@@ -205,8 +205,20 @@ fn text_parity_token_chunks_stay_in_budget_with_non_monotonic_counter() {
 }
 
 #[test]
+fn text_parity_token_chunks_are_greedy_under_a_monotonic_counter() {
+    let input = benchmark_transcript();
+    let chunks = chunk_by_tokens(&input, 256, fake_count).unwrap();
+    // `fake_count` never drops as words are added, so each chunk but the
+    // last must overflow once the next chunk's first word joins it.
+    for pair in chunks.windows(2) {
+        let next_word = pair[1].split(' ').next().unwrap();
+        assert!(fake_count(&format!("{} {next_word}", pair[0])) > 256);
+    }
+}
+
+#[test]
 fn text_parity_token_chunks_count_once_when_transcript_fits() {
-    let input = "a transcript of twelve short words that fits one chunk easily";
+    let input = "a transcript of eleven short words that fits one chunk easily";
     let mut calls = 0;
     let chunks = chunk_by_tokens(input, 1024, |s| {
         calls += 1;
