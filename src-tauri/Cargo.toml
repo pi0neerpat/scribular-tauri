@@ -3,6 +3,8 @@ name = "scribular"
 version = "0.1.0"
 edition = "2021"
 publish = false
+# `cargo run` / `tauri dev` start the app, not src/bin/bench.rs.
+default-run = "scribular"
 
 [lib]
 name = "scribular_lib"
@@ -26,3 +28,7 @@ libsqlite3-sys = "=0.38.2"
 # plans/DEPENDENCY_REVIEW_M3.md
 reqwest = { version = "=0.13.5", default-features = false, features = ["native-tls"] }
 sha2 = "=0.10.9"
+# plans/DEPENDENCY_REVIEW_ENGINES.md: llama and its ggml link as dylibs
+# (fallback A); the sys crate is pinned directly to hold the two-week rule.
+llama-cpp-2 = { version = "=0.1.158", default-features = false, features = ["metal", "dynamic-link"] }
+llama-cpp-sys-2 = "=0.1.158"

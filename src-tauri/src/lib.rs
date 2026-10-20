@@ -1,4 +1,7 @@
 pub mod commands;
+pub mod engines;
+pub mod jobs;
+pub mod llm;
 pub mod models;
 pub mod store;
 pub mod text;
@@ -7,9 +10,23 @@ use std::{sync::Arc, time::Duration};
 
 use tauri::{Emitter, Manager};
 
-use commands::{Heartbeat, HEARTBEAT_EVENT};
+use commands::{Heartbeat, TauriJobEvents, HEARTBEAT_EVENT};
+use jobs::JobQueue;
+use llm::SummarizerLoader;
 use models::ModelManager;
 use store::Store;
+
+#[cfg(feature = "fake-engines")]
+fn summarizer_loader(_models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
+    Arc::new(engines::fake::FakeLoader::new(
+        engines::fake::FakeSummarizer::new(8192),
+    ))
+}
+
+#[cfg(not(feature = "fake-engines"))]
+fn summarizer_loader(models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
+    Arc::new(llm::llama::LlamaLoader::new(Arc::clone(models)))
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -22,18 +39,26 @@ pub fn run() {
             commands::list_prompts,
             commands::list_models,
             commands::models_status,
-            commands::download_models
+            commands::download_models,
+            commands::regenerate_summary,
+            commands::cancel_job
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            app.manage(Arc::new(Store::open(&data_dir.join("scribular.db"))?));
+            let store = Arc::new(Store::open(&data_dir.join("scribular.db"))?);
+            app.manage(Arc::clone(&store));
 
             let models = Arc::new(ModelManager::new(
                 data_dir.join("models"),
                 models::manifest(),
             ));
             app.manage(Arc::clone(&models));
+            app.manage(JobQueue::new(
+                store,
+                summarizer_loader(&models),
+                Arc::new(TauriJobEvents(app.handle().clone())),
+            ));
             std::thread::spawn(move || models.scan());
 
             let handle = app.handle().clone();

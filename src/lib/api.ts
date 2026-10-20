@@ -11,6 +11,8 @@ import type { Prompt } from './types/Prompt';
 import type { Session } from './types/Session';
 import type { SessionListItem } from './types/SessionListItem';
 import type { SessionPatch } from './types/SessionPatch';
+import type { SessionProgress } from './types/SessionProgress';
+import type { SummaryDelta } from './types/SummaryDelta';
 
 export function appVersion(): Promise<AppVersion> {
   return invoke<AppVersion>('app_version');
@@ -57,4 +59,25 @@ export function downloadModels(): Promise<void> {
 
 export function onModelsProgress(handler: (progress: ModelProgress) => void): Promise<UnlistenFn> {
   return listen<ModelProgress>('models://progress', (event) => handler(event.payload));
+}
+
+/** Queues a fresh summary; progress arrives through `onSessionProgress`. */
+export function regenerateSummary(sessionId: string, promptId: string): Promise<void> {
+  return invoke<void>('regenerate_summary', { sessionId, promptId });
+}
+
+/** Stops the session's summary job; resolves to whether it had one. */
+export function cancelJob(sessionId: string): Promise<boolean> {
+  return invoke<boolean>('cancel_job', { sessionId });
+}
+
+export function onSessionProgress(
+  handler: (progress: SessionProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionProgress>('session://progress', (event) => handler(event.payload));
+}
+
+/** Text of the final summary pass as it decodes. */
+export function onSummaryDelta(handler: (delta: SummaryDelta) => void): Promise<UnlistenFn> {
+  return listen<SummaryDelta>('session://summary-delta', (event) => handler(event.payload));
 }

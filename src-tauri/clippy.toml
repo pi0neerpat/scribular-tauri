@@ -1,0 +1,11 @@
+# plans/DEPENDENCY_REVIEW_ENGINES.md usage rule: these call ggml from the main
+# binary, where they bind to whisper's ggml rather than llama's.
+# (load_backends* exist only under the `dynamic-backends` feature, which is off.)
+disallowed-methods = [
+  { path = "llama_cpp_2::send_logs_to_tracing", reason = "binds to whisper's ggml" },
+  { path = "llama_cpp_2::list_llama_ggml_backend_devices", reason = "binds to whisper's ggml" },
+  { path = "llama_cpp_2::model::params::LlamaModelParams::with_devices", reason = "binds to whisper's ggml" },
+  { path = "llama_cpp_2::model::params::LlamaModelParams::devices", reason = "binds to whisper's ggml" },
+  { path = "llama_cpp_2::model::params::LlamaModelParams::add_cpu_buft_override", reason = "binds to whisper's ggml" },
+  { path = "llama_cpp_2::ggml_time_us", reason = "binds to whisper's ggml" },
+]

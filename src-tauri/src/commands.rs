@@ -10,6 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
 
+use crate::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
 
@@ -17,10 +18,21 @@ use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
 pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 
 /// Every event the core emits; each needs a `listen` wrapper in api.ts.
-pub const EVENTS: &[&str] = &[HEARTBEAT_EVENT, MODELS_PROGRESS_EVENT];
+pub const EVENTS: &[&str] = &[
+    HEARTBEAT_EVENT,
+    MODELS_PROGRESS_EVENT,
+    SESSION_PROGRESS_EVENT,
+    SUMMARY_DELTA_EVENT,
+];
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
+
+/// Job progress, one [`SessionProgress`] per step or state change.
+pub const SESSION_PROGRESS_EVENT: &str = "session://progress";
+
+/// Summary text as it decodes, one [`SummaryDelta`] per token.
+pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +59,8 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Prompt::export_all(cfg)?;
     ModelSpec::export_all(cfg)?;
     ModelProgress::export_all(cfg)?;
+    SessionProgress::export_all(cfg)?;
+    SummaryDelta::export_all(cfg)?;
     Ok(())
 }
 
@@ -112,6 +126,36 @@ pub fn download_models(app: AppHandle, models: State<Arc<ModelManager>>) {
             })
             .await;
     });
+}
+
+/// Queues a fresh summary; progress arrives on [`SESSION_PROGRESS_EVENT`].
+#[tauri::command]
+pub fn regenerate_summary(
+    jobs: State<JobQueue>,
+    session_id: String,
+    prompt_id: String,
+) -> Result<(), String> {
+    jobs.regenerate(&session_id, &prompt_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Stops the session's job. Returns whether it had one.
+#[tauri::command]
+pub fn cancel_job(jobs: State<JobQueue>, session_id: String) -> bool {
+    jobs.cancel(&session_id)
+}
+
+/// Emits job events to the webview.
+pub struct TauriJobEvents(pub AppHandle);
+
+impl JobEvents for TauriJobEvents {
+    fn progress(&self, progress: SessionProgress) {
+        let _ = self.0.emit(SESSION_PROGRESS_EVENT, progress);
+    }
+
+    fn summary_delta(&self, delta: SummaryDelta) {
+        let _ = self.0.emit(SUMMARY_DELTA_EVENT, delta);
+    }
 }
 
 #[cfg(test)]

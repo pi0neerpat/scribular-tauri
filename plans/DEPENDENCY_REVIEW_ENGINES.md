@@ -231,3 +231,23 @@ uncommitted.
 | Test model files (tiny GGUF, `ggml-tiny.en.bin`) | Scratchpad only, not committed |
 
 **In-house:** not feasible. These are the inference engines.
+
+---
+
+## Lockfile check
+
+Adding the llama pins to the real `src-tauri/Cargo.lock` (U5) brought in one crate past
+the 2026-10-05 cutoff, a build-only dependency (bindgen → itertools), moved with
+`cargo update --precise`:
+
+| Crate | Resolved | Pinned |
+|---|---|---|
+| `either` (build-only) | 1.19.0 (2026-10-06) | 1.18.0 (2026-08-20) |
+
+**Recheck (2026-10-20, real `src-tauri/Cargo.lock` after U5):** 465 crates checked,
+0 published after the 2026-10-05 cutoff.
+
+For the bundling notes above: `build.rs` now emits both `@executable_path/../Frameworks`
+(the bundle) and `@executable_path`, so binaries in `target/<profile>/` (the app under
+`tauri dev`, `bench`) find the dylibs cargo copies beside them without
+`DYLD_LIBRARY_PATH`. Listing the dylibs in `bundle.macOS.frameworks` is still open.

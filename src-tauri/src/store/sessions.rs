@@ -309,6 +309,53 @@ impl Store {
         Ok(())
     }
 
+    /// Stores a finished summary with its provenance and timings and moves
+    /// the session to `Done`, all in one statement, so a reader never sees
+    /// `Done` without the summary that goes with it.
+    pub fn finish_summary(
+        &self,
+        id: &str,
+        summary: &str,
+        prompt_id: &str,
+        model_id: &str,
+        timings: &Timings,
+    ) -> Result<()> {
+        let timings = serde_json::to_string(timings)?;
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET summary = ?2, prompt_id = ?3, model_id = ?4, timings = ?5,
+                     status = ?6, error = NULL
+                 WHERE id = ?1",
+                params![
+                    id,
+                    summary,
+                    prompt_id,
+                    model_id,
+                    timings,
+                    SessionStatus::Done.as_str()
+                ],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(session_not_found(id));
+        }
+        Ok(())
+    }
+
+    pub fn set_timings(&self, id: &str, timings: &Timings) -> Result<()> {
+        let timings = serde_json::to_string(timings)?;
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET timings = ?2 WHERE id = ?1",
+                params![id, timings],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(session_not_found(id));
+        }
+        Ok(())
+    }
+
     /// Saves the final transcript and deletes the session's audio in the
     /// same transaction (KTD2), so audio never outlives a saved transcript
     /// and is never lost without one.
