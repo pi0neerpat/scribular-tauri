@@ -72,34 +72,52 @@ pub fn chunk_by_chars(transcript: &str) -> Result<Vec<String>, ChunkError> {
 /// Greedy word packing where each chunk's `count_tokens` stays within
 /// `budget`. Words are never split; chunks rejoin words with single spaces
 /// so concatenating chunks with `" "` restores the input.
+///
+/// A transcript that fits costs one count. Otherwise each chunk doubles its
+/// word count until the text overflows, then binary-searches, so it costs
+/// O(log w) counts for w words. Only text that was counted and fit is kept,
+/// so a non-additive counter can leave a chunk short but never over budget.
 pub fn chunk_by_tokens(
     transcript: &str,
     budget: usize,
     mut count_tokens: impl FnMut(&str) -> usize,
 ) -> Result<Vec<String>, ChunkError> {
+    let words = words(transcript)?;
+    if count_tokens(transcript) <= budget {
+        return Ok(vec![transcript.to_owned()]);
+    }
     let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut has_words = false;
-    for word in words(transcript)? {
-        let candidate = if has_words {
-            format!("{current} {word}")
-        } else {
-            word.to_owned()
-        };
-        if count_tokens(&candidate) <= budget {
-            current = candidate;
-            has_words = true;
-            continue;
-        }
-        let tokens = count_tokens(word);
+    let mut start = 0;
+    while start < words.len() {
+        let rest = &words[start..];
+        let tokens = count_tokens(rest[0]);
         if tokens > budget {
             return Err(ChunkError::WordExceedsBudget { tokens, budget });
         }
-        chunks.push(std::mem::replace(&mut current, word.to_owned()));
-        has_words = true;
-    }
-    if has_words {
-        chunks.push(current);
+        let mut fits = |k: usize| count_tokens(&rest[..k].join(" ")) <= budget;
+        // `lo` words were counted and fit; `hi` words overflowed.
+        let (mut lo, mut hi) = (1, None);
+        while lo < rest.len() {
+            let k = (lo * 2).min(rest.len());
+            if fits(k) {
+                lo = k;
+            } else {
+                hi = Some(k);
+                break;
+            }
+        }
+        if let Some(mut hi) = hi {
+            while hi - lo > 1 {
+                let mid = lo + (hi - lo) / 2;
+                if fits(mid) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+        }
+        chunks.push(rest[..lo].join(" "));
+        start += lo;
     }
     Ok(chunks)
 }

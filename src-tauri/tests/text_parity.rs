@@ -155,13 +155,91 @@ fn text_parity_token_chunks_respect_budget_and_words() {
     }
 }
 
+fn benchmark_transcript() -> String {
+    let fixture: ChunkFixture = fixture("chunk.json");
+    fixture
+        .cases
+        .into_iter()
+        .find(|c| c.name == "benchmark transcript cleaned")
+        .unwrap()
+        .input
+}
+
+#[test]
+fn text_parity_token_chunks_count_logarithmically_per_chunk() {
+    let input = benchmark_transcript();
+    let words = input.split(' ').count();
+    let mut calls = 0;
+    let chunks = chunk_by_tokens(&input, 256, |s| {
+        calls += 1;
+        fake_count(s)
+    })
+    .unwrap();
+    // One whole-transcript count, then a doubling and a binary search per chunk.
+    let per_chunk = 2 * (words.ilog2() as usize + 1) + 1;
+    assert!(
+        calls <= 1 + chunks.len() * per_chunk,
+        "{calls} counts for {} chunks of {words} words",
+        chunks.len()
+    );
+    assert!(calls < words / 4, "{calls} counts for {words} words");
+}
+
+#[test]
+fn text_parity_token_chunks_stay_in_budget_with_non_monotonic_counter() {
+    let input = benchmark_transcript();
+    let budget = 256;
+    // Text of 3n words overflows, so adding a word can lower the count.
+    let penalized = std::cell::Cell::new(false);
+    let count = |s: &str| {
+        let hit = s.split(' ').count().is_multiple_of(3);
+        penalized.set(penalized.get() || hit);
+        fake_count(s) + if hit { budget } else { 0 }
+    };
+    let chunks = chunk_by_tokens(&input, budget, count).unwrap();
+    assert!(penalized.get(), "the search never counted a penalized text");
+    for chunk in &chunks {
+        assert!(count(chunk) <= budget, "chunk over budget {budget}");
+    }
+    assert_eq!(chunks.join(" "), input);
+}
+
+#[test]
+fn text_parity_token_chunks_count_once_when_transcript_fits() {
+    let input = "a transcript of twelve short words that fits one chunk easily";
+    let mut calls = 0;
+    let chunks = chunk_by_tokens(input, 1024, |s| {
+        calls += 1;
+        fake_count(s)
+    })
+    .unwrap();
+    assert_eq!(chunks, [input]);
+    assert_eq!(calls, 1);
+}
+
+#[test]
+fn text_parity_token_chunks_restore_doubled_spaces() {
+    let input = "a  b c  d e f  g h i j k l  m n o";
+    let chunks = chunk_by_tokens(input, 4, fake_count).unwrap();
+    assert!(chunks.len() > 1);
+    for chunk in &chunks {
+        assert!(fake_count(chunk) <= 4, "chunk over budget 4");
+    }
+    assert_eq!(chunks.join(" "), input);
+}
+
 #[test]
 fn text_parity_token_chunks_reject_short_input_like_js() {
+    let mut calls = 0;
     let err = chunk_by_tokens(
         "only nine words in this short little transcript here",
         512,
-        fake_count,
+        |s| {
+            calls += 1;
+            fake_count(s)
+        },
     );
+    assert_eq!(calls, 0);
     assert_eq!(err, Err(ChunkError::InsufficientAudio));
     assert_eq!(
         err.unwrap_err().to_string(),
@@ -172,6 +250,18 @@ fn text_parity_token_chunks_reject_short_input_like_js() {
 #[test]
 fn text_parity_token_chunks_reject_oversized_word() {
     let input = format!("{} a b c d e f g h i", "x".repeat(400));
+    assert_eq!(
+        chunk_by_tokens(&input, 50, fake_count),
+        Err(ChunkError::WordExceedsBudget {
+            tokens: 100,
+            budget: 50
+        })
+    );
+}
+
+#[test]
+fn text_parity_token_chunks_reject_oversized_middle_word() {
+    let input = format!("a b c d e {} f g h i", "x".repeat(400));
     assert_eq!(
         chunk_by_tokens(&input, 50, fake_count),
         Err(ChunkError::WordExceedsBudget {
