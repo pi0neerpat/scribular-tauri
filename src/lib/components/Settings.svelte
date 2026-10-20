@@ -42,7 +42,7 @@
     } catch (e) {
       error = String(e);
     }
-    await refreshApps();
+    if (settings && settings.inputMode !== 'mic') await refreshApps();
   });
 
   async function refreshApps() {
@@ -53,6 +53,12 @@
       denied = deniedPrivacy(String(e));
       if (!denied) error = String(e);
     }
+  }
+
+  // Listing apps runs AudioCapCLI, so only when the picker shows.
+  async function changeMode() {
+    await save();
+    if (settings && settings.inputMode !== 'mic') await refreshApps();
   }
 
   async function save() {
@@ -73,7 +79,7 @@
       <legend>Record</legend>
       {#each modes as [mode, label] (mode)}
         <label>
-          <input type="radio" bind:group={settings.inputMode} value={mode} onchange={save} />
+          <input type="radio" bind:group={settings.inputMode} value={mode} onchange={changeMode} />
           {label}
         </label>
       {/each}

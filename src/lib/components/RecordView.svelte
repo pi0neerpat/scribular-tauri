@@ -38,8 +38,15 @@
   let working = $derived(status !== null && !recording && !finished.includes(status));
   let elapsed = $derived(Math.max(0, Math.floor((now - startedAt) / 1000)));
 
-  onMount(() => {
+  // The clock only ticks during a recording.
+  $effect(() => {
+    if (!recording) return;
+    now = Date.now();
     const tick = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(tick);
+  });
+
+  onMount(() => {
     const unlisten = onSessionProgress((p) => {
       if (p.sessionId !== sessionId) return;
       progress = p;
@@ -56,7 +63,6 @@
       startedAt = (await getSession(id))?.createdAt ?? Date.now();
     });
     return () => {
-      clearInterval(tick);
       unlisten.then((fn) => fn());
     };
   });

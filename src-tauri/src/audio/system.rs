@@ -6,7 +6,10 @@ use std::{
     io::Read,
     path::PathBuf,
     process::{Child, ChildStderr, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -92,7 +95,7 @@ impl SystemAudio for AudioCapCli {
         let mut stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
 
-        let flowing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flowing = Arc::new(AtomicBool::new(false));
         let reader = {
             let flowing = Arc::clone(&flowing);
             thread::Builder::new()
@@ -106,14 +109,13 @@ impl SystemAudio for AudioCapCli {
                         if n == 0 {
                             break;
                         }
-                        flowing.store(true, std::sync::atomic::Ordering::Relaxed);
+                        flowing.store(true, Ordering::Relaxed);
                         carry.extend_from_slice(&buf[..n]);
-                        let (whole, rest) = carry.as_chunks::<4>();
+                        let (whole, _) = carry.as_chunks::<4>();
+                        let used = whole.len() * 4;
                         samples.clear();
                         samples.extend(whole.iter().map(|b| f32::from_le_bytes(*b)));
-                        let rest = rest.to_vec();
-                        carry.clear();
-                        carry.extend_from_slice(&rest);
+                        carry.drain(..used);
                         if !samples.is_empty() {
                             sink(&samples);
                         }
@@ -129,7 +131,7 @@ impl SystemAudio for AudioCapCli {
             threads: vec![reader, collector],
         };
         let deadline = Instant::now() + STARTUP_GRACE;
-        while Instant::now() < deadline && !flowing.load(std::sync::atomic::Ordering::Relaxed) {
+        while Instant::now() < deadline && !flowing.load(Ordering::Relaxed) {
             if capture.child.try_wait()?.is_some() {
                 drop(capture);
                 let errors = errors.lock().unwrap_or_else(|e| e.into_inner());

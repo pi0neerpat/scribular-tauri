@@ -13,6 +13,7 @@ use std::{
     time::Instant,
 };
 
+use super::summarize::ms;
 use super::{JobEvents, JobQueue, SessionProgress};
 use crate::audio::{chunk_writer, AudioError, Capture, Microphone, SystemAudio};
 use crate::store::{
@@ -298,10 +299,6 @@ impl Drop for Recorder {
             let _ = worker.join();
         }
     }
-}
-
-fn ms(since: Instant) -> u32 {
-    u32::try_from(since.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
 impl Inner {

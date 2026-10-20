@@ -36,7 +36,7 @@ pub fn spawn(
     rx: mpsc::Receiver<Vec<f32>>,
 ) -> std::io::Result<JoinHandle<store::Result<u64>>> {
     thread::Builder::new()
-        .name(format!("chunks-{}", source_name(source)))
+        .name(format!("chunks-{}", source.as_str()))
         .spawn(move || {
             let mut resampler = Resampler::new(format);
             let mut pending: Vec<f32> = Vec::with_capacity(CHUNK_SAMPLES * 2);
@@ -61,11 +61,4 @@ pub fn spawn(
             }
             Ok(total)
         })
-}
-
-fn source_name(source: AudioSource) -> &'static str {
-    match source {
-        AudioSource::Mic => "mic",
-        AudioSource::System => "system",
-    }
 }
