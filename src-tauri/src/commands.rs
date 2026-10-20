@@ -4,17 +4,23 @@
 //! [`export_ipc_types`]; `cargo test` writes them to `src/lib/types/`, and
 //! those generated files are committed.
 
+use std::sync::Arc;
+
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
 
+use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
 
 /// Event the core emits once a second, as the example of a typed event.
 pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 
 /// Every event the core emits; each needs a `listen` wrapper in api.ts.
-pub const EVENTS: &[&str] = &[HEARTBEAT_EVENT];
+pub const EVENTS: &[&str] = &[HEARTBEAT_EVENT, MODELS_PROGRESS_EVENT];
+
+/// Download and verification progress, one [`ModelProgress`] per change.
+pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +45,8 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Session::export_all(cfg)?;
     SessionPatch::export_all(cfg)?;
     Prompt::export_all(cfg)?;
+    ModelSpec::export_all(cfg)?;
+    ModelProgress::export_all(cfg)?;
     Ok(())
 }
 
@@ -53,18 +61,18 @@ pub fn app_version() -> AppVersion {
 // Commands return `Result<_, String>`: the webview only shows the message.
 
 #[tauri::command]
-pub fn list_sessions(store: State<Store>) -> Result<Vec<SessionListItem>, String> {
+pub fn list_sessions(store: State<Arc<Store>>) -> Result<Vec<SessionListItem>, String> {
     store.list_sessions().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_session(store: State<Store>, id: String) -> Result<Option<Session>, String> {
+pub fn get_session(store: State<Arc<Store>>, id: String) -> Result<Option<Session>, String> {
     store.get_session(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn update_session(
-    store: State<Store>,
+    store: State<Arc<Store>>,
     id: String,
     patch: SessionPatch,
 ) -> Result<Session, String> {
@@ -72,13 +80,38 @@ pub fn update_session(
 }
 
 #[tauri::command]
-pub fn delete_session(store: State<Store>, id: String) -> Result<bool, String> {
+pub fn delete_session(store: State<Arc<Store>>, id: String) -> Result<bool, String> {
     store.delete_session(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_prompts(store: State<Store>) -> Result<Vec<Prompt>, String> {
+pub fn list_prompts(store: State<Arc<Store>>) -> Result<Vec<Prompt>, String> {
     store.list_prompts().map_err(|e| e.to_string())
+}
+
+/// The pinned models with their license terms, in download order.
+#[tauri::command]
+pub fn list_models(models: State<Arc<ModelManager>>) -> Vec<ModelSpec> {
+    models.specs().to_vec()
+}
+
+#[tauri::command]
+pub fn models_status(models: State<Arc<ModelManager>>) -> Vec<ModelProgress> {
+    models.status()
+}
+
+/// Starts downloading any missing model in the background and returns at
+/// once; progress arrives on [`MODELS_PROGRESS_EVENT`].
+#[tauri::command]
+pub fn download_models(app: AppHandle, models: State<Arc<ModelManager>>) {
+    let models = Arc::clone(&models);
+    tauri::async_runtime::spawn(async move {
+        models
+            .ensure_all(&|p| {
+                let _ = app.emit(MODELS_PROGRESS_EVENT, p);
+            })
+            .await;
+    });
 }
 
 #[cfg(test)]

@@ -1,12 +1,14 @@
 pub mod commands;
+pub mod models;
 pub mod store;
 pub mod text;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use tauri::{Emitter, Manager};
 
 use commands::{Heartbeat, HEARTBEAT_EVENT};
+use models::ModelManager;
 use store::Store;
 
 pub fn run() {
@@ -17,12 +19,22 @@ pub fn run() {
             commands::get_session,
             commands::update_session,
             commands::delete_session,
-            commands::list_prompts
+            commands::list_prompts,
+            commands::list_models,
+            commands::models_status,
+            commands::download_models
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            app.manage(Store::open(&data_dir.join("scribular.db"))?);
+            app.manage(Arc::new(Store::open(&data_dir.join("scribular.db"))?));
+
+            let models = Arc::new(ModelManager::new(
+                data_dir.join("models"),
+                models::manifest(),
+            ));
+            app.manage(Arc::clone(&models));
+            std::thread::spawn(move || models.scan());
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
