@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod commands;
 pub mod engines;
 pub mod jobs;
@@ -11,8 +12,9 @@ use std::{sync::Arc, time::Duration};
 
 use tauri::{Emitter, Manager};
 
+use audio::{AudioCapCli, CpalMicrophone};
 use commands::{Heartbeat, TauriJobEvents, HEARTBEAT_EVENT};
-use jobs::JobQueue;
+use jobs::{JobQueue, Recorder};
 use llm::SummarizerLoader;
 use models::ModelManager;
 use store::Store;
@@ -56,7 +58,14 @@ pub fn run() {
             commands::download_models,
             commands::regenerate_summary,
             commands::cancel_job,
-            commands::transcribe_file
+            commands::transcribe_file,
+            commands::get_recording_settings,
+            commands::set_recording_settings,
+            commands::list_audio_apps,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::current_recording,
+            commands::open_privacy_settings
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -69,12 +78,25 @@ pub fn run() {
                 models::manifest(),
             ));
             app.manage(Arc::clone(&models));
-            app.manage(transcriber_loader(&models));
-            app.manage(JobQueue::new(
-                store,
+            let stt = transcriber_loader(&models);
+            app.manage(Arc::clone(&stt));
+            let events = Arc::new(TauriJobEvents(app.handle().clone()));
+            let jobs = Arc::new(JobQueue::new(
+                Arc::clone(&store),
                 summarizer_loader(&models),
-                Arc::new(TauriJobEvents(app.handle().clone())),
+                events.clone(),
             ));
+            app.manage(Arc::clone(&jobs));
+            // Audio capture stays real under `fake-engines`; only the models
+            // are faked.
+            app.manage(Arc::new(Recorder::new(
+                store,
+                jobs,
+                stt,
+                events,
+                Arc::new(CpalMicrophone),
+                Arc::new(AudioCapCli::bundled()?),
+            )));
             std::thread::spawn(move || models.scan());
 
             let handle = app.handle().clone();

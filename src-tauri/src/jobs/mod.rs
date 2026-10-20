@@ -2,6 +2,7 @@
 //! session state machine, and the progress events the UI listens to.
 
 mod queue;
+mod session;
 pub mod state;
 mod summarize;
 
@@ -11,6 +12,7 @@ use ts_rs::TS;
 use crate::store::SessionStatus;
 
 pub use queue::{JobError, JobQueue};
+pub use session::{RecordError, Recorder};
 
 /// Payload of `session://progress`. The session's status row already says
 /// `state` by the time this is emitted.

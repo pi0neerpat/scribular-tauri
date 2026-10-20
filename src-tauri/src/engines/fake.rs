@@ -1,6 +1,7 @@
 //! Deterministic engines for tests (KTD9): a [`Summarizer`] where one
 //! whitespace-separated word is one token, so tests can reason about budgets
-//! and chunk counts exactly, and a [`Transcriber`] with scripted segments.
+//! and chunk counts exactly, a [`Transcriber`] with scripted segments, and
+//! audio sources a test feeds by hand.
 
 use std::{
     sync::{
@@ -10,6 +11,10 @@ use std::{
     time::Duration,
 };
 
+use crate::audio::{
+    AudioApp, AudioError, Capture, Format, Microphone, Privacy, Result as AudioResult, Sink,
+    SystemAudio,
+};
 use crate::llm::{GenEvent, Generation, LlmError, Result, Summarizer, SummarizerLoader};
 use crate::stt::{
     Result as SttResult, SttError, Transcriber, TranscriberLoader, TranscriptSegment,
@@ -148,6 +153,9 @@ pub struct FakeTranscriber {
     pub segments: Vec<TranscriptSegment>,
     /// The sample count of every `transcribe` call.
     pub calls: Mutex<Vec<usize>>,
+    /// Calls from this index on wait for their cancel flag, then return
+    /// `Cancelled`.
+    pub block_from: usize,
 }
 
 impl FakeTranscriber {
@@ -155,6 +163,7 @@ impl FakeTranscriber {
         Self {
             segments,
             calls: Mutex::default(),
+            block_from: usize::MAX,
         }
     }
 
@@ -169,7 +178,16 @@ impl Transcriber for FakeTranscriber {
         samples: &[f32],
         cancel: &AtomicBool,
     ) -> SttResult<Vec<TranscriptSegment>> {
-        self.calls.lock().unwrap().push(samples.len());
+        let index = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(samples.len());
+            calls.len() - 1
+        };
+        if index >= self.block_from {
+            while !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
         if cancel.load(Ordering::Relaxed) {
             return Err(SttError::Cancelled);
         }
@@ -183,5 +201,103 @@ pub struct FakeTranscriberLoader(pub Arc<FakeTranscriber>);
 impl TranscriberLoader for FakeTranscriberLoader {
     fn load(&self) -> SttResult<Arc<dyn Transcriber>> {
         Ok(self.0.clone())
+    }
+}
+
+/// An audio source the test drives: `feed` calls the open capture's sink.
+pub struct FakeSource {
+    pub format: Format,
+    sink: Arc<Mutex<Option<Sink>>>,
+    /// Makes `open` fail as if macOS refused access.
+    pub deny: AtomicBool,
+    /// How many times `open` succeeded.
+    pub opened: AtomicUsize,
+}
+
+impl FakeSource {
+    pub fn new(format: Format) -> Self {
+        Self {
+            format,
+            sink: Arc::default(),
+            deny: AtomicBool::new(false),
+            opened: AtomicUsize::new(0),
+        }
+    }
+
+    /// Delivers `samples` (interleaved, native format). Returns whether a
+    /// capture was open to receive them.
+    pub fn feed(&self, samples: &[f32]) -> bool {
+        match self.sink.lock().unwrap().as_mut() {
+            Some(sink) => {
+                sink(samples);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.sink.lock().unwrap().is_some()
+    }
+
+    fn open(&self, sink: Sink) -> AudioResult<Box<dyn Capture>> {
+        if self.deny.load(Ordering::Relaxed) {
+            return Err(AudioError::PermissionDenied(Privacy::Microphone));
+        }
+        *self.sink.lock().unwrap() = Some(sink);
+        self.opened.fetch_add(1, Ordering::Relaxed);
+        Ok(Box::new(FakeCapture {
+            format: self.format,
+            sink: Arc::clone(&self.sink),
+        }))
+    }
+}
+
+struct FakeCapture {
+    format: Format,
+    sink: Arc<Mutex<Option<Sink>>>,
+}
+
+impl Capture for FakeCapture {
+    fn format(&self) -> Format {
+        self.format
+    }
+}
+
+impl Drop for FakeCapture {
+    fn drop(&mut self) {
+        self.sink.lock().unwrap().take();
+    }
+}
+
+pub struct FakeMicrophone(pub Arc<FakeSource>);
+
+impl Microphone for FakeMicrophone {
+    fn open(&self, sink: Sink) -> AudioResult<Box<dyn Capture>> {
+        self.0.open(sink)
+    }
+}
+
+/// System audio where only `app` is playing.
+pub struct FakeSystemAudio {
+    pub source: Arc<FakeSource>,
+    pub app: String,
+}
+
+impl SystemAudio for FakeSystemAudio {
+    fn list_apps(&self) -> AudioResult<Vec<AudioApp>> {
+        Ok(vec![AudioApp {
+            name: self.app.clone(),
+            sample_rate: self.source.format.sample_rate,
+            channels: self.source.format.channels,
+            icon: None,
+        }])
+    }
+
+    fn open(&self, app: &str, sink: Sink) -> AudioResult<Box<dyn Capture>> {
+        if app != self.app {
+            return Err(AudioError::AppNotFound(app.into()));
+        }
+        self.source.open(sink)
     }
 }

@@ -159,7 +159,14 @@ fn summarize(
         return Err(Some(ChunkError::InsufficientAudio.into()));
     }
 
-    let mut timings = Timings::default();
+    // Transcription happened before the job; its time carries over.
+    let mut timings = Timings {
+        tail_transcription_ms: session
+            .timings
+            .as_ref()
+            .and_then(|t| t.tail_transcription_ms),
+        ..Timings::default()
+    };
     r.step(1, 1, "Loading summary model...");
     let model = match llm {
         Some(model) => {
