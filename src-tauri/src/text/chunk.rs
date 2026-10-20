@@ -95,29 +95,28 @@ pub fn chunk_by_tokens(
             return Err(ChunkError::WordExceedsBudget { tokens, budget });
         }
         let mut fits = |k: usize| count_tokens(&rest[..k].join(" ")) <= budget;
-        // `lo` words were counted and fit; `hi` words overflowed.
-        let (mut lo, mut hi) = (1, None);
-        while lo < rest.len() {
-            let k = (lo * 2).min(rest.len());
+        let (mut fitting, mut overflowing) = (1, None);
+        while fitting < rest.len() {
+            let k = (fitting * 2).min(rest.len());
             if fits(k) {
-                lo = k;
+                fitting = k;
             } else {
-                hi = Some(k);
+                overflowing = Some(k);
                 break;
             }
         }
-        if let Some(mut hi) = hi {
-            while hi - lo > 1 {
-                let mid = lo + (hi - lo) / 2;
+        if let Some(mut overflowing) = overflowing {
+            while overflowing - fitting > 1 {
+                let mid = fitting + (overflowing - fitting) / 2;
                 if fits(mid) {
-                    lo = mid;
+                    fitting = mid;
                 } else {
-                    hi = mid;
+                    overflowing = mid;
                 }
             }
         }
-        chunks.push(rest[..lo].join(" "));
-        start += lo;
+        chunks.push(rest[..fitting].join(" "));
+        start += fitting;
     }
     Ok(chunks)
 }
