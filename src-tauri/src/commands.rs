@@ -4,7 +4,10 @@
 //! [`export_ipc_types`]; `cargo test` writes them to `src/lib/types/`, and
 //! those generated files are committed.
 
-use std::sync::Arc;
+use std::{
+    path::Path,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -13,6 +16,7 @@ use ts_rs::TS;
 use crate::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
+use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
 /// Event the core emits once a second, as the example of a typed event.
 pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
@@ -61,6 +65,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     ModelProgress::export_all(cfg)?;
     SessionProgress::export_all(cfg)?;
     SummaryDelta::export_all(cfg)?;
+    TranscriptSegment::export_all(cfg)?;
     Ok(())
 }
 
@@ -143,6 +148,23 @@ pub fn regenerate_summary(
 #[tauri::command]
 pub fn cancel_job(jobs: State<JobQueue>, session_id: String) -> bool {
     jobs.cancel(&session_id)
+}
+
+/// Development only (M4): transcribes a 16-bit, 16 kHz mono WAV file.
+#[tauri::command]
+pub async fn transcribe_file(
+    stt: State<'_, Arc<dyn TranscriberLoader>>,
+    path: String,
+) -> Result<Vec<TranscriptSegment>, String> {
+    let stt = Arc::clone(&stt);
+    tauri::async_runtime::spawn_blocking(move || {
+        let samples = read_wav(Path::new(&path)).map_err(|e| e.to_string())?;
+        stt.load()
+            .and_then(|t| t.transcribe(&samples, &AtomicBool::new(false)))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Emits job events to the webview.

@@ -13,6 +13,7 @@ import type { SessionListItem } from './types/SessionListItem';
 import type { SessionPatch } from './types/SessionPatch';
 import type { SessionProgress } from './types/SessionProgress';
 import type { SummaryDelta } from './types/SummaryDelta';
+import type { TranscriptSegment } from './types/TranscriptSegment';
 
 export function appVersion(): Promise<AppVersion> {
   return invoke<AppVersion>('app_version');
@@ -69,6 +70,11 @@ export function regenerateSummary(sessionId: string, promptId: string): Promise<
 /** Stops the session's summary job; resolves to whether it had one. */
 export function cancelJob(sessionId: string): Promise<boolean> {
   return invoke<boolean>('cancel_job', { sessionId });
+}
+
+/** Development only: transcribes a 16-bit, 16 kHz mono WAV file. */
+export function transcribeFile(path: string): Promise<TranscriptSegment[]> {
+  return invoke<TranscriptSegment[]>('transcribe_file', { path });
 }
 
 export function onSessionProgress(

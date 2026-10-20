@@ -1,5 +1,6 @@
-//! A deterministic [`Summarizer`] where one whitespace-separated word is one
-//! token, so tests can reason about budgets and chunk counts exactly.
+//! Deterministic engines for tests (KTD9): a [`Summarizer`] where one
+//! whitespace-separated word is one token, so tests can reason about budgets
+//! and chunk counts exactly, and a [`Transcriber`] with scripted segments.
 
 use std::{
     sync::{
@@ -10,6 +11,9 @@ use std::{
 };
 
 use crate::llm::{GenEvent, Generation, LlmError, Result, Summarizer, SummarizerLoader};
+use crate::stt::{
+    Result as SttResult, SttError, Transcriber, TranscriberLoader, TranscriptSegment,
+};
 
 /// Tokens the fake chat template adds around a user turn.
 pub const TEMPLATE_TOKENS: usize = 4;
@@ -136,5 +140,44 @@ impl SummarizerLoader for FakeLoader {
             Some(e) => Err(e.clone()),
             None => Ok(self.summarizer.clone()),
         }
+    }
+}
+
+/// A [`Transcriber`] that returns the same scripted segments for any audio.
+pub struct FakeTranscriber {
+    pub segments: Vec<TranscriptSegment>,
+    /// The sample count of every `transcribe` call.
+    pub calls: Mutex<Vec<usize>>,
+}
+
+impl FakeTranscriber {
+    pub fn new(segments: Vec<TranscriptSegment>) -> Self {
+        Self {
+            segments,
+            calls: Mutex::default(),
+        }
+    }
+
+    pub fn calls(&self) -> Vec<usize> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+impl Transcriber for FakeTranscriber {
+    fn transcribe(&self, samples: &[f32], cancel: &AtomicBool) -> SttResult<Vec<TranscriptSegment>> {
+        self.calls.lock().unwrap().push(samples.len());
+        if cancel.load(Ordering::Relaxed) {
+            return Err(SttError::Cancelled);
+        }
+        Ok(self.segments.clone())
+    }
+}
+
+/// Hands out one shared [`FakeTranscriber`].
+pub struct FakeTranscriberLoader(pub Arc<FakeTranscriber>);
+
+impl TranscriberLoader for FakeTranscriberLoader {
+    fn load(&self) -> SttResult<Arc<dyn Transcriber>> {
+        Ok(self.0.clone())
     }
 }

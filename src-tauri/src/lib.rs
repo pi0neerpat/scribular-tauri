@@ -4,6 +4,7 @@ pub mod jobs;
 pub mod llm;
 pub mod models;
 pub mod store;
+pub mod stt;
 pub mod text;
 
 use std::{sync::Arc, time::Duration};
@@ -15,6 +16,7 @@ use jobs::JobQueue;
 use llm::SummarizerLoader;
 use models::ModelManager;
 use store::Store;
+use stt::TranscriberLoader;
 
 #[cfg(feature = "fake-engines")]
 fn summarizer_loader(_models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
@@ -26,6 +28,18 @@ fn summarizer_loader(_models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
 #[cfg(not(feature = "fake-engines"))]
 fn summarizer_loader(models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
     Arc::new(llm::llama::LlamaLoader::new(Arc::clone(models)))
+}
+
+#[cfg(feature = "fake-engines")]
+fn transcriber_loader(_models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> {
+    Arc::new(engines::fake::FakeTranscriberLoader(Arc::new(
+        engines::fake::FakeTranscriber::new(Vec::new()),
+    )))
+}
+
+#[cfg(not(feature = "fake-engines"))]
+fn transcriber_loader(models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> {
+    Arc::new(stt::whisper::WhisperLoader::new(Arc::clone(models)))
 }
 
 pub fn run() {
@@ -41,7 +55,8 @@ pub fn run() {
             commands::models_status,
             commands::download_models,
             commands::regenerate_summary,
-            commands::cancel_job
+            commands::cancel_job,
+            commands::transcribe_file
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -54,6 +69,7 @@ pub fn run() {
                 models::manifest(),
             ));
             app.manage(Arc::clone(&models));
+            app.manage(transcriber_loader(&models));
             app.manage(JobQueue::new(
                 store,
                 summarizer_loader(&models),
