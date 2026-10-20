@@ -187,14 +187,17 @@ fn is_permission_denied(stderr: &str) -> bool {
 }
 
 /// Parses `--list-sources` lines: `name|<rate> Hz, <n> ch|<base64 png>`.
-/// A format the line doesn't state falls back to 44.1 kHz stereo.
+/// A format the line doesn't state falls back to 44.1 kHz stereo. Apps are
+/// captured by name, so a repeated name (a browser's helper processes) is
+/// listed once.
 fn parse_sources(stdout: &str) -> Vec<AudioApp> {
+    let mut seen = std::collections::HashSet::new();
     stdout
         .lines()
         .filter_map(|line| {
             let mut parts = line.splitn(3, '|');
             let name = parts.next()?.trim();
-            if name.is_empty() {
+            if name.is_empty() || !seen.insert(name) {
                 return None;
             }
             let format = parts.next().unwrap_or("");
@@ -252,6 +255,17 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn lists_a_repeated_name_once() {
+        let out = "Brave Browser|48000 Hz, 2 ch|\n\
+                   Brave Browser Helper|48000 Hz, 2 ch|a\n\
+                   Brave Browser Helper|44100 Hz, 1 ch|b\n";
+        let apps = parse_sources(out);
+        let names: Vec<_> = apps.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["Brave Browser", "Brave Browser Helper"]);
+        assert_eq!(apps[1].icon.as_deref(), Some("a"));
     }
 
     #[test]
