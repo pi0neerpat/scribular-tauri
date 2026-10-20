@@ -131,3 +131,55 @@ again; it may have a stable release by then.
 
 If approved, I'll update `TAURI_MVP.md` (the IPC-types row in Decisions and section 5)
 to use `ts-rs` + thin wrappers.
+
+---
+
+## Lockfile check (U1 scaffold, 2026-10-19)
+
+Exact pins on direct dependencies don't fix the transitive tree. `tauri = "=2.12.1"`
+asks for its own internals with `~` ranges, so a fresh lockfile resolved them to
+releases newer than the rule allows. I checked the publish date of every locked
+package (crates.io API and npm registry) against the 2026-10-05 cutoff.
+
+**npm:** 19 of 98 were too new, all under three roots. Pinned with `overrides` in
+`package.json`:
+
+| Package | Resolved | Pinned | Required by |
+|---|---|---|---|
+| `rolldown` (+ 15 platform bindings, `@oxc-project/types`) | 1.2.14 | 1.2.12 | `vite` `~1.2.11` |
+| `postcss` | 8.5.31 | 8.5.29 | `vite` `^8.5.28` |
+| `tinybench` | 6.2.2 | 6.2.0 | `vitest` `^6.1.4` |
+
+After: 98 packages, 0 past the cutoff, `npm audit` 0 vulnerabilities.
+
+**Cargo:** 35 of 409 were too new. Each was moved with `cargo update -p <crate>@<ver>
+--precise <newest compatible version on or before the cutoff>`, repeated until a full
+recheck was clean (three passes, because Cargo refuses a downgrade while another locked
+crate still needs the newer version). Notable ones:
+
+- Tauri internals released a week after `tauri` 2.12.1: `tauri-runtime` and
+  `tauri-runtime-wry` 2.12.2 → 2.12.1, `tauri-utils` 2.10.2 → 2.10.1, `tauri-macros`
+  and `tauri-codegen` 2.7.3 → 2.7.1.
+- Build tooling: `cc` 1.9.0 → 1.6.0, `swift-rs` 1.0.9 → 1.0.8, `embed-resource`,
+  `tauri-winres`.
+- Runtime: `tokio` 1.54.0 → 1.53.2, `hyper` 1.12.0 → 1.11.1, `libc`, `uuid`, `toml` and
+  its parts, `syn` 3.0.9 → 3.0.6.
+
+After: 419 crates (older versions pull in a few more), 0 past the cutoff. All U1 checks
+pass and the app runs on the downgraded tree.
+
+**For later units:** rerun this check whenever `Cargo.lock` or `package-lock.json`
+changes.
+
+## ts-rs on the dev VM
+
+ts-rs's own exporter calls `File::sync_all`, which on macOS issues
+`fcntl(F_FULLFSYNC)`. The VirtioFS share the repo lives on rejects that with `ENOTTY`
+(a plain `fsync` works), so `#[ts(export)]` fails here even though the files get
+written. On a normal APFS disk it works.
+
+Workaround, with no new dependency: the types aren't marked `#[ts(export)]`. A
+`cargo test` (`commands::tests::export_bindings`) has ts-rs export every root type
+listed in `export_ipc_types` into a temp dir, then copies the result into
+`src/lib/types/` with plain writes and deletes generated files that no longer match a
+type. New IPC types must be added to `export_ipc_types`.

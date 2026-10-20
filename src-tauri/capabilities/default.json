@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Main window: core events only. Commands defined in this crate are allowed by default.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

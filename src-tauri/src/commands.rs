@@ -1,0 +1,107 @@
+//! Tauri commands and the IPC types they exchange with the webview.
+//!
+//! Every type that crosses IPC derives `TS` and is listed in
+//! [`export_ipc_types`]; `cargo test` writes them to `src/lib/types/`, and
+//! those generated files are committed.
+
+use serde::Serialize;
+use ts_rs::TS;
+
+/// Event the core emits once a second, as the example of a typed event.
+pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
+
+/// Every event the core emits; each needs a `listen` wrapper in api.ts.
+pub const EVENTS: &[&str] = &[HEARTBEAT_EVENT];
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AppVersion {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Heartbeat {
+    pub seq: u32,
+}
+
+/// Exports every IPC root type, plus the types they reference, into
+/// `cfg.out_dir()`.
+#[cfg(test)]
+pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
+    AppVersion::export_all(cfg)?;
+    Heartbeat::export_all(cfg)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn app_version() -> AppVersion {
+    AppVersion {
+        name: env!("CARGO_PKG_NAME").to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regenerates `src/lib/types/`. ts-rs exports into a temp dir and this
+    /// copies the result over, because ts-rs's own writer calls
+    /// `F_FULLFSYNC`, which the VirtioFS share in the dev VM rejects.
+    /// Generated files that no longer correspond to a type are deleted.
+    #[test]
+    fn export_bindings() {
+        use std::{collections::BTreeMap, fs, path::Path};
+
+        let tmp = std::env::temp_dir().join(format!("scribular-ts-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        export_ipc_types(&ts_rs::Config::new().with_out_dir(&tmp)).unwrap();
+
+        let read_ts = |dir: &Path| -> BTreeMap<String, String> {
+            fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.extension().is_some_and(|x| x == "ts"))
+                .map(|p| {
+                    let name = p.file_name().unwrap().to_string_lossy().into_owned();
+                    (name, fs::read_to_string(&p).unwrap())
+                })
+                .collect()
+        };
+        let generated = read_ts(&tmp);
+        fs::remove_dir_all(&tmp).unwrap();
+        assert!(!generated.is_empty());
+
+        let dest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/types");
+        fs::create_dir_all(&dest).unwrap();
+        for (name, old) in read_ts(&dest) {
+            match generated.get(&name) {
+                Some(new) if *new == old => {}
+                Some(new) => fs::write(dest.join(&name), new).unwrap(),
+                None => fs::remove_file(dest.join(&name)).unwrap(),
+            }
+        }
+        for (name, new) in &generated {
+            if !dest.join(name).exists() {
+                fs::write(dest.join(name), new).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn app_version_returns_crate_version() {
+        let v = app_version();
+        assert_eq!(v.name, "scribular");
+        assert_eq!(v.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn app_version_serializes_camel_case() {
+        let json = serde_json::to_value(app_version()).unwrap();
+        assert!(json.get("version").is_some());
+        assert!(json.get("name").is_some());
+    }
+}
