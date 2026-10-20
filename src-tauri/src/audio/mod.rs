@@ -86,7 +86,8 @@ pub struct Format {
 pub type Sink = Box<dyn FnMut(&[f32]) + Send>;
 
 /// A running capture. Dropping it stops the source and drops its sink, and
-/// returns only once the sink will not be called again.
+/// returns only once the sink will not be called again. A source that stops
+/// on its own (the device or app went away) drops its sink too.
 pub trait Capture: Send {
     fn format(&self) -> Format;
 }

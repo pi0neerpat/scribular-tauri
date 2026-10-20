@@ -22,8 +22,9 @@ impl Microphone for CpalMicrophone {
     fn open(&self, sink: Sink) -> Result<Box<dyn Capture>> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let lost = stop_tx.clone();
         let thread = thread::Builder::new().name("mic".into()).spawn(move || {
-            let stream = match start(sink) {
+            let stream = match start(sink, lost) {
                 Ok((stream, format)) => {
                     let _ = ready_tx.send(Ok(format));
                     stream
@@ -33,7 +34,8 @@ impl Microphone for CpalMicrophone {
                     return;
                 }
             };
-            // Returns once `MicCapture` drops the sender.
+            // Returns when `MicCapture` drops or the device is lost; either
+            // way dropping the stream drops the sink, ending its writer.
             let _ = stop_rx.recv();
             drop(stream);
         })?;
@@ -69,7 +71,11 @@ impl Capture for MicCapture {
 
 impl Drop for MicCapture {
     fn drop(&mut self) {
-        self.stop.take();
+        // The stream's error callback holds a sender too, so dropping this
+        // one alone would not wake the thread.
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -83,7 +89,17 @@ fn device_error(e: cpal::Error) -> AudioError {
     }
 }
 
-fn start(sink: Sink) -> Result<(cpal::Stream, Format)> {
+/// Errors after which the stream delivers nothing more. Glitches, reroutes
+/// and refused real-time scheduling leave it running.
+fn is_fatal(e: &cpal::Error) -> bool {
+    !matches!(
+        e.kind(),
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied
+    )
+}
+
+/// Starts the default input; a fatal stream error sends on `lost`.
+fn start(sink: Sink, lost: mpsc::Sender<()>) -> Result<(cpal::Stream, Format)> {
     let device = cpal::default_host()
         .default_input_device()
         .ok_or(AudioError::NoInputDevice)?;
@@ -94,9 +110,9 @@ fn start(sink: Sink) -> Result<(cpal::Stream, Format)> {
         channels: config.channels,
     };
     let stream = match supported.sample_format() {
-        SampleFormat::F32 => build::<f32>(&device, config, sink),
-        SampleFormat::I16 => build::<i16>(&device, config, sink),
-        SampleFormat::I32 => build::<i32>(&device, config, sink),
+        SampleFormat::F32 => build::<f32>(&device, config, sink, lost),
+        SampleFormat::I16 => build::<i16>(&device, config, sink, lost),
+        SampleFormat::I32 => build::<i32>(&device, config, sink, lost),
         other => {
             return Err(AudioError::Device(format!(
                 "unsupported sample format {other:?}"
@@ -112,6 +128,7 @@ fn build<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     mut sink: Sink,
+    lost: mpsc::Sender<()>,
 ) -> std::result::Result<cpal::Stream, cpal::Error>
 where
     T: SizedSample,
@@ -125,7 +142,12 @@ where
             buf.extend(data.iter().map(|&s| s.to_sample::<f32>()));
             sink(&buf);
         },
-        |e| eprintln!("microphone: {e}"),
+        move |e| {
+            eprintln!("microphone: {e}");
+            if is_fatal(&e) {
+                let _ = lost.send(());
+            }
+        },
         None,
     )
 }

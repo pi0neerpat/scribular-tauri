@@ -236,6 +236,11 @@ impl FakeSource {
         }
     }
 
+    /// Stops delivering, as when the device or app goes away mid-recording.
+    pub fn lose(&self) {
+        self.sink.lock().unwrap().take();
+    }
+
     pub fn is_open(&self) -> bool {
         self.sink.lock().unwrap().is_some()
     }

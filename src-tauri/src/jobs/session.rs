@@ -7,10 +7,11 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError},
         Arc, Mutex, MutexGuard,
     },
     thread::JoinHandle,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use super::summarize::ms;
@@ -74,7 +75,11 @@ fn sources(mode: InputMode) -> &'static [AudioSource] {
     }
 }
 
+/// How often a recording checks that its sources still write.
+const WATCH_INTERVAL: Duration = Duration::from_millis(250);
+
 struct Source {
+    source: AudioSource,
     capture: Box<dyn Capture>,
     writer: JoinHandle<store::Result<u64>>,
 }
@@ -94,6 +99,8 @@ impl Source {
 struct Recording {
     session_id: String,
     sources: Vec<Source>,
+    /// Dropped with the recording, which ends its watchdog.
+    _watched: mpsc::Sender<()>,
 }
 
 #[derive(Default)]
@@ -199,9 +206,27 @@ impl Recorder {
                 }
             }
         }
+        let (watched, unwatched) = mpsc::channel();
+        let watchdog = {
+            let inner = Arc::clone(inner);
+            let id = session.id.clone();
+            std::thread::Builder::new()
+                .name("record-watch".into())
+                .spawn(move || inner.watch(&id, &unwatched))
+        };
+        if let Err(e) = watchdog {
+            for s in started {
+                let _ = s.finish();
+            }
+            if let Err(e) = inner.store.delete_session(&session.id) {
+                eprintln!("record {}: deleting failed start: {e}", session.id);
+            }
+            return Err(e.into());
+        }
         *recording = Some(Recording {
             session_id: session.id.clone(),
             sources: started,
+            _watched: watched,
         });
         inner.emit(&session.id, SessionStatus::Recording, "Recording...");
         Ok(session)
@@ -228,6 +253,10 @@ impl Recorder {
         if let Some(e) = failure {
             // The chunks already written stay for a retry.
             inner.end(&id, SessionStatus::Failed, &e);
+            return Ok(id);
+        }
+        if samples == 0 {
+            inner.end(&id, SessionStatus::Failed, "no audio was recorded");
             return Ok(id);
         }
         let duration_ms =
@@ -322,7 +351,42 @@ impl Inner {
             capture.format(),
             rx,
         )?;
-        Ok(Source { capture, writer })
+        Ok(Source {
+            source,
+            capture,
+            writer,
+        })
+    }
+
+    /// Fails the recording of `id` as soon as one of its sources stops
+    /// writing — the device or app went away, or a chunk failed to save —
+    /// keeping the chunks written so far. Returns when the recording ends.
+    fn watch(&self, id: &str, recording_ends: &mpsc::Receiver<()>) {
+        while let Err(RecvTimeoutError::Timeout) = recording_ends.recv_timeout(WATCH_INTERVAL) {
+            let mut current = lock(&self.recording);
+            let stopped = current.as_ref().and_then(|r| {
+                (r.session_id == id)
+                    .then(|| r.sources.iter().find(|s| s.writer.is_finished()))
+                    .flatten()
+                    .map(|s| s.source)
+            });
+            let Some(stopped) = stopped else { continue };
+            let Some(recording) = current.take() else {
+                return;
+            };
+            drop(current);
+            let mut error = None;
+            for source in recording.sources {
+                if let Err(e) = source.finish() {
+                    error.get_or_insert(e);
+                }
+            }
+            let error = error.unwrap_or_else(|| match stopped {
+                AudioSource::Mic => "recording stopped: the microphone was lost".into(),
+                AudioSource::System => "recording stopped: the app's audio ended".into(),
+            });
+            return self.end(id, SessionStatus::Failed, &error);
+        }
     }
 
     /// Writes the status row, then emits the matching event.

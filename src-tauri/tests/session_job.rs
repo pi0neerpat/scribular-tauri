@@ -397,6 +397,42 @@ fn a_failed_summary_keeps_the_transcript_and_deletes_the_audio() {
 }
 
 #[test]
+fn a_lost_source_fails_the_recording_and_keeps_its_audio() {
+    let h = Harness::new();
+    let id = h.start(InputMode::MicAndSystem);
+    h.feed(6);
+    h.wait_chunks(&id, 2);
+    h.system.lose();
+    h.events.wait_for(&id, SessionStatus::Failed);
+
+    let s = h.get(&id);
+    assert_eq!(
+        s.error.as_deref(),
+        Some("recording stopped: the app's audio ended")
+    );
+    assert_eq!(h.recorder.current(), None);
+    assert!(!h.mic.is_open(), "the other source is stopped too");
+    // Both sources' 5 s chunks plus their flushed 1 s tails.
+    assert_eq!(h.chunks(&id), 4);
+    assert!(h.stt.calls().is_empty(), "nothing is transcribed");
+    assert!(matches!(h.recorder.stop(), Err(RecordError::NotRecording)));
+    h.assert_rows_matched_events();
+}
+
+#[test]
+fn stopping_with_no_audio_fails_the_session() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Failed);
+
+    let s = h.get(&id);
+    assert_eq!(s.error.as_deref(), Some("no audio was recorded"));
+    assert!(h.stt.calls().is_empty());
+    assert_eq!(h.summarizer.loads.load(Ordering::Relaxed), 0);
+}
+
+#[test]
 fn a_refused_source_leaves_no_session() {
     let h = Harness::new();
     h.mic.deny.store(true, Ordering::Relaxed);
