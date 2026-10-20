@@ -81,7 +81,8 @@ pub fn read_wav(path: &Path) -> io::Result<Vec<f32>> {
             b"fmt " if body.len() >= 16 => {
                 let u16_at = |i: usize| u16::from_le_bytes([body[i], body[i + 1]]);
                 let rate = u32::from_le_bytes(body[4..8].try_into().unwrap());
-                format_ok = u16_at(0) == 1 && u16_at(2) == 1 && rate == SAMPLE_RATE && u16_at(14) == 16;
+                format_ok =
+                    u16_at(0) == 1 && u16_at(2) == 1 && rate == SAMPLE_RATE && u16_at(14) == 16;
             }
             b"data" => {
                 if !format_ok {

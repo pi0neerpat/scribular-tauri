@@ -164,7 +164,11 @@ impl FakeTranscriber {
 }
 
 impl Transcriber for FakeTranscriber {
-    fn transcribe(&self, samples: &[f32], cancel: &AtomicBool) -> SttResult<Vec<TranscriptSegment>> {
+    fn transcribe(
+        &self,
+        samples: &[f32],
+        cancel: &AtomicBool,
+    ) -> SttResult<Vec<TranscriptSegment>> {
         self.calls.lock().unwrap().push(samples.len());
         if cancel.load(Ordering::Relaxed) {
             return Err(SttError::Cancelled);
