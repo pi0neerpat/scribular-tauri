@@ -5,7 +5,10 @@
 //! those generated files are committed.
 
 use serde::Serialize;
+use tauri::State;
 use ts_rs::TS;
+
+use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
 
 /// Event the core emits once a second, as the example of a typed event.
 pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
@@ -32,6 +35,10 @@ pub struct Heartbeat {
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
+    SessionListItem::export_all(cfg)?;
+    Session::export_all(cfg)?;
+    SessionPatch::export_all(cfg)?;
+    Prompt::export_all(cfg)?;
     Ok(())
 }
 
@@ -41,6 +48,37 @@ pub fn app_version() -> AppVersion {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+// Commands return `Result<_, String>`: the webview only shows the message.
+
+#[tauri::command]
+pub fn list_sessions(store: State<Store>) -> Result<Vec<SessionListItem>, String> {
+    store.list_sessions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_session(store: State<Store>, id: String) -> Result<Option<Session>, String> {
+    store.get_session(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_session(
+    store: State<Store>,
+    id: String,
+    patch: SessionPatch,
+) -> Result<Session, String> {
+    store.update_session(&id, &patch).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_session(store: State<Store>, id: String) -> Result<bool, String> {
+    store.delete_session(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_prompts(store: State<Store>) -> Result<Vec<Prompt>, String> {
+    store.list_prompts().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

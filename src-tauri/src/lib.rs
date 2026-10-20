@@ -1,16 +1,29 @@
 pub mod commands;
+pub mod store;
 pub mod text;
 
 use std::time::Duration;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use commands::{Heartbeat, HEARTBEAT_EVENT};
+use store::Store;
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::app_version])
+        .invoke_handler(tauri::generate_handler![
+            commands::app_version,
+            commands::list_sessions,
+            commands::get_session,
+            commands::update_session,
+            commands::delete_session,
+            commands::list_prompts
+        ])
         .setup(|app| {
+            let data_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&data_dir)?;
+            app.manage(Store::open(&data_dir.join("scribular.db"))?);
+
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut seq = 0u32;
