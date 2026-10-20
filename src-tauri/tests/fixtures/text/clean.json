@@ -1,0 +1,2129 @@
+{
+  "cases": [
+    {
+      "name": "bracket noise tokens",
+      "input": "Hello [MUSIC] there [BLANK_AUDIO] friend [inaudible].",
+      "output": "Hello there friend ."
+    },
+    {
+      "name": "nested and unclosed brackets",
+      "input": "a [b [c] d] e [never closed",
+      "output": "a d] e [never closed"
+    },
+    {
+      "name": "parenthesized sounds",
+      "input": "We started (soft music playing) and then (Laughter) and (birds chirping) ok",
+      "output": "We started and then (Laughter) and ok"
+    },
+    {
+      "name": "paren keyword at offset 1",
+      "input": "x ( music) y",
+      "output": "x y"
+    },
+    {
+      "name": "paren keyword at offset 0 is kept",
+      "input": "x (music) y",
+      "output": "x (music) y"
+    },
+    {
+      "name": "paren keyword beyond 40 chars is kept",
+      "input": "x (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaamusic) y",
+      "output": "x (amusic) y"
+    },
+    {
+      "name": "paren keyword at exactly 40 chars",
+      "input": "x (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaamusic) y",
+      "output": "x y"
+    },
+    {
+      "name": "paren without close",
+      "input": "x (soft music playing y",
+      "output": "x (soft music playing y"
+    },
+    {
+      "name": "paren case insensitive",
+      "input": "x (SOFT MUSIC) y (Crowd NOISE here) z",
+      "output": "x y z"
+    },
+    {
+      "name": "repeated words",
+      "input": "I I I I think so so so so so yes",
+      "output": "I think so yes"
+    },
+    {
+      "name": "repeated words with commas and case",
+      "input": "the, The, THE, the theory and no no no",
+      "output": "theory and no no no"
+    },
+    {
+      "name": "repeated word prefix match",
+      "input": "the the the the theory",
+      "output": "theory"
+    },
+    {
+      "name": "repeated characters",
+      "input": "Hmmmmm aaaa 1 1 1 1 !!!! ok",
+      "output": "Hm a 1 ! ok"
+    },
+    {
+      "name": "repeated punctuation",
+      "input": "Well..... I mean . . . . maybe. . yes....",
+      "output": "Well. I mean . maybe.yes."
+    },
+    {
+      "name": "blank lines",
+      "input": "First line.\n\n\n\nSecond line.\n\n\nThird.",
+      "output": "First line.\n\n\n\nSecond line.\n\n\nThird."
+    },
+    {
+      "name": "dot runs across newlines",
+      "input": "end.\n.\n.\nnext",
+      "output": "end.next"
+    },
+    {
+      "name": "multiple spaces",
+      "input": "too    many     spaces  here",
+      "output": "too many spaces here"
+    },
+    {
+      "name": "tabs and unicode spaces",
+      "input": "a\t\tb  c d 　 e",
+      "output": "a\t\tb  c d 　 e"
+    },
+    {
+      "name": "unicode whitespace in repeats",
+      "input": "go go go　go now",
+      "output": "go now"
+    },
+    {
+      "name": "astral characters are not collapsed",
+      "input": "😀😀😀😀 wow 😀 😀 😀 😀",
+      "output": "😀😀😀😀 wow 😀 😀 😀 😀"
+    },
+    {
+      "name": "non-ascii words",
+      "input": "café café café café über über",
+      "output": "café café café café über über"
+    },
+    {
+      "name": "kelvin and long s are not ascii",
+      "input": "KK k k k k ſ s",
+      "output": "KK k ſ s"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "output": ""
+    },
+    {
+      "name": "only noise",
+      "input": "[MUSIC] (music playing)",
+      "output": " "
+    },
+    {
+      "name": "benchmark transcript",
+      "input": "Thanks for coming in today, how have things been since we last met? Um, well, I don't know, it's like, the Stuckness is still there, you know, I keep thinking I'm going to have this break through moment where everything clicks, but then I just end up spinning my wheels again, it's exhausting. The Stuckness, can you tell me more about what that looks like when it shows up? It's like, okay, so I'll be at work and I'll have this moment where I think I could do something different, I could take a risk here, but then immediately the Stuckness just shuts it down, it's like this voice that says no, you can't, you're not ready, you don't have what it takes, and then I just, freeze, I end up doing the same thing I always do, taking the safe route, and then I go home feeling like such a failure. So the Stuckness has this way of showing up right when you're about to take a risk, and it tells you that you're not ready or that you don't have what it takes? Exactly, and the crazy thing is, I know intellectually that I'm capable, like, my manager literally told me last week that I'm one of the strongest team members they have, but in the moment, when I'm actually facing a choice, the Stuckness just, it completely takes over, it's like it has more power than the facts. That's really interesting, so even when you have evidence, like your manager's feedback, the Stuckness still manages to have that power in the moment, when did you first notice the Stuckness showing up in this way? God, I think, probably when I was in grad school, no, actually, maybe even before that, I remember being in undergrad and having to choose a major, and I just felt this paralysis, like, what if I pick wrong, what if I'm not good enough, I ended up picking the safest option, something I knew I could do well in, instead of what I actually wanted to study, which was anthropology, and I think that's been the pattern ever since. So the Stuckness has been influencing your choices for quite some time, what would you say the Stuckness wants for you, what is it trying to protect you from? I guess, failure, like, if I don't try, I can't fail, if I stay stuck, at least I know what to expect, it's safe, but then I also feel like I'm failing by not trying, so it's this weird paradox where the Stuckness is supposed to protect me from failure, but it's actually creating it. It sounds incredibly frustrating, to have the Stuckness trying to protect you, but ending up creating the very thing it's trying to prevent, have there been times recently when you were able to do something different, even with the Stuckness present? Um, well, actually, yeah, last Thursday I did something kind of different, there was this project opportunity, leading a new initiative and normally I would just immediately say no, or make some excuse about being too busy, but this time I actually, I told myself okay, the Stuckness is here, it's telling me all the usual stuff, but I'm going to say yes anyway, and I did, I raised my hand in the meeting and volunteered. Wow, so even though the Stuckness was there with all its usual messages, you were able to make a choice that was different from what it was suggesting? Yeah, I mean, I was terrified the whole time, my heart was racing, and I kept thinking oh my god, what did I just do, I'm going to screw this up, but I did it. What do you think that says about you, that you were able to do that even while feeling terrified? I don't know, I guess that I can push through, like, the fear doesn't have to be in charge. It sounds like you're discovering something important, that even when the Stuckness is present with all its familiar warnings, you have the ability to make choices that align with what you actually want, not just what feels safe. I never thought of it that way, I always thought I had to get rid of the fear first, or like, fix the Stuckness before I could move forward, but maybe, maybe I can just acknowledge it's there and move forward anyway. That's a powerful realization, what was it like after you volunteered for the project, how did you feel? Honestly, proud, like, genuinely proud of myself, which is not something I feel very often, and also kind of, free, like, oh, I can actually do this, I don't have to listen to every thought that pops into my head, it's been a few days now and I haven't spiraled into the usual self-doubt, which is unusual for me. So this choice to volunteer, even with the Stuckness present, has opened up some new feelings, pride and freedom, that aren't usually part of your experience, what else has shifted since Thursday. Well, I've been noticing the Stuckness more, like, I can catch it now, yesterday I was about to decline a coffee invitation from a colleague because I thought oh, they probably don't actually want to hang out with me, they're just being polite, and then I realized, wait, that's the Stuckness talking, so I said yes to coffee instead, and it was actually really nice, we ended up talking for like an hour and a half. So you're developing this ability to recognize the Stuckness when it shows up and make choices that aren't dictated by it, what does that say about the kind of person you're becoming? I guess, someone who doesn't let fear make all the decisions, someone who can take risks even when it's uncomfortable. Someone who can acknowledge the Stuckness is present but still move toward what matters to you, what do you think that version of yourself would say to the person who was afraid to choose anthropology all those years ago? Oh man, I think, I think I'd say it's okay to want things, it's okay to go after what you actually want instead of what feels safest, and maybe you don't have to have it all figured out first, you can figure it out along the way. That's beautiful, and it sounds like that's exactly what you've been practicing this week, going after what you want even without having it all figured out. Yeah, I guess I have, I didn't really think about it that way, but yeah. As you think about the next week, what opportunities might there be to continue practicing this, noticing the Stuckness, acknowledging it's there, and then making choices that align with what you actually want? Well, the first meeting for the new project is on Wednesday, that's going to be a big one, I'll probably have all kinds of thoughts about not being prepared enough or not knowing what to say, but maybe I can just notice those thoughts and show up anyway. It sounds like you're already planning how to work with the Stuckness rather than letting it run the show, what else? I've been thinking about reaching out to this friend I lost touch with, we used to be really close, but we drifted apart and now I have this story that it's been too long, it would be weird, she probably doesn't want to hear from me, but that's probably just the Stuckness again, right? What do you think? Yeah, it's definitely the Stuckness, the real story is that we were close and I miss her, and reaching out is just, reaching out, it doesn't have to be this huge dramatic thing. What might it be like to reach out, even with all those Stuckness thoughts present? Scary, but also, like I'm taking my life back, like I'm not going to let this invisible force keep me small anymore, I'm just going to do the things that matter to me, even if it's uncomfortable. That sounds like a significant shift, from being controlled by the Stuckness to being someone who can acknowledge it and still move forward with what matters, how does that feel? Honestly, it feels like hope, like maybe I'm not actually stuck, maybe I've just been letting the Stuckness convince me I am. That's a powerful distinction, you're not stuck, the Stuckness has just been very convincing, and now you're learning to recognize it and make different choices. Yeah, exactly. Last session we started getting to know the part of you that shows up when you think about setting boundaries at work, how has that been sitting with you this week? I noticed it a lot more, like every time my boss asks me to stay late there's this voice that says just do it don't make waves, it's almost automatic. That's great noticing, so there's a part that has a very clear message, don't make waves just comply, what do you sense about that part right now as you describe it, where do you notice it in your body? It's in my chest, kind of a tightness, like a clenching, and the message feels urgent like if I don't listen to it something bad will happen. Can you let that part know you see it and you're interested in getting to know it better, we're not trying to change it or push it aside, just curious about it. Okay, in trying, it's suspicious though, like it doesn't trust that in just going to listen. It's suspicion makes a lot of sense, this part has probably been working really hard for a long time to keep you safe, parts that have been carrying heavy loads don't usually trust right away, can you let it know that you appreciate how hard it's been working? Yeah, I said that kind of internally and the tightness loosen just a tiny bit. Good, that tiny shift is meaningful, it means the part is registering that you're approaching it differently, now I'm curious, what does this part believe will happen if you do set a boundary at work? That'll be seen as difficult, that people will stop liking me, and then, I don't know, something worse. Something worse, can you stay with that, what's the something worse this part is protecting you from? Being alone, if people don't like me feel leave, and they'll be completely alone. So this part, this manager part, is working over time to make sure you're never rejected never abandoned, it learned that compliance equals safety, does that fit? Completely, that's been my whole life, be easy be helpful don't ask for too much. And how do you feel toward this part right now as you understand it's job better? I feel sad for it, it's been carrying this for so long since I was a kid probably. That sadness and that compassion that's you, you're self showing up, that self energy, when you can look at a part with curiosity and compassion instead of wanting to fix it or get rid of it that's when real relationship between you and the part becomes possible, can you let the part know you feel that compassion? I'm doing that, and the chest thing is really opening up now, I feel I'm almost emotional. Stay with that, that emotion is the part letting you in a little more, now I want to ask the part, is it willing to show you where it learned this, what happened that taught it people leave if you're not compliant? It's showing me being around 8 or 9, my parent would get really cold and withdraw whenever I did something they didn't approve of, silent treatment for days sometimes, I learned that any pushback meant I lost connection. So that young part of you, the 8 year old who experienced that withdrawal, that's the exile this manager has been protecting, the manager learned never push back because the exile carries the pain of being shut out by someone you needed. That makes so much sense, I've been running from that feeling my whole life. Can you be with that young part right now, the 8 year old who was so alone during those silent treatments, what does that part need from you? They need to know it wasn't their fault, that they didn't do anything wrong by having needs. Can you tell them that? Im telling them, you didn't do anything wrong, you were just a kid who wanted your parent to stay, fear crying, im crying. That's beautiful, that's the exile being witnessed, being seen by you by yourself maybe for the first time, this is really important work, how is the manager part responding as you're with this young one? It's watching, it seems unreliven, like maybe it doesn't have to hold this alone anymore. That's exactly what happens when the exile gets what it needs, to be seen to be told it wasn't their fault, the manager doesn't have to work so hard, the manager's job was to keep you away from this pain, but now you're showing the system that you can handle the pain, that you can be with it without being destroyed by it. I don't feel destroyed, I feel lighter, which is weird because im crying. That's the paradox of this work, when we let ourselves be with the pain instead of running from it it actually loosens its grip, the exile has been frozen in time carrying that 8-year-olds burden, yourself being with it now starts to update the system, to show all your parts that the past is not the present. So does this mean the people pleasing will just stop? Not necessarily overnight, the manager has been doing this job for decades, it needs time to trust that you can handle things differently now, what well do in future sessions is continue building this relationship between yourself and these parts, we may also check for other protectors, sometimes there are firefighter parts that act out in other ways when the manager's strategy fails, but right now the most important thing is what just happened, yourself made contact with the exile and the manager witnessed that. I feel like I met a part of myself I've been avoiding for 20 years. In a way you did, and that part has been waiting, for next steps I'd invite you to check in with both the manager and the young part between sessions, not to do heavy work on your own but just to notice them, if the manager shows up at work you might internally say I see you I know what you're doing and why, that acknowledgement goes a long way. I can do that, it already feels like something shifted just from today. Being did shift, your system got a new experience, yourself showed up for a part that needed it, that's the foundation for all the work going forward, well continue building on this next time. So last week we talked about what happens when one of you reaches out and the other umpules back, I'd love to check in how has the week been between you two. It was okay for the first few days, but then Thursday happened, I came home and I could just feel the wall go up, I tried to ask about the day and got like one word answers. I wasn't putting up a wall, I was exhausted, I'd had the worst day at work and I just needed like 10 minutes to breathe. So there's already something really important here, one of you is reaching out looking for connection after a long day apart, and the other is needing space to regulate after a hard day, neither of those needs is wrong, but the cycle kicks in when the reaching out feels like pressure and the pulling back feels like rejection, does that land for either of you. That's exactly it, when I get silence my brain goes straight to like they don't want to be around me, and then I push harder because I'm because I'm scared. And when I feel that push I shut down more, it's like I can't find words, I just freeze. Right, so we're seeing the cycle really clearly here, the more one of you pursues asks questions tries to get a response the more the other withdraws, and the more withdrawal happens the more urgent the pursuit becomes, it's like a dance neither of you chose but both of you are stuck in. I hate that dance, I don't want to be the nagging one, that's not who I want to be. Of course not, and I want you to hear this, the pursuing Iceland about nagging, underneath that reaching out there's usually a really deep attachment need, something like do I matter to you, are you still here with me, can you feel that underneath when you're reaching for connection. Yes, that's exactly what it is, I just want to know they still care, when I get nothing back it feels like I'm alone in this relationship. That's so important, that loneliness that fear of being alone in the relationship that's the primary emotion, the frustration the pushing the asking what's wrong, what's wrong that's the secondary reaction that protects you from feeling that deeper pain, what's it like to say that out loud right now. It's scary, because what if I say I'm scared you don't care and they um they confirm it. I do care, I care so much, I just when I feel that pressure something in me locks up, it's like my body decides before my brain does. That locking up that's your protective response, and it makes a lot of sense, can you tell me what's happening inside when you feel yourself shutting down, what's the feeling underneath the freeze. I think it's um I feel like I'm going to get it wrong, like whatever I say won't be enough, so it's safer to say nothing. So there's a fear there too, a fear of failing your partner, of not being enough, that's also an attachment fear, you're both actually afraid of the same thing just from different sides, one of you is afraid of being abandoned and the other is afraid of being inadequate, and your protective strategies pursuing and withdrawing accidentally confirm each other's worst fears. I never thought of it like that, that fear also scared. I didn't know that's what was happening for me until just now, I thought I was just bad at talking about feelings. You're not bad at it, you're doing it right now, and I want to slow down here because something important just happened, you just shared something really vulnerable, that you're afraid of not being enough, and your partner heard it, im curious, what happened for you when you heard that? It makes me want to cry, because I don't want them to feel that way, I want them to know fear enough. Can you turn and say that directly? You are enough, I don't need you to have the perfect response, I just need to know you're there. Im here, I just don't always know how to show it. This is a really important moment, you're both showing up right now with your guards down, this is what we call accessible and responsive engagement, when you can reach for each other from a place of vulnerability instead of from that reactive cycle, this is what deescalation looks like in real time. It feels different when we talk like this, karma, like we're on the same team. Yeah, I don't feel that pressure right now, I just feel close. It's the cycle slowing down, when the pursuer can say im scared I don't matter instead of why I want you to talk to me, and when the withdrawer can say im afraid ill fail you instead of going silent, the whole dynamic shifts, you're reaching for each other instead of reacting against each other. So what do we do when it happens at home, because in here it feels safe but Thursday night it all went sideways in about three minutes. Big question, one thing we can practice is a softened startup, when you notice you're wanting connection try leading with the vulnerability instead of the frustration, something like I missed you today and im feeling disconnected instead of why I aren't you talking to me, and for you if you need that 10 minutes try naming it, like I need a few minutes to land but im coming back to you, that reassures your partner that the withdrawal is temporary not a rejection. I can try that, um, I am coming back to you, that would actually help a lot. And I can try to say what im actually feeling instead of just asking questions. Exactly, you're both already doing the hardest part which is seeing the cycle and being willing to step out of it, were firmly in the deescalation stage and im starting to see moments where you naturally reach for each other in new ways, that's real movement, let's keep building on this next week, how are you both feeling right now? lighter, like I can breathe, yeah, connected, which is kind of the whole point right? That's exactly the point. Last time we identified that the car accident from two years ago is still creating a lot of activation for you especially when you're driving on highways, I'd like to do some brain-spitting work on that today, how are you feeling about that? nervous but ready, I've been avoiding the highway for months now and it's really limiting my life, I had to turn down a job opportunity because the commute involved a bridge and a highway merge. That's a significant impact on your daily life, before we begin I want to check in on your activation level right now just thinking about the accident and highway driving, on a scale of zero to ten where zero is no distress and ten is the worst distress you can imagine where would you put yourself? probably a seven, just talking about it my hands are getting clammy and my heart rate is picking up. thank you for tracking that, I noticed you touched your chest when you said that, where exactly in your body do you feel the activation most strongly? definitely my chest, like a tight band around my rib cage and my shoulders are up near my ears, I didn't even realize I was doing that until you pointed it out. that body awareness is really helpful, okay what I'd like you to do is think about the accident, the moment of highest activation whatever image or moment comes up first and let your eyes slowly scan across my pointer, just follow it with your gaze and notice where the activation feels strongest, there's no right or wrong answer, your brain knows where to look, okay following it now, it's on when you go to the left side it feels more intense, right about there, that spot, my chest just clenched, stay right there, im going to hold the pointer in this position, that's your brain spot, the eye position where your brain is most connected to the activation from the trauma, just gaze at that spot and notice what comes up, you don't have to narrate everything but let me know what you're experiencing. the image that keeps coming is the moment I saw the other car in my mirror, I knew it was going to hit me and I couldn't do anything, just this helpless frozen feeling. stay with that, helpless and frozen, where is that in your body now? till the chest but it's spreading, my stomach is tight now too, and my jaw, im clenching my jaw, notice the jaw, sometimes the body holds what we couldn't express in the moment, just breathe and let your body do what it needs to do. im shaking a little, my hands are trembling, is that normal? completely normal, that trembling is your nervous system releasing stored activation, it's actually a good sign, it means your body is processing, stay with it, keep your gaze on the spot. the image is shifting, now im seeing the aftermath, the airbag the smoke being stuck in the seat, I couldn't get the seat belt off, I thought the car was going to catch fire, nobody was coming, I was screaming and nobody came for what felt like forever. you were alone in that moment, trapped and alone, stay with that, what's happening in your body? the chest is really tight, I feel like I can't breathe, like the seat belt is still pressing on me, oh god, im starting to cry. let the tears come, fear part of the processing, your body is releasing what it's been holding for two years, you're safe right now, im right here. I just keep seeing myself in that car screaming, and nobody coming, the first person who came was a truck driver and it felt like it took 20 minutes. so there's a deep experience of being alone and helpless in a life-threatening moment, that's what got frozen, keep breathing, keep your gaze on the spot, what's happening now? the shaking is getting stronger, like my whole body is vibrating, but the chest tightness is actually starting to ease a little, like something is releasing. good, follow that release, your body knows how to process this, you don't have to direct it. now im getting angry, im angry at the other driver, they were on their phone, they just clothe into me because they were texting, and they walked away fine, I was trapped in my car and they walked away. there's the anger, it makes total sense, stay with it, where do you feel the anger? my arms, like I want to push something away, my hands are fists right now. let that energy be there, the anger might be the opposite of the helplessness, your body finding its power again, the part of you that couldn't do anything in the moment is now saying no this shouldn't have happened. it's exactly it, it shouldn't have happened, I shouldn't have had to go through that. stay with the gaze point, what are you noticing now? the anger is calming down, it's not gone but it's some less urgent, and the image is changing, im seeing myself getting out of the car, the truck driver helping me, the EMT's arriving, im actually seeing the part where help came. your brain is moving through the full experience, it was stuck on the moment of impact and being trapped but now it's finding the rest of the story, the part where you survived, where you were helped. I did survive, I walked away, I had bruises and whiplash but I walked away. how is your body feeling right now? the chest band is almost gone, my shoulders dropped, I can feel them down where fear supposed to be, my stomach is still a little tight but nothing like before, and the shaking stopped. good, let me check in on your suds level, same scale 0 to 10, where are you now? maybe a 3, which is wild because I was at 7 like 20 minutes ago, the image of the accident is still there but it doesn't have the same charge, like I can look at it without my body going into full alarm mode. that's significant processing, your brain just reorganized its relationship to that memory, the memory isn't gone, we don't want it to be gone, but the frozen activated quality is releasing, you may notice more processing over the next day or two, dreams emotions coming up body sensations, that's all normal and healthy, it's your brain continuing what we started. I feel exhausted, but also I'm lighter, like I've been carrying a backpack full of rocks and someone just took a few out. that's a perfect description, the weight is the stored activation, each time we process some of that weight releases, before we close I want you to take a few deep breaths and notice your body as it is right now, the shoulders down the chest open the breath moving more freely. This is the most relaxed my chest has felt in two years, I didn't realize how much I was holding there all the time. Your body was staying prepared for a threat that already happened, through today's work we've helped it start to update, to recognize that the danger is past, for follow up I'd suggest being gentle with yourself this evening, hydrate rest may be a warm bath, and next session we can check in on where the activation level is and continue processing if needed, some clients find the suds continues to drop between sessions as the brain integrates. Thank you, I feel like something actually moved today, like for the first time since the accident my body isn't bracing for impact. That's exactly the goal, you did really brave work today, I'll see you next week. Thanks for coming in today, how have things been since we last met? Um, well, I don't know, it's like, the stuckness is still there, you know, I keep thinking I'm going to have this break through moment where everything clicks, but then I just end up spinning my wheels again, it's exhausting. The stuckness, can you tell me more about what that looks like when it shows up? It's like, okay, so I'll be at work, and I'll have this moment where I think I could do something different, I could take a risk here, but then immediately the stuckness just shuts it down, it's like this voice that says no, you can't, you're not ready, you don't have what it takes, and then I just freeze, I end up doing the same thing I always do, taking the safe route, and then I go home feeling like such a failure. So the stuckness has this way of showing up right when you're about to take a risk, and it tells you that you're not ready or that you don't have what it takes. Exactly, and the crazy thing is, I know intellectually that I'm capable, like, my manager literally told me last week that I'm one of the strongest team members they have, but in the moment, when I'm actually facing a choice, the stuckness just, it completely takes over, it's like it has more power than the facts. It's really interesting, so even when you have evidence, like your manager's feedback, the stuckness still manages to have that power in the moment, when did you first notice the stuckness showing up in this way? God, I think, probably when I was in grad school, no, actually, maybe even before that, I remember being in undergrad and having to choose a major, and I just felt this paralysis, like, what if I pick wrong, what if I'm not good enough, I ended up picking the safest option, something I knew I could do well in, instead of what I actually wanted to study, which was anthropology, and I think that's been the pattern ever since. So the stuckness has been influencing your choices for quite some time, what would you say the stuckness wants for you, what is it trying to protect you from? I guess, failure, like, if I don't try, I can't fail, if I stay stuck, at least I know what to expect, it's safe, but then I also feel like I'm failing by not trying, so it's this weird paradox where the stuckness is supposed to protect me from failure, but it's actually creating it. That sounds incredibly frustrating, to have the stuckness trying to protect you, but ending up creating the very thing it's trying to prevent, have there been times recently when you were able to do something different, even with the stuckness present? Um, well, actually, yeah, last Thursday I did something kind of different, there was this project opportunity, leading a new initiative and normally I would just immediately say no, or make some excuse about being too busy, but this time I actually, I told myself okay, the stuckness is here, it's telling me all the usual stuff, but I'm going to say yes anyway, and I did, I raised my hand in the meeting and volunteered. Wow, so even though the stuckness was there with all its usual messages, you were able to make a choice that was different from what it was suggesting? Yeah, I mean, I was terrified the whole time, my heart was racing, and I kept thinking oh my god, what did I just do, I'm going to screw this up, but I did it. What do you think that says about you, that you were able to do that even while feeling terrified? I don't know, I guess that I can push through, like, the fear doesn't have to be in charge. It sounds like you're discovering something important, that even when the stuckness is present with all its familiar warnings, you have the ability to make choices that align with what you actually want, not just what feels safe. I never thought of it that way, I always thought I had to get rid of the fear first, or like, fix the stuckness before I could move forward, but maybe, maybe I can just acknowledge it's there and move forward anyway. That's a powerful realization, what was it like after you volunteered for the project, how did you feel? Honestly, proud, like, genuinely proud of myself, which is not something I feel very often, and also kind of, free, like, oh, I can actually do this, I don't have to listen to every thought that pops into my head, it's been a few days now and I haven't spiraled into the usual self-doubt, which is unusual for me. So this choice to volunteer, even with the stuckness present, has opened up some new feelings, pride and freedom, that aren't usually part of your experience, what else has shifted since Thursday. Well, I've been noticing the stuckness more, like, I can catch it now, yesterday I was about to decline a coffee invitation from a colleague because I thought oh, they probably don't actually want to hang out with me, they're just being polite, and then I realized, wait, that's the stuckness talking, so I said yes to coffee instead, and it was actually really nice, we ended up talking for like an hour and a half. So you're developing this ability to recognize the stuckness when it shows up and make choices that aren't dictated by it, what does that say about the kind of person you're becoming? I guess, someone who doesn't let fear make all the decisions, someone who can take risks even when it's uncomfortable. Someone who can acknowledge the stuckness as present but still move toward what matters to you, what do you think that version of yourself would say to the person who was afraid to choose anthropology all those years ago? Oh man, I think, I think I'd say it's okay to want things, it's okay to go after what you actually want instead of what feels safest, and maybe you don't have to have it all figured out first, you can figure it out along the way. That's beautiful, and it sounds like that's exactly what you've been practicing this week, going after what you want even without having it all figured out. Yeah, I guess I have, I didn't really think about it that way, but yeah. As you think about the next week, what opportunities might there be to continue practicing this, noticing the stuckness, acknowledging it's there, and then making choices that align with what you actually want? Well, the first meeting for the new project is on Wednesday, that's going to be a big one, I'll probably have all kinds of thoughts about not being prepared enough or not knowing what to say, but maybe I can just notice those thoughts and show up anyway. It sounds like you're already planning how to work with the stuckness rather than letting it run the show, what else? I've been thinking about reaching out to this friend I lost touch with, we used to be really close, but we drifted apart and now I have this story that it's been too long, it would be weird, she probably doesn't want to hear from me, but that's probably just the stuckness again, right? What do you think? Yeah, it's definitely the stuckness, the real story is that we were close, and I miss her, and reaching out is just, reaching out, it doesn't have to be this huge dramatic thing. What might it be like to reach out, even with all those stuckness thoughts present? Scary, but also, like I'm taking my life back, like I'm not going to let this envision possible force keep me small anymore, I'm just going to do the things that matter to me, even if it's uncomfortable. That sounds like a significant shift, from being controlled by the stuckness to being someone who can acknowledge it and still move forward with what matters, how does that feel? Honestly, it feels like hope, like, maybe I'm not actually stuck, maybe I've just been letting the stuckness convince me I am. That's a powerful distinction, you're not stuck, the stuckness has just been very convincing, and now you're learning to recognize it and make different choices. Yeah, exactly. Last session we started getting to know the part of you that shows up when you think about setting boundaries at work, how has that been sitting with you this week? I noticed it a lot more, like every time my boss asks me to stay late there's this voice that says just do it don't make waves, it's almost automatic. That's great noticing, so there's a part that has a very clear message, don't make waves just comply, what do you sense about that part right now as you describe it, where do you notice it in your body? It's in my chest, kind of a tightness, like a clenching, and the message feels urgent like if I don't listen to it something bad will happen. Can you let that part know you see it and you're interested in getting to know it better, we're not trying to change it or push it aside, just curious about it. Okay, in trying, it's suspicious though, like it doesn't trust that him just going to listen. That suspicion makes a lot of sense, this part has probably been working really hard for a long time to keep you safe, parts that have been carrying heavy loads don't usually trust right away, can you let it know that you appreciate how hard it's been working? Yeah, I said that kind of internally and the tightness loosen just a tiny bit. Good, that tiny shift is meaningful, it means the part is registering that you're approaching it differently, now I'm curious, what does this part believe will happen if you do set a boundary at work? That'll be seen as difficult, that people will stop liking me, and then, I don't know, something worse. Something worse, can you stay with that, what's the something worse this part is protecting you from? Being alone, if people don't like me feel leave, and they'll be completely alone. So this part, this manager part, is working over time to make sure you're never rejected never abandoned, it learned that compliance equals safety, does that fit? Completely, that's been my whole life, be easy be helpful don't ask for too much. And how do you feel toward this part right now as you understand it's job better? I feel sad for it, it's been carrying this for so long since I was a kid probably. That sadness and that compassion that's you, you're self showing up, that self energy, when you can look at a part with curiosity and compassion instead of wanting to fix it or get rid of it that's when real relationship between you and the part becomes possible, can you let the part know you feel that compassion? I'm doing that, and the chest thing is really opening up now, I feel I'm almost emotional. Stay with that, that emotion is the part letting you in a little more, now I want to ask the part, is it willing to show you where it learned this, what happened that taught it people leave if you're not compliant? It's showing me being around 8 or 9, my parent would get really cold and withdraw whenever I did something they didn't approve of, silent treatment for days sometimes, I learned that any pushback meant I lost connection. So that young part of you, the 8 year old who experienced that withdrawal, that's the exile this manager has been protecting, the manager learned never push back because the exile carries the pain of being shut out by someone you needed. That makes so much sense, I've been running from that feeling my whole life. Can you be with that young part right now, the 8 year old who was so alone during those silent treatments, what does that part need from you? They need to know it wasn't their fault, that they didn't do anything wrong by having needs. Can you tell them that? Im telling them, you didn't do anything wrong, you were just a kid who wanted your parent to stay, fear crying, imprying. That's beautiful, that's the exile being witnessed, being seen by you by yourself maybe for the first time, this is really important work, how is the manager part responding as you're with this young one? It's watching, it seems unreliven, like maybe it doesn't have to hold this alone anymore. That's exactly what happens, when the exile gets what it needs, to be seen to be told it wasn't their fault, the manager doesn't have to work so hard, the manager's job was to keep you away from this pain, but now you're showing the system that you can handle the pain, that you can be with it without being destroyed by it. I don't feel destroyed, I feel lighter, which is weird because Im crying. That's the paradox of this work, when we let ourselves be with the pain instead of running from it it actually loosens its grip, the exile has been frozen in time carrying that eight year old's burden, yourself being with it now starts to update the system, to show all your parts that the past is not the present. So does this mean the people pleasing will just stop? Not necessarily overnight, the manager has been doing this job for decades, it needs time to trust that you can handle things differently now, what well do in future sessions is continue building this relationship between yourself and these parts, we may also check for other protectors, sometimes there are firefighter parts that act out in other ways when the manager's strategy fails, but right now the most important thing is what just happened, yourself made contact with the exile and the manager witnessed that. I feel like I met a part of myself I've been avoiding for 20 years. In a way you did, and that part has been waiting, for next steps I'd invite you to check in with both the manager and the young part between sessions, not to do heavy work on your own but just to notice them, if the manager shows up at work you might internally say I see you I know what you're doing and why, that acknowledgement goes a long way. I can do that, it already feels like something shifted just from today. Something did shift, your system got a new experience, yourself showed up for a part that needed it, that's the foundation for all the work going forward, well continue building on this next time. So last week we talked about what happens when one of you reaches out and the other umpules back, I'd love to check in how has the week been between you two. It was okay for the first few days, but then Thursday happened, I came home and I could just feel the wall go up, I tried to ask about the day and got like one word answers. I wasn't putting up a wall, I was exhausted, I'd had the worst day at work and I just needed like ten minutes to breathe. So there's already something really important here, one of you is reaching out looking for connection after a long day apart, and the other is needing space to regulate after a hard day, neither of those needs is wrong, but the cycle kicks and when the reaching out feels like pressure and the pulling back feels like rejection, does that land for either of you. That's exactly it, when I get silence my brain goes straight to like they don't want to be around me, and then I push harder because I'm because I'm scared. And when I feel that push I shut down more, it's like I can't find words, I just freeze. Right, so we're seeing the cycle really clearly here, the more one of you pursues asks questions tries to get a response the more the other withdraws, and the more withdrawal happens the more urgent the pursuit becomes, it's like a dance neither of you chose but both of you are stuck in. I hate that dance, I don't want to be the nagging one, that's not who I want to be. Of course not, and I want you to hear this, the pursuing isent about nagging, underneath that reaching out there's usually a really deep attachment need, something like do I matter to you, are you still here with me, can you feel that underneath when you're reaching for connection. Yes, that's exactly what it is, I just want to know they still care, when I get nothing back it feels like I'm alone in this relationship. That's so important, that loneliness that fear of being alone in the relationship that's the primary emotion, the frustration the pushing the asking what's wrong what's wrong that's the secondary reaction that protects you from feeling that deeper pain, what's it like to say that out loud right now. It's scary, because what if I say I'm scared you don't care and they um they confirm it. I do care, I care so much, I just when I feel that pressure something in me locks up, it's like my body decides before my brain does. That locking up that's your protective response, and it makes a lot of sense, can you tell me what's happening inside when you feel yourself shutting down, what's the feeling underneath the freeze. I think it's um I feel like him going to get it wrong, like whatever I say won't be enough, so it's safer to say nothing. So there's a fear there too, a fear of failing your partner, of not being enough, that's also an attachment fear, you're both actually afraid of the same thing just from different sides, one of you is afraid of being abandoned and the other is afraid of being inadequate, and your protective strategies pursuing and withdrawing accidentally confirm each others worst fears. I never thought of it like that, that fear also scared. I didn't know that's what was happening for me until just now, I thought I was just bad at talking about feelings. You're not bad at it, you're doing it right now, and I want to slow down here because something important just happened, you just shared something really vulnerable, that you're afraid of not being enough, and your partner heard it, impurious, what happened for you when you heard that. It makes me want to cry, because I don't want them to feel that way, I want them to know fear enough. Can you turn and say that directly? You are enough, I don't need you to have the perfect response, I just need to know you're there.",
+      "output": "Thanks for coming in today, how have things been since we last met? Um, well, I don't know, it's like, the Stuckness is still there, you know, I keep thinking I'm going to have this break through moment where everything clicks, but then I just end up spinning my wheels again, it's exhausting. The Stuckness, can you tell me more about what that looks like when it shows up? It's like, okay, so I'll be at work and I'll have this moment where I think I could do something different, I could take a risk here, but then immediately the Stuckness just shuts it down, it's like this voice that says no, you can't, you're not ready, you don't have what it takes, and then I just, freeze, I end up doing the same thing I always do, taking the safe route, and then I go home feeling like such a failure. So the Stuckness has this way of showing up right when you're about to take a risk, and it tells you that you're not ready or that you don't have what it takes? Exactly, and the crazy thing is, I know intellectually that I'm capable, like, my manager literally told me last week that I'm one of the strongest team members they have, but in the moment, when I'm actually facing a choice, the Stuckness just, it completely takes over, it's like it has more power than the facts. That's really interesting, so even when you have evidence, like your manager's feedback, the Stuckness still manages to have that power in the moment, when did you first notice the Stuckness showing up in this way? God, I think, probably when I was in grad school, no, actually, maybe even before that, I remember being in undergrad and having to choose a major, and I just felt this paralysis, like, what if I pick wrong, what if I'm not good enough, I ended up picking the safest option, something I knew I could do well in, instead of what I actually wanted to study, which was anthropology, and I think that's been the pattern ever since. So the Stuckness has been influencing your choices for quite some time, what would you say the Stuckness wants for you, what is it trying to protect you from? I guess, failure, like, if I don't try, I can't fail, if I stay stuck, at least I know what to expect, it's safe, but then I also feel like I'm failing by not trying, so it's this weird paradox where the Stuckness is supposed to protect me from failure, but it's actually creating it. It sounds incredibly frustrating, to have the Stuckness trying to protect you, but ending up creating the very thing it's trying to prevent, have there been times recently when you were able to do something different, even with the Stuckness present? Um, well, actually, yeah, last Thursday I did something kind of different, there was this project opportunity, leading a new initiative and normally I would just immediately say no, or make some excuse about being too busy, but this time I actually, I told myself okay, the Stuckness is here, it's telling me all the usual stuff, but I'm going to say yes anyway, and I did, I raised my hand in the meeting and volunteered. Wow, so even though the Stuckness was there with all its usual messages, you were able to make a choice that was different from what it was suggesting? Yeah, I mean, I was terrified the whole time, my heart was racing, and I kept thinking oh my god, what did I just do, I'm going to screw this up, but I did it. What do you think that says about you, that you were able to do that even while feeling terrified? I don't know, I guess that I can push through, like, the fear doesn't have to be in charge. It sounds like you're discovering something important, that even when the Stuckness is present with all its familiar warnings, you have the ability to make choices that align with what you actually want, not just what feels safe. I never thought of it that way, I always thought I had to get rid of the fear first, or like, fix the Stuckness before I could move forward, but maybe, maybe I can just acknowledge it's there and move forward anyway. That's a powerful realization, what was it like after you volunteered for the project, how did you feel? Honestly, proud, like, genuinely proud of myself, which is not something I feel very often, and also kind of, free, like, oh, I can actually do this, I don't have to listen to every thought that pops into my head, it's been a few days now and I haven't spiraled into the usual self-doubt, which is unusual for me. So this choice to volunteer, even with the Stuckness present, has opened up some new feelings, pride and freedom, that aren't usually part of your experience, what else has shifted since Thursday. Well, I've been noticing the Stuckness more, like, I can catch it now, yesterday I was about to decline a coffee invitation from a colleague because I thought oh, they probably don't actually want to hang out with me, they're just being polite, and then I realized, wait, that's the Stuckness talking, so I said yes to coffee instead, and it was actually really nice, we ended up talking for like an hour and a half. So you're developing this ability to recognize the Stuckness when it shows up and make choices that aren't dictated by it, what does that say about the kind of person you're becoming? I guess, someone who doesn't let fear make all the decisions, someone who can take risks even when it's uncomfortable. Someone who can acknowledge the Stuckness is present but still move toward what matters to you, what do you think that version of yourself would say to the person who was afraid to choose anthropology all those years ago? Oh man, I think, I think I'd say it's okay to want things, it's okay to go after what you actually want instead of what feels safest, and maybe you don't have to have it all figured out first, you can figure it out along the way. That's beautiful, and it sounds like that's exactly what you've been practicing this week, going after what you want even without having it all figured out. Yeah, I guess I have, I didn't really think about it that way, but yeah. As you think about the next week, what opportunities might there be to continue practicing this, noticing the Stuckness, acknowledging it's there, and then making choices that align with what you actually want? Well, the first meeting for the new project is on Wednesday, that's going to be a big one, I'll probably have all kinds of thoughts about not being prepared enough or not knowing what to say, but maybe I can just notice those thoughts and show up anyway. It sounds like you're already planning how to work with the Stuckness rather than letting it run the show, what else? I've been thinking about reaching out to this friend I lost touch with, we used to be really close, but we drifted apart and now I have this story that it's been too long, it would be weird, she probably doesn't want to hear from me, but that's probably just the Stuckness again, right? What do you think? Yeah, it's definitely the Stuckness, the real story is that we were close and I miss her, and reaching out is just, reaching out, it doesn't have to be this huge dramatic thing. What might it be like to reach out, even with all those Stuckness thoughts present? Scary, but also, like I'm taking my life back, like I'm not going to let this invisible force keep me small anymore, I'm just going to do the things that matter to me, even if it's uncomfortable. That sounds like a significant shift, from being controlled by the Stuckness to being someone who can acknowledge it and still move forward with what matters, how does that feel? Honestly, it feels like hope, like maybe I'm not actually stuck, maybe I've just been letting the Stuckness convince me I am. That's a powerful distinction, you're not stuck, the Stuckness has just been very convincing, and now you're learning to recognize it and make different choices. Yeah, exactly. Last session we started getting to know the part of you that shows up when you think about setting boundaries at work, how has that been sitting with you this week? I noticed it a lot more, like every time my boss asks me to stay late there's this voice that says just do it don't make waves, it's almost automatic. That's great noticing, so there's a part that has a very clear message, don't make waves just comply, what do you sense about that part right now as you describe it, where do you notice it in your body? It's in my chest, kind of a tightness, like a clenching, and the message feels urgent like if I don't listen to it something bad will happen. Can you let that part know you see it and you're interested in getting to know it better, we're not trying to change it or push it aside, just curious about it. Okay, in trying, it's suspicious though, like it doesn't trust that in just going to listen. It's suspicion makes a lot of sense, this part has probably been working really hard for a long time to keep you safe, parts that have been carrying heavy loads don't usually trust right away, can you let it know that you appreciate how hard it's been working? Yeah, I said that kind of internally and the tightness loosen just a tiny bit. Good, that tiny shift is meaningful, it means the part is registering that you're approaching it differently, now I'm curious, what does this part believe will happen if you do set a boundary at work? That'll be seen as difficult, that people will stop liking me, and then, I don't know, something worse. Something worse, can you stay with that, what's the something worse this part is protecting you from? Being alone, if people don't like me feel leave, and they'll be completely alone. So this part, this manager part, is working over time to make sure you're never rejected never abandoned, it learned that compliance equals safety, does that fit? Completely, that's been my whole life, be easy be helpful don't ask for too much. And how do you feel toward this part right now as you understand it's job better? I feel sad for it, it's been carrying this for so long since I was a kid probably. That sadness and that compassion that's you, you're self showing up, that self energy, when you can look at a part with curiosity and compassion instead of wanting to fix it or get rid of it that's when real relationship between you and the part becomes possible, can you let the part know you feel that compassion? I'm doing that, and the chest thing is really opening up now, I feel I'm almost emotional. Stay with that, that emotion is the part letting you in a little more, now I want to ask the part, is it willing to show you where it learned this, what happened that taught it people leave if you're not compliant? It's showing me being around 8 or 9, my parent would get really cold and withdraw whenever I did something they didn't approve of, silent treatment for days sometimes, I learned that any pushback meant I lost connection. So that young part of you, the 8 year old who experienced that withdrawal, that's the exile this manager has been protecting, the manager learned never push back because the exile carries the pain of being shut out by someone you needed. That makes so much sense, I've been running from that feeling my whole life. Can you be with that young part right now, the 8 year old who was so alone during those silent treatments, what does that part need from you? They need to know it wasn't their fault, that they didn't do anything wrong by having needs. Can you tell them that? Im telling them, you didn't do anything wrong, you were just a kid who wanted your parent to stay, fear crying, im crying. That's beautiful, that's the exile being witnessed, being seen by you by yourself maybe for the first time, this is really important work, how is the manager part responding as you're with this young one? It's watching, it seems unreliven, like maybe it doesn't have to hold this alone anymore. That's exactly what happens when the exile gets what it needs, to be seen to be told it wasn't their fault, the manager doesn't have to work so hard, the manager's job was to keep you away from this pain, but now you're showing the system that you can handle the pain, that you can be with it without being destroyed by it. I don't feel destroyed, I feel lighter, which is weird because im crying. That's the paradox of this work, when we let ourselves be with the pain instead of running from it it actually loosens its grip, the exile has been frozen in time carrying that 8-year-olds burden, yourself being with it now starts to update the system, to show all your parts that the past is not the present. So does this mean the people pleasing will just stop? Not necessarily overnight, the manager has been doing this job for decades, it needs time to trust that you can handle things differently now, what well do in future sessions is continue building this relationship between yourself and these parts, we may also check for other protectors, sometimes there are firefighter parts that act out in other ways when the manager's strategy fails, but right now the most important thing is what just happened, yourself made contact with the exile and the manager witnessed that. I feel like I met a part of myself I've been avoiding for 20 years. In a way you did, and that part has been waiting, for next steps I'd invite you to check in with both the manager and the young part between sessions, not to do heavy work on your own but just to notice them, if the manager shows up at work you might internally say I see you I know what you're doing and why, that acknowledgement goes a long way. I can do that, it already feels like something shifted just from today. Being did shift, your system got a new experience, yourself showed up for a part that needed it, that's the foundation for all the work going forward, well continue building on this next time. So last week we talked about what happens when one of you reaches out and the other umpules back, I'd love to check in how has the week been between you two. It was okay for the first few days, but then Thursday happened, I came home and I could just feel the wall go up, I tried to ask about the day and got like one word answers. I wasn't putting up a wall, I was exhausted, I'd had the worst day at work and I just needed like 10 minutes to breathe. So there's already something really important here, one of you is reaching out looking for connection after a long day apart, and the other is needing space to regulate after a hard day, neither of those needs is wrong, but the cycle kicks in when the reaching out feels like pressure and the pulling back feels like rejection, does that land for either of you. That's exactly it, when I get silence my brain goes straight to like they don't want to be around me, and then I push harder because I'm because I'm scared. And when I feel that push I shut down more, it's like I can't find words, I just freeze. Right, so we're seeing the cycle really clearly here, the more one of you pursues asks questions tries to get a response the more the other withdraws, and the more withdrawal happens the more urgent the pursuit becomes, it's like a dance neither of you chose but both of you are stuck in. I hate that dance, I don't want to be the nagging one, that's not who I want to be. Of course not, and I want you to hear this, the pursuing Iceland about nagging, underneath that reaching out there's usually a really deep attachment need, something like do I matter to you, are you still here with me, can you feel that underneath when you're reaching for connection. Yes, that's exactly what it is, I just want to know they still care, when I get nothing back it feels like I'm alone in this relationship. That's so important, that loneliness that fear of being alone in the relationship that's the primary emotion, the frustration the pushing the asking what's wrong, what's wrong that's the secondary reaction that protects you from feeling that deeper pain, what's it like to say that out loud right now. It's scary, because what if I say I'm scared you don't care and they um they confirm it. I do care, I care so much, I just when I feel that pressure something in me locks up, it's like my body decides before my brain does. That locking up that's your protective response, and it makes a lot of sense, can you tell me what's happening inside when you feel yourself shutting down, what's the feeling underneath the freeze. I think it's um I feel like I'm going to get it wrong, like whatever I say won't be enough, so it's safer to say nothing. So there's a fear there too, a fear of failing your partner, of not being enough, that's also an attachment fear, you're both actually afraid of the same thing just from different sides, one of you is afraid of being abandoned and the other is afraid of being inadequate, and your protective strategies pursuing and withdrawing accidentally confirm each other's worst fears. I never thought of it like that, that fear also scared. I didn't know that's what was happening for me until just now, I thought I was just bad at talking about feelings. You're not bad at it, you're doing it right now, and I want to slow down here because something important just happened, you just shared something really vulnerable, that you're afraid of not being enough, and your partner heard it, im curious, what happened for you when you heard that? It makes me want to cry, because I don't want them to feel that way, I want them to know fear enough. Can you turn and say that directly? You are enough, I don't need you to have the perfect response, I just need to know you're there. Im here, I just don't always know how to show it. This is a really important moment, you're both showing up right now with your guards down, this is what we call accessible and responsive engagement, when you can reach for each other from a place of vulnerability instead of from that reactive cycle, this is what deescalation looks like in real time. It feels different when we talk like this, karma, like we're on the same team. Yeah, I don't feel that pressure right now, I just feel close. It's the cycle slowing down, when the pursuer can say im scared I don't matter instead of why I want you to talk to me, and when the withdrawer can say im afraid ill fail you instead of going silent, the whole dynamic shifts, you're reaching for each other instead of reacting against each other. So what do we do when it happens at home, because in here it feels safe but Thursday night it all went sideways in about three minutes. Big question, one thing we can practice is a softened startup, when you notice you're wanting connection try leading with the vulnerability instead of the frustration, something like I missed you today and im feeling disconnected instead of why I aren't you talking to me, and for you if you need that 10 minutes try naming it, like I need a few minutes to land but im coming back to you, that reassures your partner that the withdrawal is temporary not a rejection. I can try that, um, I am coming back to you, that would actually help a lot. And I can try to say what im actually feeling instead of just asking questions. Exactly, you're both already doing the hardest part which is seeing the cycle and being willing to step out of it, were firmly in the deescalation stage and im starting to see moments where you naturally reach for each other in new ways, that's real movement, let's keep building on this next week, how are you both feeling right now? lighter, like I can breathe, yeah, connected, which is kind of the whole point right? That's exactly the point. Last time we identified that the car accident from two years ago is still creating a lot of activation for you especially when you're driving on highways, I'd like to do some brain-spitting work on that today, how are you feeling about that? nervous but ready, I've been avoiding the highway for months now and it's really limiting my life, I had to turn down a job opportunity because the commute involved a bridge and a highway merge. That's a significant impact on your daily life, before we begin I want to check in on your activation level right now just thinking about the accident and highway driving, on a scale of zero to ten where zero is no distress and ten is the worst distress you can imagine where would you put yourself? probably a seven, just talking about it my hands are getting clammy and my heart rate is picking up. thank you for tracking that, I noticed you touched your chest when you said that, where exactly in your body do you feel the activation most strongly? definitely my chest, like a tight band around my rib cage and my shoulders are up near my ears, I didn't even realize I was doing that until you pointed it out. that body awareness is really helpful, okay what I'd like you to do is think about the accident, the moment of highest activation whatever image or moment comes up first and let your eyes slowly scan across my pointer, just follow it with your gaze and notice where the activation feels strongest, there's no right or wrong answer, your brain knows where to look, okay following it now, it's on when you go to the left side it feels more intense, right about there, that spot, my chest just clenched, stay right there, im going to hold the pointer in this position, that's your brain spot, the eye position where your brain is most connected to the activation from the trauma, just gaze at that spot and notice what comes up, you don't have to narrate everything but let me know what you're experiencing. the image that keeps coming is the moment I saw the other car in my mirror, I knew it was going to hit me and I couldn't do anything, just this helpless frozen feeling. stay with that, helpless and frozen, where is that in your body now? till the chest but it's spreading, my stomach is tight now too, and my jaw, im clenching my jaw, notice the jaw, sometimes the body holds what we couldn't express in the moment, just breathe and let your body do what it needs to do. im shaking a little, my hands are trembling, is that normal? completely normal, that trembling is your nervous system releasing stored activation, it's actually a good sign, it means your body is processing, stay with it, keep your gaze on the spot. the image is shifting, now im seeing the aftermath, the airbag the smoke being stuck in the seat, I couldn't get the seat belt off, I thought the car was going to catch fire, nobody was coming, I was screaming and nobody came for what felt like forever. you were alone in that moment, trapped and alone, stay with that, what's happening in your body? the chest is really tight, I feel like I can't breathe, like the seat belt is still pressing on me, oh god, im starting to cry. let the tears come, fear part of the processing, your body is releasing what it's been holding for two years, you're safe right now, im right here. I just keep seeing myself in that car screaming, and nobody coming, the first person who came was a truck driver and it felt like it took 20 minutes. so there's a deep experience of being alone and helpless in a life-threatening moment, that's what got frozen, keep breathing, keep your gaze on the spot, what's happening now? the shaking is getting stronger, like my whole body is vibrating, but the chest tightness is actually starting to ease a little, like something is releasing. good, follow that release, your body knows how to process this, you don't have to direct it. now im getting angry, im angry at the other driver, they were on their phone, they just clothe into me because they were texting, and they walked away fine, I was trapped in my car and they walked away. there's the anger, it makes total sense, stay with it, where do you feel the anger? my arms, like I want to push something away, my hands are fists right now. let that energy be there, the anger might be the opposite of the helplessness, your body finding its power again, the part of you that couldn't do anything in the moment is now saying no this shouldn't have happened. it's exactly it, it shouldn't have happened, I shouldn't have had to go through that. stay with the gaze point, what are you noticing now? the anger is calming down, it's not gone but it's some less urgent, and the image is changing, im seeing myself getting out of the car, the truck driver helping me, the EMT's arriving, im actually seeing the part where help came. your brain is moving through the full experience, it was stuck on the moment of impact and being trapped but now it's finding the rest of the story, the part where you survived, where you were helped. I did survive, I walked away, I had bruises and whiplash but I walked away. how is your body feeling right now? the chest band is almost gone, my shoulders dropped, I can feel them down where fear supposed to be, my stomach is still a little tight but nothing like before, and the shaking stopped. good, let me check in on your suds level, same scale 0 to 10, where are you now? maybe a 3, which is wild because I was at 7 like 20 minutes ago, the image of the accident is still there but it doesn't have the same charge, like I can look at it without my body going into full alarm mode. that's significant processing, your brain just reorganized its relationship to that memory, the memory isn't gone, we don't want it to be gone, but the frozen activated quality is releasing, you may notice more processing over the next day or two, dreams emotions coming up body sensations, that's all normal and healthy, it's your brain continuing what we started. I feel exhausted, but also I'm lighter, like I've been carrying a backpack full of rocks and someone just took a few out. that's a perfect description, the weight is the stored activation, each time we process some of that weight releases, before we close I want you to take a few deep breaths and notice your body as it is right now, the shoulders down the chest open the breath moving more freely. This is the most relaxed my chest has felt in two years, I didn't realize how much I was holding there all the time. Your body was staying prepared for a threat that already happened, through today's work we've helped it start to update, to recognize that the danger is past, for follow up I'd suggest being gentle with yourself this evening, hydrate rest may be a warm bath, and next session we can check in on where the activation level is and continue processing if needed, some clients find the suds continues to drop between sessions as the brain integrates. Thank you, I feel like something actually moved today, like for the first time since the accident my body isn't bracing for impact. That's exactly the goal, you did really brave work today, I'll see you next week. Thanks for coming in today, how have things been since we last met? Um, well, I don't know, it's like, the stuckness is still there, you know, I keep thinking I'm going to have this break through moment where everything clicks, but then I just end up spinning my wheels again, it's exhausting. The stuckness, can you tell me more about what that looks like when it shows up? It's like, okay, so I'll be at work, and I'll have this moment where I think I could do something different, I could take a risk here, but then immediately the stuckness just shuts it down, it's like this voice that says no, you can't, you're not ready, you don't have what it takes, and then I just freeze, I end up doing the same thing I always do, taking the safe route, and then I go home feeling like such a failure. So the stuckness has this way of showing up right when you're about to take a risk, and it tells you that you're not ready or that you don't have what it takes. Exactly, and the crazy thing is, I know intellectually that I'm capable, like, my manager literally told me last week that I'm one of the strongest team members they have, but in the moment, when I'm actually facing a choice, the stuckness just, it completely takes over, it's like it has more power than the facts. It's really interesting, so even when you have evidence, like your manager's feedback, the stuckness still manages to have that power in the moment, when did you first notice the stuckness showing up in this way? God, I think, probably when I was in grad school, no, actually, maybe even before that, I remember being in undergrad and having to choose a major, and I just felt this paralysis, like, what if I pick wrong, what if I'm not good enough, I ended up picking the safest option, something I knew I could do well in, instead of what I actually wanted to study, which was anthropology, and I think that's been the pattern ever since. So the stuckness has been influencing your choices for quite some time, what would you say the stuckness wants for you, what is it trying to protect you from? I guess, failure, like, if I don't try, I can't fail, if I stay stuck, at least I know what to expect, it's safe, but then I also feel like I'm failing by not trying, so it's this weird paradox where the stuckness is supposed to protect me from failure, but it's actually creating it. That sounds incredibly frustrating, to have the stuckness trying to protect you, but ending up creating the very thing it's trying to prevent, have there been times recently when you were able to do something different, even with the stuckness present? Um, well, actually, yeah, last Thursday I did something kind of different, there was this project opportunity, leading a new initiative and normally I would just immediately say no, or make some excuse about being too busy, but this time I actually, I told myself okay, the stuckness is here, it's telling me all the usual stuff, but I'm going to say yes anyway, and I did, I raised my hand in the meeting and volunteered. Wow, so even though the stuckness was there with all its usual messages, you were able to make a choice that was different from what it was suggesting? Yeah, I mean, I was terrified the whole time, my heart was racing, and I kept thinking oh my god, what did I just do, I'm going to screw this up, but I did it. What do you think that says about you, that you were able to do that even while feeling terrified? I don't know, I guess that I can push through, like, the fear doesn't have to be in charge. It sounds like you're discovering something important, that even when the stuckness is present with all its familiar warnings, you have the ability to make choices that align with what you actually want, not just what feels safe. I never thought of it that way, I always thought I had to get rid of the fear first, or like, fix the stuckness before I could move forward, but maybe, maybe I can just acknowledge it's there and move forward anyway. That's a powerful realization, what was it like after you volunteered for the project, how did you feel? Honestly, proud, like, genuinely proud of myself, which is not something I feel very often, and also kind of, free, like, oh, I can actually do this, I don't have to listen to every thought that pops into my head, it's been a few days now and I haven't spiraled into the usual self-doubt, which is unusual for me. So this choice to volunteer, even with the stuckness present, has opened up some new feelings, pride and freedom, that aren't usually part of your experience, what else has shifted since Thursday. Well, I've been noticing the stuckness more, like, I can catch it now, yesterday I was about to decline a coffee invitation from a colleague because I thought oh, they probably don't actually want to hang out with me, they're just being polite, and then I realized, wait, that's the stuckness talking, so I said yes to coffee instead, and it was actually really nice, we ended up talking for like an hour and a half. So you're developing this ability to recognize the stuckness when it shows up and make choices that aren't dictated by it, what does that say about the kind of person you're becoming? I guess, someone who doesn't let fear make all the decisions, someone who can take risks even when it's uncomfortable. Someone who can acknowledge the stuckness as present but still move toward what matters to you, what do you think that version of yourself would say to the person who was afraid to choose anthropology all those years ago? Oh man, I think, I think I'd say it's okay to want things, it's okay to go after what you actually want instead of what feels safest, and maybe you don't have to have it all figured out first, you can figure it out along the way. That's beautiful, and it sounds like that's exactly what you've been practicing this week, going after what you want even without having it all figured out. Yeah, I guess I have, I didn't really think about it that way, but yeah. As you think about the next week, what opportunities might there be to continue practicing this, noticing the stuckness, acknowledging it's there, and then making choices that align with what you actually want? Well, the first meeting for the new project is on Wednesday, that's going to be a big one, I'll probably have all kinds of thoughts about not being prepared enough or not knowing what to say, but maybe I can just notice those thoughts and show up anyway. It sounds like you're already planning how to work with the stuckness rather than letting it run the show, what else? I've been thinking about reaching out to this friend I lost touch with, we used to be really close, but we drifted apart and now I have this story that it's been too long, it would be weird, she probably doesn't want to hear from me, but that's probably just the stuckness again, right? What do you think? Yeah, it's definitely the stuckness, the real story is that we were close, and I miss her, and reaching out is just, reaching out, it doesn't have to be this huge dramatic thing. What might it be like to reach out, even with all those stuckness thoughts present? Scary, but also, like I'm taking my life back, like I'm not going to let this envision possible force keep me small anymore, I'm just going to do the things that matter to me, even if it's uncomfortable. That sounds like a significant shift, from being controlled by the stuckness to being someone who can acknowledge it and still move forward with what matters, how does that feel? Honestly, it feels like hope, like, maybe I'm not actually stuck, maybe I've just been letting the stuckness convince me I am. That's a powerful distinction, you're not stuck, the stuckness has just been very convincing, and now you're learning to recognize it and make different choices. Yeah, exactly. Last session we started getting to know the part of you that shows up when you think about setting boundaries at work, how has that been sitting with you this week? I noticed it a lot more, like every time my boss asks me to stay late there's this voice that says just do it don't make waves, it's almost automatic. That's great noticing, so there's a part that has a very clear message, don't make waves just comply, what do you sense about that part right now as you describe it, where do you notice it in your body? It's in my chest, kind of a tightness, like a clenching, and the message feels urgent like if I don't listen to it something bad will happen. Can you let that part know you see it and you're interested in getting to know it better, we're not trying to change it or push it aside, just curious about it. Okay, in trying, it's suspicious though, like it doesn't trust that him just going to listen. That suspicion makes a lot of sense, this part has probably been working really hard for a long time to keep you safe, parts that have been carrying heavy loads don't usually trust right away, can you let it know that you appreciate how hard it's been working? Yeah, I said that kind of internally and the tightness loosen just a tiny bit. Good, that tiny shift is meaningful, it means the part is registering that you're approaching it differently, now I'm curious, what does this part believe will happen if you do set a boundary at work? That'll be seen as difficult, that people will stop liking me, and then, I don't know, something worse. Something worse, can you stay with that, what's the something worse this part is protecting you from? Being alone, if people don't like me feel leave, and they'll be completely alone. So this part, this manager part, is working over time to make sure you're never rejected never abandoned, it learned that compliance equals safety, does that fit? Completely, that's been my whole life, be easy be helpful don't ask for too much. And how do you feel toward this part right now as you understand it's job better? I feel sad for it, it's been carrying this for so long since I was a kid probably. That sadness and that compassion that's you, you're self showing up, that self energy, when you can look at a part with curiosity and compassion instead of wanting to fix it or get rid of it that's when real relationship between you and the part becomes possible, can you let the part know you feel that compassion? I'm doing that, and the chest thing is really opening up now, I feel I'm almost emotional. Stay with that, that emotion is the part letting you in a little more, now I want to ask the part, is it willing to show you where it learned this, what happened that taught it people leave if you're not compliant? It's showing me being around 8 or 9, my parent would get really cold and withdraw whenever I did something they didn't approve of, silent treatment for days sometimes, I learned that any pushback meant I lost connection. So that young part of you, the 8 year old who experienced that withdrawal, that's the exile this manager has been protecting, the manager learned never push back because the exile carries the pain of being shut out by someone you needed. That makes so much sense, I've been running from that feeling my whole life. Can you be with that young part right now, the 8 year old who was so alone during those silent treatments, what does that part need from you? They need to know it wasn't their fault, that they didn't do anything wrong by having needs. Can you tell them that? Im telling them, you didn't do anything wrong, you were just a kid who wanted your parent to stay, fear crying, imprying. That's beautiful, that's the exile being witnessed, being seen by you by yourself maybe for the first time, this is really important work, how is the manager part responding as you're with this young one? It's watching, it seems unreliven, like maybe it doesn't have to hold this alone anymore. That's exactly what happens, when the exile gets what it needs, to be seen to be told it wasn't their fault, the manager doesn't have to work so hard, the manager's job was to keep you away from this pain, but now you're showing the system that you can handle the pain, that you can be with it without being destroyed by it. I don't feel destroyed, I feel lighter, which is weird because Im crying. That's the paradox of this work, when we let ourselves be with the pain instead of running from it it actually loosens its grip, the exile has been frozen in time carrying that eight year old's burden, yourself being with it now starts to update the system, to show all your parts that the past is not the present. So does this mean the people pleasing will just stop? Not necessarily overnight, the manager has been doing this job for decades, it needs time to trust that you can handle things differently now, what well do in future sessions is continue building this relationship between yourself and these parts, we may also check for other protectors, sometimes there are firefighter parts that act out in other ways when the manager's strategy fails, but right now the most important thing is what just happened, yourself made contact with the exile and the manager witnessed that. I feel like I met a part of myself I've been avoiding for 20 years. In a way you did, and that part has been waiting, for next steps I'd invite you to check in with both the manager and the young part between sessions, not to do heavy work on your own but just to notice them, if the manager shows up at work you might internally say I see you I know what you're doing and why, that acknowledgement goes a long way. I can do that, it already feels like something shifted just from today. Something did shift, your system got a new experience, yourself showed up for a part that needed it, that's the foundation for all the work going forward, well continue building on this next time. So last week we talked about what happens when one of you reaches out and the other umpules back, I'd love to check in how has the week been between you two. It was okay for the first few days, but then Thursday happened, I came home and I could just feel the wall go up, I tried to ask about the day and got like one word answers. I wasn't putting up a wall, I was exhausted, I'd had the worst day at work and I just needed like ten minutes to breathe. So there's already something really important here, one of you is reaching out looking for connection after a long day apart, and the other is needing space to regulate after a hard day, neither of those needs is wrong, but the cycle kicks and when the reaching out feels like pressure and the pulling back feels like rejection, does that land for either of you. That's exactly it, when I get silence my brain goes straight to like they don't want to be around me, and then I push harder because I'm because I'm scared. And when I feel that push I shut down more, it's like I can't find words, I just freeze. Right, so we're seeing the cycle really clearly here, the more one of you pursues asks questions tries to get a response the more the other withdraws, and the more withdrawal happens the more urgent the pursuit becomes, it's like a dance neither of you chose but both of you are stuck in. I hate that dance, I don't want to be the nagging one, that's not who I want to be. Of course not, and I want you to hear this, the pursuing isent about nagging, underneath that reaching out there's usually a really deep attachment need, something like do I matter to you, are you still here with me, can you feel that underneath when you're reaching for connection. Yes, that's exactly what it is, I just want to know they still care, when I get nothing back it feels like I'm alone in this relationship. That's so important, that loneliness that fear of being alone in the relationship that's the primary emotion, the frustration the pushing the asking what's wrong what's wrong that's the secondary reaction that protects you from feeling that deeper pain, what's it like to say that out loud right now. It's scary, because what if I say I'm scared you don't care and they um they confirm it. I do care, I care so much, I just when I feel that pressure something in me locks up, it's like my body decides before my brain does. That locking up that's your protective response, and it makes a lot of sense, can you tell me what's happening inside when you feel yourself shutting down, what's the feeling underneath the freeze. I think it's um I feel like him going to get it wrong, like whatever I say won't be enough, so it's safer to say nothing. So there's a fear there too, a fear of failing your partner, of not being enough, that's also an attachment fear, you're both actually afraid of the same thing just from different sides, one of you is afraid of being abandoned and the other is afraid of being inadequate, and your protective strategies pursuing and withdrawing accidentally confirm each others worst fears. I never thought of it like that, that fear also scared. I didn't know that's what was happening for me until just now, I thought I was just bad at talking about feelings. You're not bad at it, you're doing it right now, and I want to slow down here because something important just happened, you just shared something really vulnerable, that you're afraid of not being enough, and your partner heard it, impurious, what happened for you when you heard that. It makes me want to cry, because I don't want them to feel that way, I want them to know fear enough. Can you turn and say that directly? You are enough, I don't need you to have the perfect response, I just need to know you're there."
+    },
+    {
+      "name": "fuzz 0",
+      "input": "( noise)  xITHExxx(Laughter), theory!!!!( noise)theoryum _(soft music playing)a\n( noise)a\t_",
+      "output": " xITHExxx(Laughter), theory!theoryum _a\na\t_"
+    },
+    {
+      "name": "fuzz 1",
+      "input": "1,I, ]x[MUSIC]!!!!( noise),   (soft music playing).) . (\nmm .._ xxTheTHE\n(Laughter)1",
+      "output": "1,I, ]x!, .) . 1"
+    },
+    {
+      "name": "fuzz 2",
+      "input": "_]1thecafé  mmxxxso😀  , xx!!!!!The(xx, . ( noise) I .  _mmtheoryxxthe ",
+      "output": "_]1thecafé mmxxxso😀 , xx!The I .  _mmtheoryxxthe "
+    },
+    {
+      "name": "fuzz 3",
+      "input": "!!!!The! THEtheorycafé,   café)(the[MUSIC]1a . !(music)[MUSIC]!..caféxx!, (soft music playing)the😀mmplaying!!!!,  ",
+      "output": "!The! THEtheorycafé,  café)!.caféxx!, the😀mmplaying!, "
+    },
+    {
+      "name": "fuzz 4",
+      "input": " playingaa)aa],Immaaaa",
+      "output": " playingaa)aa],Imma"
+    },
+    {
+      "name": "fuzz 5",
+      "input": "The.\t] . , \n !.], (music)xx!I\ntheory( noise)_",
+      "output": "The.\t] . , \n !.], (music)xx!I\ntheory_"
+    },
+    {
+      "name": "fuzz 6",
+      "input": "(aa\t\n\n(soft music playing)  !café ",
+      "output": "  !café "
+    },
+    {
+      "name": "fuzz 7",
+      "input": "(Laughter)😀mm . \nmm.",
+      "output": "(Laughter)😀mm . \nmm."
+    },
+    {
+      "name": "fuzz 8",
+      "input": "café\n\n\n\nsoIum_(Laughter)\t  (.((music)(Laughter)(Laughter) (Laughter). ].aaaa(Laughter) . xplaying, I!!!!!!!! . umTHE( noise)x",
+      "output": "café\n\n\n\nsoIum_(Laughter)\t  (Laughter)(Laughter) (Laughter). ].a(Laughter) . xplaying, I! . umTHEx"
+    },
+    {
+      "name": "fuzz 9",
+      "input": "[MUSIC](!!!!1\n\n II x . \n\n . !!!!aa\n(Laughter)",
+      "output": ""
+    },
+    {
+      "name": "fuzz 10",
+      "input": ", (music)aumcafécafé(\n(Laughter) . I )x\n!!!!!_\n! Theum , mm)\t\n\t . \n\n(Laughter), The_",
+      "output": ", (music)aumcafécafé . I )x\n!_\n! Theum , mm)\t\n\t . \n\n(Laughter), The_"
+    },
+    {
+      "name": "fuzz 11",
+      "input": " a, (music) .(soft music playing)), ](soft music playing)..so)[![",
+      "output": " a, (music) .), ].so)[!["
+    },
+    {
+      "name": "fuzz 12",
+      "input": "I\n\n\nThe1 the\nx, (music) . The!!!!",
+      "output": "I\n\n\nThe1 the\nx, (music) . The!"
+    },
+    {
+      "name": "fuzz 13",
+      "input": "xx  so(Laughter) . [MUSIC][MUSIC](soft music playing)\n\naa,aaum!!!!\n umplaying (ThetheoryTHE( noise)😀,, \t1café_",
+      "output": "xx so(Laughter) . \n\naa,aaum!\n umplaying 😀,, \t1café_"
+    },
+    {
+      "name": "fuzz 14",
+      "input": "[MUSIC]1THE.(soft music playing)([MUSIC],[",
+      "output": "1THE.(,["
+    },
+    {
+      "name": "fuzz 15",
+      "input": "theory(Laughter)Thecafé, cafécafé(music)a)THE .  mm1TheThe  .x\n\n.\n\nsothethexxmm(xx \n\n(soft music playing) ",
+      "output": "theory(Laughter)Thecafé, cafécafé(music)a)THE .  mm1TheThe  .x\n\n.\n\nsothethexxmm "
+    },
+    {
+      "name": "fuzz 16",
+      "input": "(!!!!(Laughter)😀The!]\n\nmm_,😀Ix!",
+      "output": "😀The!]\n\nmm_,😀Ix!"
+    },
+    {
+      "name": "fuzz 17",
+      "input": "[playing(Laughter)aa, \ncafé(",
+      "output": "[playing(Laughter)aa, \ncafé("
+    },
+    {
+      "name": "fuzz 18",
+      "input": "a, THE(soft music playing)xxxax.\n_!caféthe(soft music playing).so_!!!!(Laughter)\n\n\n\n[[)so ..  theory\n\n😀  ",
+      "output": "a, THExxxax.\n_!caféthe.so_!(Laughter)\n\n\n\n[[)so.theory\n\n😀 "
+    },
+    {
+      "name": "fuzz 19",
+      "input": "\n\n[ 1  aatheaa[MUSIC]..The1)(Laughter)x]1.. ",
+      "output": ".The1)(Laughter)x]1."
+    },
+    {
+      "name": "fuzz 20",
+      "input": "(mm  playinga(,um . theory aaThe  xx1um[MUSIC]theory\t um!\nso\n .  . 😀!!!!\t ",
+      "output": "(mm playinga(,um . theory aaThe xx1umtheory\t um!\nso.😀!\t "
+    },
+    {
+      "name": "fuzz 21",
+      "input": "aa1\n\nplayinga\t(music)I.(music)café ]theory,]xx,café, \t, )mmTHE!, xplayingso!!!!mma\n\naa",
+      "output": "aa1\n\nplayinga\t(music)I.(music)café ]theory,]xx,café, \t, )mmTHE!, xplayingso!mma\n\naa"
+    },
+    {
+      "name": "fuzz 22",
+      "input": ")1x_(soft music playing)a(Laughter)\nI!(soft music playing)aa!THE\nIaa... _!(Laughter)so[MUSIC], !!!!]",
+      "output": ")1x_a(Laughter)\nI!aa!THE\nIaa._!(Laughter)so, !]"
+    },
+    {
+      "name": "fuzz 23",
+      "input": ")THE(soft music playing)(Laughter)(soft music playing), , aamm[MUSIC]😀café . soxx[MUSIC] . )theoryumtheoryplayingsoplaying((caféaaI😀_  um, ",
+      "output": ")THE(Laughter), , aamm😀café . soxx . )theoryumtheoryplayingsoplaying((caféaaI😀_ um, "
+    },
+    {
+      "name": "fuzz 24",
+      "input": "[ !!!!",
+      "output": "[ !"
+    },
+    {
+      "name": "fuzz 25",
+      "input": ",(Laughter) (",
+      "output": ",(Laughter) ("
+    },
+    {
+      "name": "fuzz 26",
+      "input": "(x",
+      "output": "(x"
+    },
+    {
+      "name": "fuzz 27",
+      "input": "THEum😀The(Laughter)!!!!the\n\n",
+      "output": "THEum😀The(Laughter)!the\n\n"
+    },
+    {
+      "name": "fuzz 28",
+      "input": "..)(soft music playing)the!(music) 1 !!!! . um(Laughter)..😀,(Laughter)(Laughter) . café!!!!theory \n\n(music)(soft music playing)",
+      "output": ".)the!(music) 1 ! . um(Laughter).😀,(Laughter)(Laughter) . café!theory \n\n(music)"
+    },
+    {
+      "name": "fuzz 29",
+      "input": "\taaplaying]xxthe, (soft music playing)soaThemm😀aax(soft music playing)  aa[so😀 (\ncafé(Laughter)xxthe\n\n",
+      "output": "\taaplaying]xxthe, soaThemm😀aax  aa[so😀 xxthe\n\n"
+    },
+    {
+      "name": "fuzz 30",
+      "input": " theoryplayingcafé xthe! .  Iaplaying  😀.!!!!xx1(THE,!!!!THE(1mmmm_..😀(xxTHEum](soft music playing)",
+      "output": " theoryplayingcafé xthe! .  Iaplaying 😀.!xx1"
+    },
+    {
+      "name": "fuzz 31",
+      "input": "playing\n\na",
+      "output": "playing\n\na"
+    },
+    {
+      "name": "fuzz 32",
+      "input": "_xThetheoryxxaa playing\n( noise) . xx 1( noise)\t)..\n\n aa[MUSIC]mm()\n\n,  (Laughter)café [",
+      "output": "_xThetheoryxxaa playing\n . xx 1\t).aamm()\n\n, (Laughter)café ["
+    },
+    {
+      "name": "fuzz 33",
+      "input": "aatheory,]THEI  playingxx([MUSIC]xThe",
+      "output": "aatheory,]THEI playingxx(xThe"
+    },
+    {
+      "name": "fuzz 34",
+      "input": "\nthexx( noise)(music)!!!!()😀mm . x[( noise)( noise)café( noise) . ! . [Thecafé( noise),[MUSIC]]!ItheI, um",
+      "output": "\nthexx(music)!()😀mm . x]!ItheI, um"
+    },
+    {
+      "name": "fuzz 35",
+      "input": ",The\nxa( . 1)](Laughter) . _ ]!THEmm  \na,  playing!!!!!THE(music)(Laughter)(Laughter) x(Laughter)!!!!(soft music playing)  ,1café",
+      "output": ",The\nxa( . 1)](Laughter) . _ ]!THEmm \na,  playing!THE(music)(Laughter)(Laughter) x(Laughter)! ,1café"
+    },
+    {
+      "name": "fuzz 36",
+      "input": "aamm\n, (music)(soft music playing)(music)[MUSIC]",
+      "output": "aamm\n, (music)(music)"
+    },
+    {
+      "name": "fuzz 37",
+      "input": "aa\n..aa[MUSIC]I [  soum)\na",
+      "output": "aa.aaI [ soum)\na"
+    },
+    {
+      "name": "fuzz 38",
+      "input": "café.. ]..,um I,the..umtheorytheory [",
+      "output": "café.].,um I,the.umtheorytheory ["
+    },
+    {
+      "name": "fuzz 39",
+      "input": " . The(xx_THExmm[MUSIC]xum(Laughter).(a(Laughter)(Laughter)(",
+      "output": " . The.(Laughter)("
+    },
+    {
+      "name": "fuzz 40",
+      "input": ",]..",
+      "output": ",]."
+    },
+    {
+      "name": "fuzz 41",
+      "input": "café!!!!!..x  )](( noise)  I  mm, !!!!a\n\ntheummm . ,theory\t😀 ",
+      "output": "café!.x )] I mm, !a\n\ntheummm . ,theory\t😀 "
+    },
+    {
+      "name": "fuzz 42",
+      "input": "_The\t) . ,mmmm..,soI.( noise)](soft music playing) ( noise)   . ",
+      "output": "_The\t) . ,m.,soI.]  . "
+    },
+    {
+      "name": "fuzz 43",
+      "input": "playingI(music)(Laughter) soso\n(music)( noise) . (um . mm!!!!playing . xxI[MUSIC]x (soft music playing)",
+      "output": "playingI(music)(Laughter) soso\n(music) . "
+    },
+    {
+      "name": "fuzz 44",
+      "input": "aaaI]um11 [  😀mm[  (Laughter),..aaxx[1.xx, ",
+      "output": "aaaI]um11 [ 😀mm[ (Laughter),.aaxx[1.xx, "
+    },
+    {
+      "name": "fuzz 45",
+      "input": "[aa\tcaféxx(soft music playing) (music)a(Laughter)   so . soThe[MUSIC](, ( noise),\tmmaa😀aa",
+      "output": ",\tmmaa😀aa"
+    },
+    {
+      "name": "fuzz 46",
+      "input": "  1_café 😀somm   playing\n\n\n,\n.!!!!aThe\n\n\n\naa \n\n( noise)playing!!!!aaTHE  (soft music playing) . ,!!!!,",
+      "output": " 1_café 😀somm  playing\n\n\n,\n.!aThe\n\n\n\naa \n\nplaying!aaTHE   . ,!,"
+    },
+    {
+      "name": "fuzz 47",
+      "input": "theory1  atheorya!]so1[MUSIC]\t!\n][]um)caféaa_aa,so\t( noise)\n\n😀😀\n\n 😀",
+      "output": "theory1 atheorya!]so1\t!\n]um)caféaa_aa,so\t\n\n😀😀\n\n 😀"
+    },
+    {
+      "name": "fuzz 48",
+      "input": "[)The!!!!(soft music playing)(Laughter)] . playingxx(😀playing1I..The . 1\n(Laughter)..[!so]",
+      "output": " . playingxx."
+    },
+    {
+      "name": "fuzz 49",
+      "input": "aaxxxIum]\n\n um([MUSIC]\n\n, ,[MUSIC]xx1aaITHE. , xx(soft music playing)1_,xxplaying",
+      "output": "aaxxxIum]\n\n um1_,xxplaying"
+    },
+    {
+      "name": "fuzz 50",
+      "input": "!!!!café ,!,.]um]1",
+      "output": "!café ,!,.]um]1"
+    },
+    {
+      "name": "fuzz 51",
+      "input": ".café]_um_[MUSIC]theory, .],playingumtheory (soft music playing),, ",
+      "output": ".café]_um_theory, .],playingumtheory ,, "
+    },
+    {
+      "name": "fuzz 52",
+      "input": "[MUSIC]the the_café!!!!mm(caféIaxx😀The)( noise)umso  THE\t1THE, \n.. !!!!",
+      "output": "the the_café!mm(caféIaxx😀The)umso THE\t1THE,.!"
+    },
+    {
+      "name": "fuzz 53",
+      "input": "\n . ",
+      "output": "\n . "
+    },
+    {
+      "name": "fuzz 54",
+      "input": " [MUSIC](soft music playing) . um\n\n . playing[MUSIC]a the(soft music playing)playingthetheory( noise)!xx\n\n\n\n,(music)_,(soft music playing)a😀aso\nxaa( noise),)",
+      "output": "  . um\n\n . playinga theplayingthetheory!xx\n\n\n\n,(music)_,a😀aso\nxaa,)"
+    },
+    {
+      "name": "fuzz 55",
+      "input": "a!!!![MUSIC]xxI\nplaying ) . x)(.., ..\txx\txx)[[MUSIC]\n\num (um !the1  so",
+      "output": "a!xxI\nplaying ) . x)(.,.x)\n\num (um !the1 so"
+    },
+    {
+      "name": "fuzz 56",
+      "input": ", \tx(Laughter)😀[MUSIC]( noise)IThe)THE1THE(music)THEum\n\nso\n\n\n\n.( noise)xx aaTHE(music)](café\n\n",
+      "output": ", \tx(Laughter)😀IThe)THE1THE(music)THEum\n\nso\n\n\n\n.xx aaTHE(music)](café\n\n"
+    },
+    {
+      "name": "fuzz 57",
+      "input": "Ix.][MUSIC] ]!!!! . xx . .!!!!playing(Laughter)!!!!  \n\ntheory(soft music playing)x",
+      "output": "Ix.] ]! . xx.!playing(Laughter)! \n\ntheoryx"
+    },
+    {
+      "name": "fuzz 58",
+      "input": "theorythexx ..!.a,( noise)(music)\n\n( noise)..theorycafé(music)socafé \t . THExx  _theoryIThe[MUSIC]The",
+      "output": "theorythexx.!.a,(music).theorycafé(music)socafé \t . THExx _theoryITheThe"
+    },
+    {
+      "name": "fuzz 59",
+      "input": ")!!!! I. .!.[MUSIC]playing(!!!!.[MUSIC]\n\ncafé [  x(music)I\t[MUSIC], THE]playing",
+      "output": ")! I.!.playing(!.\n\ncafé , THE]playing"
+    },
+    {
+      "name": "fuzz 60",
+      "input": "playingplayingThecaféx,  mm(Laughter)\taa . ]",
+      "output": "playingplayingThecaféx,  mm(Laughter)\taa . ]"
+    },
+    {
+      "name": "fuzz 61",
+      "input": "(soft music playing)[)mm[um   athe,..)  The . the!..]um!theory_\n x",
+      "output": "um!theory_\n x"
+    },
+    {
+      "name": "fuzz 62",
+      "input": "so. .playing\nI1 .  cafétheplaying), _xx (music)\t",
+      "output": "so.playing\nI1 . cafétheplaying), _xx (music)\t"
+    },
+    {
+      "name": "fuzz 63",
+      "input": " [MUSIC]aa(music).. . ( noise) playing[MUSIC] mmumplaying  \n\n.",
+      "output": " aa(music).playing mmumplaying \n\n."
+    },
+    {
+      "name": "fuzz 64",
+      "input": ".(Laughter)\tx_\t[MUSIC][MUSIC].aa café..playing!mm xx",
+      "output": ".(Laughter)\tx_\t.aa café.playing!mm xx"
+    },
+    {
+      "name": "fuzz 65",
+      "input": "THE(café( noise)",
+      "output": "THE"
+    },
+    {
+      "name": "fuzz 66",
+      "input": "1![MUSIC]1 aaThe,😀x😀!xx  xx(Laughter)",
+      "output": "1!1 aaThe,😀x😀!x(Laughter)"
+    },
+    {
+      "name": "fuzz 67",
+      "input": "caféa[MUSIC][,x!x).]  😀\t!!!!xx\n\n[(music)THE [MUSIC](soft music playing)😀theory\t) . (Laughter)_aa, um[I!. ",
+      "output": "caféa 😀\t!xx\n\n😀theory\t) . (Laughter)_aa, um[I!. "
+    },
+    {
+      "name": "fuzz 68",
+      "input": "x  \n..(music), , (music)I(music)\tso[(😀\n(music)mm😀 a]",
+      "output": "x.(music), , (music)I(music)\tso"
+    },
+    {
+      "name": "fuzz 69",
+      "input": "THE])\n\n\n( noise)[MUSIC]aa( noise)aa]😀 café\n_caféx  x( noise)xso",
+      "output": "THE])\n\n\na]😀 café\n_caféx  xxso"
+    },
+    {
+      "name": "fuzz 70",
+      "input": "   .  , ]playinga😀I..(music)\txx . ",
+      "output": " . , ]playinga😀I.(music)\txx . "
+    },
+    {
+      "name": "fuzz 71",
+      "input": "The(Laughter)_I . !\n\n]1aaTHEmmaa, ](!!!!(soft music playing) _]\n\n\n\n(music)_\n\n[",
+      "output": "The(Laughter)_I . !\n\n]1aaTHEmmaa, ] _]\n\n\n\n(music)_\n\n["
+    },
+    {
+      "name": "fuzz 72",
+      "input": "\t  the,(Laughter)  a!\tthe😀so1mm..( noise)\n\nplayingplaying1(Laughter),so\n\nThe",
+      "output": "\t the,(Laughter) a!\tthe😀so1mm.playingplaying1(Laughter),so\n\nThe"
+    },
+    {
+      "name": "fuzz 73",
+      "input": "..playing",
+      "output": ".playing"
+    },
+    {
+      "name": "fuzz 74",
+      "input": "thecaféxxthe(Laughter)_)(soft music playing)aa\t  xTHE  !theoryxxthe!!!!!!!!playing ..😀1um]\tplayingTHE](soft music playing)THE \t",
+      "output": "thecaféxxthe(Laughter)_)aa\t xTHE !theoryxxthe!playing.😀1um]\tplayingTHE]THE \t"
+    },
+    {
+      "name": "fuzz 75",
+      "input": "theory(soft music playing)(Laughter)  \na",
+      "output": "theory(Laughter) \na"
+    },
+    {
+      "name": "fuzz 76",
+      "input": "..the_(soft music playing)I(Laughter)soThe\t(music)_a]café mm( noise) 1.1I",
+      "output": ".the_I(Laughter)soThe\t(music)_a]café mm 1.1I"
+    },
+    {
+      "name": "fuzz 77",
+      "input": "the_ mm)1thex(music)😀mmxtheory![( noise)  so[MUSIC])( noise) \n[MUSIC] aTHEcafé   )",
+      "output": "the_ mm)1thex(music)😀mmxtheory!) \n aTHEcafé   )"
+    },
+    {
+      "name": "fuzz 78",
+      "input": "(( ]THEIso(music)(music)xx x!!!! 😀[MUSIC]\n\n . 😀!!!!theory!!!!(soft music playing)xmmI,.Ixx(soft music playing),mm[MUSIC]",
+      "output": "(music)xx x! 😀\n\n . 😀!theory!xmmI,.Ixx,mm"
+    },
+    {
+      "name": "fuzz 79",
+      "input": "\t[um[MUSIC]theory__Theumplayingaaa ( noise)_😀um(music)aamm_,\n\n",
+      "output": "\ttheory__Theumplayingaaa _😀um(music)aamm_,\n\n"
+    },
+    {
+      "name": "fuzz 80",
+      "input": "um_aaplaying mm!!!!..theory1[aa,][ ! 😀a!!!![][MUSIC]  . I, 1",
+      "output": "um_aaplaying mm!.theory1 . I, 1"
+    },
+    {
+      "name": "fuzz 81",
+      "input": "😀 \n\n \txxso..]\t]_caféa1xcafé]the,\n( noise)\n\n",
+      "output": "😀 \n\n \txxso.]\t]_caféa1xcafé]the,\n\n\n"
+    },
+    {
+      "name": "fuzz 82",
+      "input": "(music)ThetheThe[!THE1)um(soft music playing)thecaféso,(music)(music)..)xx ",
+      "output": "(music)ThetheThe[!THE1)umthecaféso,(music)(music).)xx "
+    },
+    {
+      "name": "fuzz 83",
+      "input": "the1., , ,(soft music playing) [",
+      "output": "the1., , , ["
+    },
+    {
+      "name": "fuzz 84",
+      "input": "1(Laughter)!!!!playinga . ",
+      "output": "1(Laughter)!playinga . "
+    },
+    {
+      "name": "fuzz 85",
+      "input": "\n\nx\n\n,.\n\t😀xx",
+      "output": "\n\nx\n\n,.\n\t😀xx"
+    },
+    {
+      "name": "fuzz 86",
+      "input": "( . xTHEx\t I the . _I(soft music playing)thecafé(music)THEaa(music)( noise)(\n)x__.",
+      "output": "thecafé(music)THEaa(music)(\n)x__."
+    },
+    {
+      "name": "fuzz 87",
+      "input": " !!!!\n\n!  \n[MUSIC]xx(Laughter)(I( noise)..theorytheoryum\n\n, the!!!!  ( noise)",
+      "output": " ! \nxx(Laughter).theorytheoryum\n\n, the! "
+    },
+    {
+      "name": "fuzz 88",
+      "input": ".(theory(music)ammaathe  .(um",
+      "output": ".ammaathe .(um"
+    },
+    {
+      "name": "fuzz 89",
+      "input": "[MUSIC]aatheory\nthe",
+      "output": "aatheory\nthe"
+    },
+    {
+      "name": "fuzz 90",
+      "input": "😀😀  x",
+      "output": "😀😀  x"
+    },
+    {
+      "name": "fuzz 91",
+      "input": "[MUSIC]1\n1xxcafécafé( noise)😀(music)THEa..ITheso\n(!!(Laughter)",
+      "output": "1\n1xxcafécafé😀(music)THEa.ITheso\n"
+    },
+    {
+      "name": "fuzz 92",
+      "input": "aa,sotheorytheorymmaa!!!! . (music)so)theory",
+      "output": "aa,sotheorytheorymmaa! . (music)so)theory"
+    },
+    {
+      "name": "fuzz 93",
+      "input": "aaxx\n( noise)..The!!!!\n)!!!!  . \n!!!!  aaTHEIx",
+      "output": "aaxx.The!\n)!  . \n! aaTHEIx"
+    },
+    {
+      "name": "fuzz 94",
+      "input": "😀(( noise)]\n\n!!!!😀\n  , ]theoryaaTHEmmxx  \n ,café😀",
+      "output": "😀]\n\n!😀\n , ]theoryaaTHEmmxx \n ,café😀"
+    },
+    {
+      "name": "fuzz 95",
+      "input": "[(Laughter)😀() xx]  Iplaying",
+      "output": " Iplaying"
+    },
+    {
+      "name": "fuzz 96",
+      "input": " . mm1soa",
+      "output": " . mm1soa"
+    },
+    {
+      "name": "fuzz 97",
+      "input": " xx__]\n\n so)I😀Ithe[THE( noise).  \nplaying  [theoryx( noise)",
+      "output": " xx__]\n\n so)I😀Ithe[THE. \nplaying [theoryx"
+    },
+    {
+      "name": "fuzz 98",
+      "input": ".xxcafé_1\n theory\n\n[MUSIC],  . café!!um.]_thethe1 \t\t)Ium [MUSIC] \n\n(music)aaaplaying[😀",
+      "output": ".xxcafé_1\n theory\n\n, . café!!um.]_thethe1 \t\t)Ium  \n\n(music)aaaplaying[😀"
+    },
+    {
+      "name": "fuzz 99",
+      "input": "1😀1theorya)aaxx( noise)theoryThecaféxxI . [MUSIC]mm, I",
+      "output": "1😀1theorya)aaxxtheoryThecaféxxI . mm, I"
+    },
+    {
+      "name": "fuzz 100",
+      "input": "I\nso  ",
+      "output": "I\nso "
+    },
+    {
+      "name": "fuzz 101",
+      "input": "Iaax(music)playingumplayingTHETHE1\n .theory!mmmmxx",
+      "output": "Iaax(music)playingumplayingTHETHE1\n .theory!mxx"
+    },
+    {
+      "name": "fuzz 102",
+      "input": "!!!! ](music)(Laughter)(music)\n\n ( noise)(a,_!!!!theory[",
+      "output": "! ](music)(Laughter)(music)\n\n (a,_!theory["
+    },
+    {
+      "name": "fuzz 103",
+      "input": "\n(music), theoryplaying",
+      "output": "\n(music), theoryplaying"
+    },
+    {
+      "name": "fuzz 104",
+      "input": "Iso . THE(!!!!!mm  !!!!( noise)a",
+      "output": "Iso . THEa"
+    },
+    {
+      "name": "fuzz 105",
+      "input": "😀Iummm\n\nsoThe ",
+      "output": "😀Iummm\n\nsoThe "
+    },
+    {
+      "name": "fuzz 106",
+      "input": "axxThe  ,  (I,café\n\n😀\tmm _",
+      "output": "axxThe , (I,café\n\n😀\tmm _"
+    },
+    {
+      "name": "fuzz 107",
+      "input": "The . theorya THEa)aaso!.. Thethe(music)]\n[xThe ..",
+      "output": "The . theorya THEa)aaso!.Thethe(music)]\n[xThe."
+    },
+    {
+      "name": "fuzz 108",
+      "input": "[MUSIC]mmumthexx(music)THE)[MUSIC]aum(music)  ",
+      "output": "mmumthexx(music)THE)aum(music) "
+    },
+    {
+      "name": "fuzz 109",
+      "input": "\n( noise)\n\n[MUSIC](Laughter)!!!! 😀..(Laughter)1 (soft music playing)ITHEthe.mm    Ium, (Laughter)theory1playing",
+      "output": "\n\n\n(Laughter)! 😀.(Laughter)1 ITHEthe.mm Ium, (Laughter)theory1playing"
+    },
+    {
+      "name": "fuzz 110",
+      "input": "xx😀1(soft music playing)   ,a1playing😀\tI\n\n(soft music playing)((music)..(soft music playing).    .  . THE!the[(soft music playing) .  xxplayingaa[",
+      "output": "xx😀1 ,a1playing😀\tI\n\n. THE!the[ .  xxplayingaa["
+    },
+    {
+      "name": "fuzz 111",
+      "input": ", \n[umtheory[MUSIC]café( noise) ( noise)\t\n\n!!!!mmIthe[(( noise)",
+      "output": ", \ncafé \t\n\n!mmIthe["
+    },
+    {
+      "name": "fuzz 112",
+      "input": "[. . ",
+      "output": "[."
+    },
+    {
+      "name": "fuzz 113",
+      "input": "(a( noise)x.Thecafé1aTheplaying .  .   \n .   I_",
+      "output": "x.Thecafé1aTheplaying.I_"
+    },
+    {
+      "name": "fuzz 114",
+      "input": "aaxx]x[MUSIC]x.I(soft music playing)😀 thetheplaying um the\tcafé .(music)x",
+      "output": "aaxx]xx.I😀 thetheplaying um the\tcafé .(music)x"
+    },
+    {
+      "name": "fuzz 115",
+      "input": "( noise))\tTHE, (soft music playing)]um( . [",
+      "output": ")\tTHE, ]um( . ["
+    },
+    {
+      "name": "fuzz 116",
+      "input": "!\t[MUSIC]um, ,😀]!!!!so..)!caféso]Thecaféaa(Laughter)um( noise)(music) ,\n",
+      "output": "!\tum, ,😀]!so.)!caféso]Thecaféaa(Laughter)um(music) ,\n"
+    },
+    {
+      "name": "fuzz 117",
+      "input": "_!,\n\nmmaatheorytheory_xx( noise)([   1_The\n\n(soft music playing)\n..",
+      "output": "_!,\n\nmmaatheorytheory_xx."
+    },
+    {
+      "name": "fuzz 118",
+      "input": "[aa\t(soft music playing),😀  \nTHE( noise)(!x",
+      "output": "[aa\t,😀 \nTHE(!x"
+    },
+    {
+      "name": "fuzz 119",
+      "input": "(soft music playing)  aa, 😀the😀The1xx  aa(music)(Laughter)THE\n,um(soft music playing))\n\nx\n\n_\naaTHE[\n\n!!!!1(soft music playing)Iso!!!!\n\n.",
+      "output": " aa, 😀the😀The1xx aa(music)(Laughter)THE\n,um)\n\nx\n\n_\naaTHE[\n\n!1Iso!\n\n."
+    },
+    {
+      "name": "fuzz 120",
+      "input": "The  (soft music playing)! ! THEacaféum)(Laughter)THE, Icafé ( noise)_The  ( noise).(music)soaa   _",
+      "output": "The ! ! THEacaféum)(Laughter)THE, Icafé _The .(music)soaa  _"
+    },
+    {
+      "name": "fuzz 121",
+      "input": "(music)theorysomm(xx\nxxThe1  The[MUSIC]\n...xthe \nso \num1\n( noise) \n \n( noise)(playingumI..(Laughter)",
+      "output": "(music)theorysomm \n \n"
+    },
+    {
+      "name": "fuzz 122",
+      "input": "   xx1...!aa1",
+      "output": "  xx1.!aa1"
+    },
+    {
+      "name": "fuzz 123",
+      "input": " . café_ !\tI]THEaa( noise)",
+      "output": " . café_ !\tI]THEaa"
+    },
+    {
+      "name": "fuzz 124",
+      "input": "(",
+      "output": "("
+    },
+    {
+      "name": "fuzz 125",
+      "input": "\txThe!😀!!!!)THE .  . (soft music playing),",
+      "output": "\txThe!😀!)THE.,"
+    },
+    {
+      "name": "fuzz 126",
+      "input": "[\ntheoryxx..café😀..The\n\n[\num\txxTheThe",
+      "output": "[\ntheoryxx.café😀.The\n\n[\num\txxTheThe"
+    },
+    {
+      "name": "fuzz 127",
+      "input": "]café1I1, umaa . ,the[MUSIC]so so  café\n[.[\n\nTHExxcafé(( noise)um",
+      "output": "]café1I1, umaa . ,theso so café\n[.[\n\nTHExxcaféum"
+    },
+    {
+      "name": "fuzz 128",
+      "input": "!!!!_1  [playingx\t,  . theaax, , aa, \n\n]",
+      "output": "!_1  "
+    },
+    {
+      "name": "fuzz 129",
+      "input": "the(soft music playing)( noise)a[MUSIC]a)um(Laughter)(soft music playing)Itheorytheory![, ),\nso!!!!!theory! . [",
+      "output": "theaa)um(Laughter)Itheorytheory![, ),\nso!theory! . ["
+    },
+    {
+      "name": "fuzz 130",
+      "input": "]1I aa[MUSIC]café . (_(music),café,[MUSIC]aaxthe( noise)",
+      "output": "]1I aacafé . ,café,aaxthe"
+    },
+    {
+      "name": "fuzz 131",
+      "input": "_,  THE] , [MUSIC]\t[MUSIC](Laughter)um😀[ 😀[MUSIC]the..[  the!!!!.caféso!!!!!,the\n\n\n (Laughter)cafécafé( noise)The(music)",
+      "output": "_, THE] , \t(Laughter)um😀the.[  the!.caféso!,the\n\n\n (Laughter)cafécaféThe(music)"
+    },
+    {
+      "name": "fuzz 132",
+      "input": "[,.( noise)!!!!aa!!!! the[",
+      "output": "[,.!aa! the["
+    },
+    {
+      "name": "fuzz 133",
+      "input": "😀[The !!!!(  ,!!!![]\nx!!!!😀[.!!!!(Laughter)\n(xcafécafé )so",
+      "output": "😀\nx!😀[.!(Laughter)\n(xcafécafé )so"
+    },
+    {
+      "name": "fuzz 134",
+      "input": "[\n\nmm,cafécaféa_x1!(Laughter)(Laughter)I xxcaféso.\n\n(music),",
+      "output": "[\n\nmm,cafécaféa_x1!(Laughter)(Laughter)I xxcaféso.\n\n(music),"
+    },
+    {
+      "name": "fuzz 135",
+      "input": "  .😀mm[ _The\nsocaféaa  ..",
+      "output": " .😀mm[ _The\nsocaféaa."
+    },
+    {
+      "name": "fuzz 136",
+      "input": "1]The[MUSIC]_!!!!THExxxaa\t..(Laughter)1(music)xcafémm,    playing (Laughter)I]",
+      "output": "1]The_!THExxxaa.(Laughter)1(music)xcafémm,    playing (Laughter)I]"
+    },
+    {
+      "name": "fuzz 137",
+      "input": "\ttheoryxTHE\tcafé[uma  café] . so[\n\n [I,\n\n..xx_ ",
+      "output": "\ttheoryxTHE\tcafé . so[\n\n [I,.xx_ "
+    },
+    {
+      "name": "fuzz 138",
+      "input": "(the",
+      "output": "(the"
+    },
+    {
+      "name": "fuzz 139",
+      "input": "x!mm . mmtheorycaféa😀_THEaammxxaIummm",
+      "output": "x!mm . mmtheorycaféa😀_THEaammxxaIummm"
+    },
+    {
+      "name": "fuzz 140",
+      "input": "\tthe 1(Laughter) (soft music playing)😀(music) Thethe_\n . THE  Theum .  (music)soTHExx,soI![mm)a(music)1The",
+      "output": "\tthe 1(Laughter) 😀(music) Thethe_\n . THE Theum . (music)soTHExx,soI![mm)a(music)1The"
+    },
+    {
+      "name": "fuzz 141",
+      "input": "(soft music playing)( !!!!! the ",
+      "output": "( ! the "
+    },
+    {
+      "name": "fuzz 142",
+      "input": "xThe(music)x![thecafé",
+      "output": "xThe(music)x![thecafé"
+    },
+    {
+      "name": "fuzz 143",
+      "input": ",  (soft music playing)aum... The theoryIThe(music)",
+      "output": ",  aum.The theoryIThe(music)"
+    },
+    {
+      "name": "fuzz 144",
+      "input": "playing![MUSIC]   THE)a....[umxcafé\n\n [MUSIC]!a1theory\n](Laughter)x]aa\nTHE1( noise)",
+      "output": "playing!  THE)a.!a1theory\n](Laughter)x]aa\nTHE1"
+    },
+    {
+      "name": "fuzz 145",
+      "input": "umso\n\n!!!!!!!!THE\n\nmmaa\n\n)soplaying . ( noise)[THE\n . a . ( noise)\t!!!!(so]😀]playing,.!!!!aa..xx[",
+      "output": "umso\n\n!THE\n\nmmaa\n\n)soplaying . 😀]playing,.!aa.xx["
+    },
+    {
+      "name": "fuzz 146",
+      "input": "(soft music playing)playing thetheory1theoryTHE    ",
+      "output": "playing thetheory1theoryTHE "
+    },
+    {
+      "name": "fuzz 147",
+      "input": ") . caféxx[MUSIC]((Laughter)thetheory!(soft music playing)(Laughter)\n",
+      "output": ") . caféxxthetheory!(Laughter)\n"
+    },
+    {
+      "name": "fuzz 148",
+      "input": " theory!!!!xx😀 [(music)",
+      "output": " theory!xx😀 [(music)"
+    },
+    {
+      "name": "fuzz 149",
+      "input": "[",
+      "output": "["
+    },
+    {
+      "name": "fuzz 150",
+      "input": "I[MUSIC]( noise)]a!(music)umtheory[a, .!xx(music)[MUSIC]so (soft music playing)[MUSIC]so . café(soft music playing)\n\naammTHEmm,xaa  (soft music playing)THE( noise)",
+      "output": "I]a!(music)umtheoryso so . café\n\naammTHEmm,xaa THE"
+    },
+    {
+      "name": "fuzz 151",
+      "input": ", (soft music playing)",
+      "output": ", "
+    },
+    {
+      "name": "fuzz 152",
+      "input": "😀aa[MUSIC]playing(music)so)!!!!!Ix theThe1\n\n, themmplayingso[MUSIC]xx,_",
+      "output": "😀aaplaying(music)so)!Ix theThe1\n\n, themmplayingsoxx,_"
+    },
+    {
+      "name": "fuzz 153",
+      "input": " . I😀 (music)theory,café( noise) ( noise)I] . (music)\n\n(café(  !((",
+      "output": " . I😀 (music)theory,café I] . (music)\n\n(café( !(("
+    },
+    {
+      "name": "fuzz 154",
+      "input": "\n\n_ . playing",
+      "output": "\n\n_ . playing"
+    },
+    {
+      "name": "fuzz 155",
+      "input": ") .  mmtheory(.x(soft music playing)!![MUSIC]Iso\n!!!!!!!!!!!!.um(music)(soft music playing) ( noise)mm!!!!_],😀",
+      "output": ") .  mmtheory!!Iso\n!.um(music) mm!_],😀"
+    },
+    {
+      "name": "fuzz 156",
+      "input": " mm(Laughter).😀1.\n\nTHE (soft music playing)The  !1The(Laughter)xx . (Laughter)",
+      "output": " mm(Laughter).😀1.\n\nTHE The !1The(Laughter)xx . (Laughter)"
+    },
+    {
+      "name": "fuzz 157",
+      "input": "I😀 (soft music playing) . The( noise)",
+      "output": "I😀  . The"
+    },
+    {
+      "name": "fuzz 158",
+      "input": "THE1asoaa[(music)The[(music) 😀I , ..thecaféThe,xxTHE😀 The[MUSIC]aso(music)]\tplaying( noise)..)x[MUSIC]1I",
+      "output": "THE1asoaaaso(music)]\tplaying.)x1I"
+    },
+    {
+      "name": "fuzz 159",
+      "input": "(so um",
+      "output": "(so um"
+    },
+    {
+      "name": "fuzz 160",
+      "input": " aa\n.um😀um(soft music playing)um",
+      "output": " aa\n.um😀umum"
+    },
+    {
+      "name": "fuzz 161",
+      "input": "playingcaféxplayingxx.[MUSIC]xx\n\nthemm . I(soft music playing)playing",
+      "output": "playingcaféxplayingxx.xx\n\nthemm . Iplaying"
+    },
+    {
+      "name": "fuzz 162",
+      "input": "( cafécafé).aa",
+      "output": "( cafécafé).aa"
+    },
+    {
+      "name": "fuzz 163",
+      "input": " ] mm\n\n\n!!!!aa,x]..a[ 1!mmaa_, (Laughter)x(soft music playing)aaxx  . (aa[MUSIC]. . \nThe(soft music playing), ",
+      "output": " ] mm\n\n\n!aa,x].a.The, "
+    },
+    {
+      "name": "fuzz 164",
+      "input": "THEa(music)café😀 \n\ntheorycaféaa(music)aa]😀café!so[",
+      "output": "THEa(music)café😀 \n\ntheorycaféaa(music)aa]😀café!so["
+    },
+    {
+      "name": "fuzz 165",
+      "input": "aathetheory(]!!!! THE",
+      "output": "aathetheory(]! THE"
+    },
+    {
+      "name": "fuzz 166",
+      "input": "😀)[MUSIC]aa acaféplaying]\ta,] .!!!!The  .  ummm(",
+      "output": "😀)aa acaféplaying]\ta,] .!The  . ummm("
+    },
+    {
+      "name": "fuzz 167",
+      "input": ", playing\n\n 1café\n\n_café,😀😀soplaying, caféxxum café",
+      "output": ", playing\n\n 1café\n\n_café,😀😀soplaying, caféxxum café"
+    },
+    {
+      "name": "fuzz 168",
+      "input": "The..so..]]!!!!axxtheoryumumthe  ) xThemm, aaumcafémmx(Laughter)_",
+      "output": "The.so.]]!axxtheoryumumthe  ) xThemm, aaumcafémmx(Laughter)_"
+    },
+    {
+      "name": "fuzz 169",
+      "input": "so\t1(Laughter)the]mm( noise)]..( noise)!,\n!.., (😀The_)\nxxcaféum]café(soft music playing)]😀",
+      "output": "so\t1(Laughter)the]mm].!,\n!., (😀The_)\nxxcaféum]café]😀"
+    },
+    {
+      "name": "fuzz 170",
+      "input": " [MUSIC]x\n\n!!!!",
+      "output": " x\n\n!"
+    },
+    {
+      "name": "fuzz 171",
+      "input": "caféTHE..xTHE, , mm!_[MUSIC]x1 1theory][MUSIC]I",
+      "output": "caféTHE.xTHE, , mm!_x1 1theory]I"
+    },
+    {
+      "name": "fuzz 172",
+      "input": "\n\n😀\tThe)😀café . mm_so]( noise) THE😀The_   [",
+      "output": "\n\n😀\tThe)😀café . mm_so] THE😀The_  ["
+    },
+    {
+      "name": "fuzz 173",
+      "input": "so.[(soft music playing)1aum\n\n[MUSIC]( noise)theory..a, \tcaféTHE[ ,1playing\t(Laughter)xxxxcafé😀_[( ,..Thexx(music) ",
+      "output": "so.theory.a, \tcaféTHE[ ,1playing\t(Laughter)xcafé😀_[ "
+    },
+    {
+      "name": "fuzz 174",
+      "input": ", . playing\n\n..😀( .  . xx, (soft music playing)x",
+      "output": ", . playing.😀x"
+    },
+    {
+      "name": "fuzz 175",
+      "input": ")the( noise)\nx",
+      "output": ")the\nx"
+    },
+    {
+      "name": "fuzz 176",
+      "input": "aa(soft music playing))..(um!um]",
+      "output": "aa).(um!um]"
+    },
+    {
+      "name": "fuzz 177",
+      "input": "\n\n  !!!!,I\taaa \n",
+      "output": "\n\n !,I\taaa \n"
+    },
+    {
+      "name": "fuzz 178",
+      "input": "TheThe  ",
+      "output": "TheThe "
+    },
+    {
+      "name": "fuzz 179",
+      "input": ")THE\t!!!!mm( noise)(Laughter)café 1\n!!!!\n(soft music playing))(,...(!!!!",
+      "output": ")THE\t!mm(Laughter)café 1\n!\n)(,.(!"
+    },
+    {
+      "name": "fuzz 180",
+      "input": "..,   ([MUSIC]_café(soft music playing)\n1!xsocafé1]aa..um(Laughter))\t!!!!\n[(music)[MUSIC]soum1I[\tplaying( noise)\tTHE",
+      "output": "., \n1!xsocafé1]aa.um(Laughter))\t!\nsoum1I[\tplaying\tTHE"
+    },
+    {
+      "name": "fuzz 181",
+      "input": "!aso , (music)xtheory_  \nthe]playingtheoryI(soft music playing)).._The_Itheorytheory,_!![MUSIC]",
+      "output": "!aso , (music)xtheory_ \nthe]playingtheoryI)._The_Itheorytheory,_!!"
+    },
+    {
+      "name": "fuzz 182",
+      "input": "!!!!playing, café , ( noise)(soft music playing)  \t\txxmm!!!!mma1playing.. !!!!\n_,",
+      "output": "!playing, café , \t\txxmm!mma1playing.!\n_,"
+    },
+    {
+      "name": "fuzz 183",
+      "input": "_ !,aaThe\nTHE(music)\n\n)(music)a, cafémm]The,..😀!!!!a[ . theory(soft music playing)( noise)a(( noise), ",
+      "output": "_ !,aaThe\nTHE(music)\n\n)(music)a, cafémm]The,.😀!a[ . theorya, "
+    },
+    {
+      "name": "fuzz 184",
+      "input": "( noise)!.atheory.  [MUSIC]",
+      "output": "!.atheory. "
+    },
+    {
+      "name": "fuzz 185",
+      "input": "xxum!!!!(Laughter)😀\n ..café(soft music playing)um(Laughter)",
+      "output": "xxum!(Laughter)😀.caféum(Laughter)"
+    },
+    {
+      "name": "fuzz 186",
+      "input": ", theoryxx_(music)!😀(Laughter)The_[!(soft music playing)(xx(music)xx😀xIcafé\t\n !!!!café(soft music playing)]\tI, [\tumplayingx",
+      "output": ", theoryxx_(music)!😀(Laughter)The_\tI, [\tumplayingx"
+    },
+    {
+      "name": "fuzz 187",
+      "input": "  !!!!(Laughter)\n\t( noise)[\n\n)( noise)\tcafé!(Laughter)!!!!,\t  , \nmm\n[ (music).)1, _.\n\nTheI,\n",
+      "output": " !(Laughter)\n\t[\n\n)\tcafé!(Laughter)!,\t  , \nmm\n[ (music).)1, _.\n\nTheI,\n"
+    },
+    {
+      "name": "fuzz 188",
+      "input": ")(.the\txxx)(soft music playing)somm(soft music playing)acafé)x,I",
+      "output": ")(.the\txxx)sommacafé)x,I"
+    },
+    {
+      "name": "fuzz 189",
+      "input": " theoryumumtheory( noise)(Laughter)(soft music playing)Icafé(Laughter) x, , socaféaa😀(Laughter)x😀, . a1(THE(soft music playing)",
+      "output": " theoryumumtheory(Laughter)Icafé(Laughter) x, , socaféaa😀(Laughter)x😀, . a1"
+    },
+    {
+      "name": "fuzz 190",
+      "input": " THEThe(Laughter) . theory) ](..",
+      "output": " THEThe(Laughter) . theory) ](."
+    },
+    {
+      "name": "fuzz 191",
+      "input": "theory)..(Laughter)theory a\n, _mm(Laughter)(soft music playing)    ",
+      "output": "theory).(Laughter)theory a\n, _mm(Laughter) "
+    },
+    {
+      "name": "fuzz 192",
+      "input": "  so(Laughter)😀(soft music playing)( noise)_.,Themm😀( noise))   IaI,xplaying!!!!THE_I, ._])",
+      "output": " so(Laughter)😀_.,Themm😀) IaI,xplaying!THE_I, ._])"
+    },
+    {
+      "name": "fuzz 193",
+      "input": " \t(cafétheory1umxplaying a\n\n)😀  caféplaying[MUSIC] (Laughter)(",
+      "output": " \t😀 caféplaying (Laughter)("
+    },
+    {
+      "name": "fuzz 194",
+      "input": "mm\t The(theory, um!!!!THExx.theory][The(Laughter)playing.\n\n\nTHE1😀 . ( noise),[MUSIC]aaum[,",
+      "output": "mm\t The(theory, um!THExx.theory]aaum[,"
+    },
+    {
+      "name": "fuzz 195",
+      "input": "(Laughter)",
+      "output": "(Laughter)"
+    },
+    {
+      "name": "fuzz 196",
+      "input": "aa(soft music playing)[MUSIC],]\n\na_  !!!!playing\t!, ",
+      "output": "aa,]\n\na_ !playing\t!, "
+    },
+    {
+      "name": "fuzz 197",
+      "input": "\nthe  the  ",
+      "output": "\nthe the "
+    },
+    {
+      "name": "fuzz 198",
+      "input": ",playinga\n\n\n\n( noise)..!!!!(music)um ,[The(soft music playing)!x..,😀[MUSIC](]aa.mm, _,mm[MUSIC]😀!!!!",
+      "output": ",playinga.!(music)um ,(]aa.mm, _,mm😀!"
+    },
+    {
+      "name": "fuzz 199",
+      "input": "x  !!!!😀)\n\n(music)[😀_xTHE[MUSIC]café..)( .  ,]aa)THETHE(( noise)TheTHE((Laughter)(music).",
+      "output": "x !😀)\n\n(music)café.)( .  ,]aa)THETHETheTHE(music)."
+    },
+    {
+      "name": "fuzz 200",
+      "input": " .(music)café😀mm\n\n.I_(((music)so!  ..\n\n( noise)  ( noise)x(music), I  _a  \t..(Laughter)1(",
+      "output": " .(music)café😀mm\n\n.I_so!.x(music), I _a.(Laughter)1("
+    },
+    {
+      "name": "fuzz 201",
+      "input": "xx(soft music playing)I.mmmm]_ _xxIx(\n\n(soft music playing), , playing(music)",
+      "output": "xxI.m]_ _xxIx, , playing(music)"
+    },
+    {
+      "name": "fuzz 202",
+      "input": ", !( noise)The!(soft music playing),!playing\n so].( noise)so so(soft music playing)THE[MUSIC]..[playing)   mmThe[(Laughter)mm \tthe(soft music playing)😀playing",
+      "output": ", !The!,!playing\n so].so soTHE.[playing)  mmThe[(Laughter)mm \tthe😀playing"
+    },
+    {
+      "name": "fuzz 203",
+      "input": "The..), \n [MUSIC](( noise)The!!!!so\n",
+      "output": "The.), \n The!so\n"
+    },
+    {
+      "name": "fuzz 204",
+      "input": "1\n, [MUSIC]",
+      "output": "1\n, "
+    },
+    {
+      "name": "fuzz 205",
+      "input": "[(soft music playing)The\n I_ 😀(soft music playing)x_,\n\nmm!theory\n\nplaying \nthexx[( noise)(I .  😀\tplaying[MUSIC]",
+      "output": ""
+    },
+    {
+      "name": "fuzz 206",
+      "input": "ITHEIsotheory . the(Laughter))um,  I(soft music playing)😀The  (..!!!!so)The\taaaxxum_]playing, \n\n\naa(soft music playing)!!!!",
+      "output": "ITHEIsotheory . the(Laughter))um,  I😀The (.!so)The\taaaxxum_]playing, \n\n\naa!"
+    },
+    {
+      "name": "fuzz 207",
+      "input": ",[MUSIC]!(Laughter)[  (Laughter).)\n\n(Laughter).a]  \n\n,.._aa  ],]xxITHE]1.)(music)so.",
+      "output": ",!(Laughter) \n\n,._aa ],]xxITHE]1.)(music)so."
+    },
+    {
+      "name": "fuzz 208",
+      "input": "\n\n, aaso[MUSIC]THE[MUSIC]1aa(soft music playing)😀theory.. . (Laughter).themmx",
+      "output": "\n\n, aasoTHE1aa😀theory.(Laughter).themmx"
+    },
+    {
+      "name": "fuzz 209",
+      "input": "1(Laughter)(soft music playing)  theory ..\naa . ",
+      "output": "1(Laughter) theory.aa . "
+    },
+    {
+      "name": "fuzz 210",
+      "input": "_1the\t \n\naa!!!!!!!!the_( noise)um!!!!a  cafétheoryx [MUSIC](Laughter)][(_ ",
+      "output": "_1the\t \n\naa!the_um!a cafétheoryx (Laughter)][(_ "
+    },
+    {
+      "name": "fuzz 211",
+      "input": "))The  xx(Laughter)aa..I) . I . um.[MUSIC]theoryTHE",
+      "output": "))The  xx(Laughter)aa.I) . I . um.theoryTHE"
+    },
+    {
+      "name": "fuzz 212",
+      "input": "(soft music playing)😀x ( noise)😀THETheThethe!]( noise)( noise), )aaaIso _\n\nmm..mm.!theory( noise)(..\n\naa( noise)]The[\t",
+      "output": "😀x 😀THETheThethe!], )aaaIso _\n\nmm.mm.!theory]The[\t"
+    },
+    {
+      "name": "fuzz 213",
+      "input": "(]aa,1😀a!(soft music playing)..  ])   \t[MUSIC]😀playingaa!!!!xxcafé!   .. cafémm\tITHETHEThe ",
+      "output": ".])  \t😀playingaa!xxcafé!.cafémm\tITHETHEThe "
+    },
+    {
+      "name": "fuzz 214",
+      "input": "  Iax( noise)",
+      "output": " Iax"
+    },
+    {
+      "name": "fuzz 215",
+      "input": " ..!x!( noise) . so!!!!!,( noise), (music)\n",
+      "output": ".!x! . so!,, (music)\n"
+    },
+    {
+      "name": "fuzz 216",
+      "input": "(Laughter)soathe\n!!!!(theory]( so . _(Laughter) theory__ (Laughter)  playingThe \n(soft music playing) \tx",
+      "output": "(Laughter)soathe\n! theory__ (Laughter)  playingThe \n \tx"
+    },
+    {
+      "name": "fuzz 217",
+      "input": "The]  xxumxxumaxx] ( noise)](music)😀( noise)[MUSIC]😀aa\t",
+      "output": "The] xxumxxumaxx] ](music)😀😀aa\t"
+    },
+    {
+      "name": "fuzz 218",
+      "input": "]😀xx1 😀caféaa😀!😀, ],so,,aa])xx(Laughter)1!!!![MUSIC]",
+      "output": "]😀xx1 😀caféaa😀!😀, ],so,,aa])xx(Laughter)1!"
+    },
+    {
+      "name": "fuzz 219",
+      "input": " \tplayingsoum.  (um x1theory\t(music)1!um..x]1)!",
+      "output": " \tplayingsoum. 1!um.x]1)!"
+    },
+    {
+      "name": "fuzz 220",
+      "input": "1\nTHE1aa( noise) soThemm(soft music playing)!!!!..",
+      "output": "1\nTHE1aa soThemm!."
+    },
+    {
+      "name": "fuzz 221",
+      "input": "]😀THE (Laughter)theorycafé,so.._Ixcafé",
+      "output": "]😀THE (Laughter)theorycafé,so._Ixcafé"
+    },
+    {
+      "name": "fuzz 222",
+      "input": " café \n\nI Thea . soso[MUSIC]! café,]( noise)  . .  \t[!",
+      "output": " café \n\nI Thea . soso! café,].[!"
+    },
+    {
+      "name": "fuzz 223",
+      "input": "!!!!))x(music)]\t,, [MUSIC]café\n( noise)!xITHEaum xxso\tTHE\t)café_so",
+      "output": "!))x(music)]\t,, café\n!xITHEaum xxso\tTHE\t)café_so"
+    },
+    {
+      "name": "fuzz 224",
+      "input": "( noise)(THE), x  I[MUSIC]I Iaso(Laughter)!!!!the)a, mm(soft music playing)]IImm 1(music)theory(music)]\t(aa ",
+      "output": "(THE), x II Iaso(Laughter)!the)a, mm]IImm 1(music)theory(music)]\t(aa "
+    },
+    {
+      "name": "fuzz 225",
+      "input": "( noise)",
+      "output": ""
+    },
+    {
+      "name": "fuzz 226",
+      "input": ".THE\n\n1!!!!The(Laughter)[MUSIC].",
+      "output": ".THE\n\n1!The(Laughter)."
+    },
+    {
+      "name": "fuzz 227",
+      "input": "the [MUSIC]theory\t(soft music playing) !!!!], x😀[)xx\num!!!!a!, playing!  ]cafésoso(Laughter)umplaying\t.the",
+      "output": "the theory\t !], x😀cafésoso(Laughter)umplaying\t.the"
+    },
+    {
+      "name": "fuzz 228",
+      "input": " . aITHE] a1 . a(soft music playing),!)  xum😀The_",
+      "output": " . aITHE] a1 . a,!) xum😀The_"
+    },
+    {
+      "name": "fuzz 229",
+      "input": "!café_café!a[MUSIC]1(soft music playing)soxummm...., the(music)(music)\tTHEa[MUSIC],THE😀xxaa(theoryxxx_ ",
+      "output": "!café_café!a1soxummm., the(music)(music)\tTHEa,THE😀xxaa(theoryxxx_ "
+    },
+    {
+      "name": "fuzz 230",
+      "input": ")!!!!",
+      "output": ")!"
+    },
+    {
+      "name": "fuzz 231",
+      "input": "\n\n.soxx!xx(soft music playing)aso!!!!(café😀( noise)(1the😀soxumIaa café .  (soft music playing)I ,]soum_",
+      "output": "\n\n.soxx!xxaso!I ,]soum_"
+    },
+    {
+      "name": "fuzz 232",
+      "input": "um(Laughter)(,playing[MUSIC]a(music)\n\n_))[MUSIC].\n\n",
+      "output": "um(Laughter)\n\n_)).\n\n"
+    },
+    {
+      "name": "fuzz 233",
+      "input": " [MUSIC]\n\n[MUSIC] (music)mm    \n!,   THE  !,a( noise)aa, café[MUSIC]! ",
+      "output": " \n\n (music)mm \n!, THE !,aaa, café! "
+    },
+    {
+      "name": "fuzz 234",
+      "input": ".. 1\nplayingI[_   I \n\n\t_😀\n  (music)(😀so(\t.]xx( noise) a( noise)  .playing(café\t[.",
+      "output": ".1\nplayingIxx a .playing(café\t[."
+    },
+    {
+      "name": "fuzz 235",
+      "input": ") THE(.!!!!( noise)THE( noise).[MUSIC]\n\n,aum !!!!\n\n!!!!The😀!!!!!( noise),\n um!!!!)\n",
+      "output": ") THETHE.\n\n,aum !The😀!,\n um!)\n"
+    },
+    {
+      "name": "fuzz 236",
+      "input": "((soft music playing)  aaThe\n\n . \n\n( noise)\n\n!!!!..xx\n\n(music).\n( noise)the \t(soft music playing)aathexx\n\n(Laughter)xTHEaacaféplayingTHE1(soft music playing)[ (",
+      "output": " aaThe\n\n . \n\n\n\n!.xx\n\n(music).\nthe \taathexx\n\n(Laughter)xTHEaacaféplayingTHE1[ ("
+    },
+    {
+      "name": "fuzz 237",
+      "input": "THE, mm   _, ",
+      "output": "THE, mm  _, "
+    },
+    {
+      "name": "fuzz 238",
+      "input": "um  aaa\n, ][MUSIC]((soft music playing)\nTHE_uma umum\t",
+      "output": "um  aaa\n, ]\nTHE_uma umum\t"
+    },
+    {
+      "name": "fuzz 239",
+      "input": "!  )[MUSIC]playingplaying,xI( noise)theory\t1sothe  I..)\n\n( noise)]]   café(.(Laughter) mm THE\n\n\n\nThe",
+      "output": "! )playingplaying,xItheory\t1sothe I.)\n\n]] café mm THE\n\n\n\nThe"
+    },
+    {
+      "name": "fuzz 240",
+      "input": "!!!!( the .  mmcaféplayingum  ...THE(music)](um\n\nIxx . !!!!",
+      "output": "!](um\n\nIxx . !"
+    },
+    {
+      "name": "fuzz 241",
+      "input": "\n( noise),   (Laughter)😀( umum The)(Laughter) . theso!\n\ncaféacafémm  ..I..  xxtheory aa  THE\nplaying",
+      "output": "\n, (Laughter)😀( umum The)(Laughter) . theso!\n\ncaféacafémm.I.xxtheory aa THE\nplaying"
+    },
+    {
+      "name": "fuzz 242",
+      "input": "(]\t!mmx!",
+      "output": "(]\t!mmx!"
+    },
+    {
+      "name": "fuzz 243",
+      "input": "(café",
+      "output": "(café"
+    },
+    {
+      "name": "fuzz 244",
+      "input": "THEcafé( noise)(\n(music)(music)    ..[MUSIC]_café\t",
+      "output": "THEcafé(music)._café\t"
+    },
+    {
+      "name": "fuzz 245",
+      "input": "(Laughter)!!!!😀theoryaaa . 1playingplaying(music)), \n\n_.\t, , \n mm]Iaa . ,!!!!sotheory\t",
+      "output": "(Laughter)!😀theoryaaa . 1playingplaying(music)), \n\n_.\t, , \n mm]Iaa . ,!sotheory\t"
+    },
+    {
+      "name": "fuzz 246",
+      "input": "( noise)xxxx\naa (music)aa]THEso1um].,, [ .   ( noise)😀playingtheory(Laughter) . playing[!Itheory,(soft music playing)(Laughter)Ix_,",
+      "output": "x\naa (music)aa]THEso1um].,, [ . 😀playingtheory(Laughter) . playing[!Itheory,(Laughter)Ix_,"
+    },
+    {
+      "name": "fuzz 247",
+      "input": ")socafé!xx(music)I a( noise))theory( noise)a\n . !a!!!!I",
+      "output": ")socafé!xx(music)I a)theorya\n . !a!I"
+    },
+    {
+      "name": "fuzz 248",
+      "input": "[!  ",
+      "output": "[! "
+    },
+    {
+      "name": "fuzz 249",
+      "input": "  xThe]café [MUSIC].so, \n",
+      "output": "  xThe]café .so, \n"
+    },
+    {
+      "name": "fuzz 250",
+      "input": " The ..TheI",
+      "output": " The.TheI"
+    },
+    {
+      "name": "fuzz 251",
+      "input": "\n( noise)]the1x😀..xx[MUSIC]_ . \t(Laughter) . !!!!The1THEThe(so[The(umso] café",
+      "output": "\n]the1x😀.xx_ . \t(Laughter) . !The1THEThe(so café"
+    },
+    {
+      "name": "fuzz 252",
+      "input": "!!!!mmtheory xx, mmxmmcafé)]xx!!!!)xxThe(Laughter) aa  ",
+      "output": "!mmtheory xx, mmxmmcafé)]xx!)xxThe(Laughter) aa "
+    },
+    {
+      "name": "fuzz 253",
+      "input": "😀(Laughter)caféTHExso, \n\na  1x,um",
+      "output": "😀(Laughter)caféTHExso, \n\na 1x,um"
+    },
+    {
+      "name": "fuzz 254",
+      "input": "\t,   sotheory\n\nTHEso . .](soft music playing).",
+      "output": "\t,  sotheory\n\nTHEso.]."
+    },
+    {
+      "name": "fuzz 255",
+      "input": "(The,   1 . ( noise)!The( noise)  playing\n!!!!\n\nthexx_ax(Laughter)I,  ([]aa, , aa",
+      "output": "!The playing\n!\n\nthexx_ax(Laughter)I, (aa, , aa"
+    },
+    {
+      "name": "fuzz 256",
+      "input": "xx(music)[MUSIC]( noise)\n\n..[MUSIC](Laughter)",
+      "output": "xx(music).(Laughter)"
+    },
+    {
+      "name": "fuzz 257",
+      "input": "😀",
+      "output": "😀"
+    },
+    {
+      "name": "fuzz 258",
+      "input": "  ]😀 THETHEcaféso ",
+      "output": "  ]😀 THETHEcaféso "
+    },
+    {
+      "name": "fuzz 259",
+      "input": "playingThe(music) ) .(Laughter)..(Laughter)[( noise)(soft music playing)(soft music playing)IIplaying cafémm(music)II😀THE!  [,[  (soft music playing)!um😀ITHEcafé",
+      "output": "playingThe(music) ) .(Laughter).(Laughter)[IIplaying cafémm(music)II😀THE! [,[  !um😀ITHEcafé"
+    },
+    {
+      "name": "fuzz 260",
+      "input": " aa]\n(Laughter)\t\n\n_   playing( noise)Itheory (soft music playing)um)",
+      "output": " aa]\n(Laughter)\t\n\n_ playingItheory um)"
+    },
+    {
+      "name": "fuzz 261",
+      "input": "]The( noise)\n\n_ \n\nxx( noise)  ",
+      "output": "]The\n\n_ \n\nxx "
+    },
+    {
+      "name": "fuzz 262",
+      "input": " . mm, , \n!!!!( noise)\n\n, [MUSIC]playing) (soft music playing)the\t)",
+      "output": " . mm, , \n!\n\n, playing) the\t)"
+    },
+    {
+      "name": "fuzz 263",
+      "input": "playing",
+      "output": "playing"
+    },
+    {
+      "name": "fuzz 264",
+      "input": "ITHE😀The( noise),THEplayingum\nmmcafé\n\n\n    THE1, so[!!!![MUSIC]😀, theoryI\t_",
+      "output": "ITHE😀The,THEplayingum\nmmcafé\n\n\n THE1, so😀, theoryI\t_"
+    },
+    {
+      "name": "fuzz 265",
+      "input": "playing.aa(Laughter)",
+      "output": "playing.aa(Laughter)"
+    },
+    {
+      "name": "fuzz 266",
+      "input": "\nxx[MUSIC]x😀 caféthe( noise)[MUSIC]THE ])  😀😀 .  theory.mm",
+      "output": "\nxxx😀 cafétheTHE ]) 😀😀 .  theory.mm"
+    },
+    {
+      "name": "fuzz 267",
+      "input": "playing😀the xx(soft music playing)playing(soft music playing)..[mmI)",
+      "output": "playing😀the xxplaying.[mmI)"
+    },
+    {
+      "name": "fuzz 268",
+      "input": "playing, )]😀!!!![umso\ttheory 😀(music)!!!!..( noise) . ",
+      "output": "playing, )]😀![umso\ttheory 😀(music)!."
+    },
+    {
+      "name": "fuzz 269",
+      "input": "[MUSIC]  \nso!!!!  \n theoryThe1theory",
+      "output": " \nso!  \n theoryThe1theory"
+    },
+    {
+      "name": "fuzz 270",
+      "input": "The!Theum[MUSIC] theorytheoryplaying(soft music playing)mm_1asoum!!!!a(music)(soft music playing)(soft music playing)[\ntheory..",
+      "output": "The!Theum theorytheoryplayingmm_1asoum!a(music)[\ntheory."
+    },
+    {
+      "name": "fuzz 271",
+      "input": "]theory",
+      "output": "]theory"
+    },
+    {
+      "name": "fuzz 272",
+      "input": "(Laughter)\n!!!!\t",
+      "output": "(Laughter)\n!\t"
+    },
+    {
+      "name": "fuzz 273",
+      "input": "mm!!!!  😀.._..umThethe  a(mm\n\n  . \nxx",
+      "output": "mm! 😀._.umThethe a(mm\n\n . \nxx"
+    },
+    {
+      "name": "fuzz 274",
+      "input": "😀 THE, so(soft music playing)umplayingx]playing_( noise)_] . playing[MUSIC]aI)!!!!aa  _ \t)café ,",
+      "output": "😀 THE, soumplayingx]playing__] . playingaI)!aa _ \t)café ,"
+    },
+    {
+      "name": "fuzz 275",
+      "input": "playing( noise)\t(music)(soft music playing)I   . \n\nso1😀  The( noise)THE(music)\n\n)[",
+      "output": "playing\t(music)I . \n\nso1😀 TheTHE(music)\n\n)["
+    },
+    {
+      "name": "fuzz 276",
+      "input": "\t\n[.",
+      "output": "\t\n[."
+    },
+    {
+      "name": "fuzz 277",
+      "input": "the, so.[MUSIC]",
+      "output": "the, so."
+    },
+    {
+      "name": "fuzz 278",
+      "input": "x\n\ttheoryThe(soft music playing)\n!!!!theory  the\n",
+      "output": "x\n\ttheoryThe\n!theory the\n"
+    },
+    {
+      "name": "fuzz 279",
+      "input": "[MUSIC]so_\n\n\n[MUSIC]\n[MUSIC] . I)The . xx(music)[MUSIC]mm,([.",
+      "output": "so_\n\n\n\n . I)The . xx(music)mm,([."
+    },
+    {
+      "name": "fuzz 280",
+      "input": ",aa xx , the,THE, 1\n, I   (soft music playing)xx",
+      "output": ",aa xx , the,THE, 1\n, I  xx"
+    },
+    {
+      "name": "fuzz 281",
+      "input": ")1playing . 1[( noise)( .,   \t(soft music playing)mmplayingIThe] )!!!!([playingThe!.. .. )!\n] . aa(music)",
+      "output": ")1playing . 1 )!"
+    },
+    {
+      "name": "fuzz 282",
+      "input": "(soft music playing)xa_!. 1\n( noise)!THE1x..",
+      "output": "xa_!. 1\n!THE1x."
+    },
+    {
+      "name": "fuzz 283",
+      "input": " ",
+      "output": " "
+    },
+    {
+      "name": "fuzz 284",
+      "input": "(  (Laughter))  (Laughter).!,(] . (Laughter)!!!!theoryso1(music)I.(!!\t1 mm)Ixmm!!!!",
+      "output": ") (Laughter).!,!theoryso1(music)I.(!!\t1 mm)Ixmm!"
+    },
+    {
+      "name": "fuzz 285",
+      "input": "[\n😀The.café(music)\n\nmm[_[café\tum!!!!theoryplaying",
+      "output": "[\n😀The.café(music)\n\nmm[_[café\tum!theoryplaying"
+    },
+    {
+      "name": "fuzz 286",
+      "input": "!(Laughter)!!!!a The(music) ([MUSIC]I  mm( noise)café\nmmI",
+      "output": "!(Laughter)!a The(music) café\nmmI"
+    },
+    {
+      "name": "fuzz 287",
+      "input": "xsoI,, I\tthe..THE( noise)!!!!.\ttheory😀playing]mm)[MUSIC], .[MUSIC]",
+      "output": "xsoI,, I\tthe.THE!.\ttheory😀playing]mm), ."
+    },
+    {
+      "name": "fuzz 288",
+      "input": "The,  . xx\n\n,theory",
+      "output": "The, . xx\n\n,theory"
+    },
+    {
+      "name": "fuzz 289",
+      "input": "😀  ",
+      "output": "😀  "
+    },
+    {
+      "name": "fuzz 290",
+      "input": "[) [😀\t1\n\n]xum(soft music playing)( noise)1(music)playinguma(😀mm(Laughter)(\n",
+      "output": "xum1(music)playinguma(\n"
+    },
+    {
+      "name": "fuzz 291",
+      "input": "!!!! . 1.THEa[MUSIC]xx\n!!!!caféaathe( noise)",
+      "output": "! . 1.THEaxx\n!caféaathe"
+    },
+    {
+      "name": "fuzz 292",
+      "input": "😀THE😀,[MUSIC]I xx]\n]!..(music) . xx]theory . (music)( noise)THE( (Laughter)\t aa",
+      "output": "😀THE😀,I xx]\n]!.(music) . xx]theory . (music)THE\t aa"
+    },
+    {
+      "name": "fuzz 293",
+      "input": " .  .\n\nplaying)[playing (music)",
+      "output": ".playing)[playing (music)"
+    },
+    {
+      "name": "fuzz 294",
+      "input": "\n\n1( noise)1(so]the_,[MUSIC]😀1((Laughter)um(music)!mmmm, I\num\t1,(xx.playing\tcaféaammum [ ",
+      "output": "\n\n11um(music)!m, I\num\t1,(xx.playing\tcaféaammum [ "
+    },
+    {
+      "name": "fuzz 295",
+      "input": "xTHE [the(soft music playing)  ]café)(music)THE!!!!  soumxx (Laughter) mm!  !THETHE . \n\n_(]   (Laughter)",
+      "output": "xTHE café)(music)THE!  soumxx (Laughter) mm! !THETHE . \n\n_"
+    },
+    {
+      "name": "fuzz 296",
+      "input": "_[,IThe( noise)[\n.[ theoryTHE",
+      "output": "_[,IThe[\n.[ theoryTHE"
+    },
+    {
+      "name": "fuzz 297",
+      "input": "1Iplaying!mmIaa\n\n  theoryaaxxx😀[MUSIC]!!!!😀um,x!_THEtheory[MUSIC]um",
+      "output": "1Iplaying!mmIaa\n\n  theoryaaxxx😀!😀um,x!_THEtheoryum"
+    },
+    {
+      "name": "fuzz 298",
+      "input": "((soft music playing) . !\n_ (_theTHE\tumxx(music)!!!!Itheaamm(music)😀( noise)[\t x     aamm  ",
+      "output": " . !\n_ !Itheaamm(music)😀[\t x   aamm "
+    },
+    {
+      "name": "fuzz 299",
+      "input": "mm[ . I..mm\t1",
+      "output": "mm[ . I.mm\t1"
+    },
+    {
+      "name": "fuzz 300",
+      "input": "playingTHE . (music),Theaum, xx) . (.mm I",
+      "output": "playingTHE . (music),Theaum, xx) . (.mm I"
+    },
+    {
+      "name": "fuzz 301",
+      "input": "I\n",
+      "output": "I\n"
+    },
+    {
+      "name": "fuzz 302",
+      "input": "aa😀so,[MUSIC], ),",
+      "output": "aa😀so,, ),"
+    },
+    {
+      "name": "fuzz 303",
+      "input": "  (",
+      "output": " ("
+    },
+    {
+      "name": "fuzz 304",
+      "input": "\n\naaxplaying\n\n..(( noise)mmI,\tplaying\n\n],so ",
+      "output": "\n\naaxplaying.mmI,\tplaying\n\n],so "
+    },
+    {
+      "name": "fuzz 305",
+      "input": ".1_, 😀caféso",
+      "output": ".1_, 😀caféso"
+    },
+    {
+      "name": "fuzz 306",
+      "input": "1",
+      "output": "1"
+    },
+    {
+      "name": "fuzz 307",
+      "input": "socafé( noise)I[MUSIC]x , the\nplaying .  café theory)a\tmm(music)aaso1I(music), ,café",
+      "output": "socaféIx , the\nplaying .  café theory)a\tmm(music)aaso1I(music), ,café"
+    },
+    {
+      "name": "fuzz 308",
+      "input": "The.\n) \t(Laughter),\n\n\n\nthe) TheIxxx)!!!! [😀😀(music)theum😀!  . aI[MUSIC]",
+      "output": "The.\n) \t(Laughter),\n\n\n\nthe) TheIxxx)! "
+    },
+    {
+      "name": "fuzz 309",
+      "input": "..!The!!!!a",
+      "output": ".!The!a"
+    },
+    {
+      "name": "fuzz 310",
+      "input": "I\n\n\n   . mmcafé]theoryum . !!!!\n..so(Laughter)  ",
+      "output": "I\n\n\n . mmcafé]theoryum . !.so(Laughter) "
+    },
+    {
+      "name": "fuzz 311",
+      "input": "\naa,I",
+      "output": "\naa,I"
+    },
+    {
+      "name": "fuzz 312",
+      "input": "café(music)THE( [MUSIC]THE\n\n]theory(soft music playing)um, ]THE !!!!",
+      "output": "café(music)THEum, ]THE !"
+    },
+    {
+      "name": "fuzz 313",
+      "input": "so.!!!![MUSIC]The , x[ The..(soft music playing)  (Laughter)the.aaxx[xx[ !The😀][\n[MUSIC]Thethe![😀!!!!THE",
+      "output": "so.!The , xThethe![😀!THE"
+    },
+    {
+      "name": "fuzz 314",
+      "input": "xx\na,the!(Laughter)11thexTheThe )(Laughter).(Laughter)[theoryso!!!!😀!1 😀]_] . x",
+      "output": "xx\na,the!(Laughter)11thexTheThe )(Laughter).(Laughter)_] . x"
+    },
+    {
+      "name": "fuzz 315",
+      "input": "aaxx[MUSIC](soft music playing)I..theory😀]..café_xx(Laughter)theory . ,_(music)the[MUSIC]((Laughter)playingaa Theplaying)",
+      "output": "aaxxI.theory😀].café_xx(Laughter)theory . ,_(music)theplayingaa Theplaying)"
+    },
+    {
+      "name": "fuzz 316",
+      "input": " theory\n!!!!(soft music playing).",
+      "output": " theory\n!."
+    },
+    {
+      "name": "fuzz 317",
+      "input": "(music)[MUSIC], \tcafé   ( noise)so\t.] (music)]😀café  \n\n!theory xxcaféx(Laughter)umTHE)(Laughter)( noise)I ) (aa",
+      "output": "(music), \tcafé  so\t.] (music)]😀café  \n\n!theory xxcaféx(Laughter)umTHE)(Laughter)I ) (aa"
+    },
+    {
+      "name": "fuzz 318",
+      "input": "soThe(.  ",
+      "output": "soThe(. "
+    },
+    {
+      "name": "fuzz 319",
+      "input": "The[MUSIC]the\nxx, [MUSIC]theory(",
+      "output": "Thethe\nxx, theory("
+    },
+    {
+      "name": "fuzz 320",
+      "input": "x😀mmaa(Laughter)😀aatheorysoaa",
+      "output": "x😀mmaa(Laughter)😀aatheorysoaa"
+    },
+    {
+      "name": "fuzz 321",
+      "input": "!!!!(Laughter))mm(soft music playing)mm\n\n!!!!\tum  ",
+      "output": "!(Laughter))m\n\n!\tum "
+    },
+    {
+      "name": "fuzz 322",
+      "input": "\n\n]\n,café  (soft music playing)(!(Laughter)[umso.[MUSIC]playing.\n(music)The1..THEtheory..!um(Laughter)",
+      "output": "\n\n]\n,café playing.\n(music)The1.THEtheory.!um(Laughter)"
+    },
+    {
+      "name": "fuzz 323",
+      "input": "_1]a1!!!!(soft music playing)The\n, um!!!!_Itheoryso.[(music)(soft music playing)the..)",
+      "output": "_1]a1!The\n, um!_Itheoryso.[(music)the.)"
+    },
+    {
+      "name": "fuzz 324",
+      "input": "aaThesothe, (music)Iso_theplaying,..aa[MUSIC] . ( noise)",
+      "output": "aaThesothe, (music)Iso_theplaying,.aa . "
+    },
+    {
+      "name": "fuzz 325",
+      "input": " !!!!](soft music playing)(soft music playing) \n\nathexx(Laughter)theI . \numaxx!!!!caféx ",
+      "output": " !] \n\nathexx(Laughter)theI . \numaxx!caféx "
+    },
+    {
+      "name": "fuzz 326",
+      "input": "(soft music playing) . a  xx] The\n😀,!!!![The1xTHEa(soft music playing)!!!!THE.",
+      "output": " . a xx] The\n😀,![The1xTHEa!THE."
+    },
+    {
+      "name": "fuzz 327",
+      "input": "(Laughter)( noise)[MUSIC]",
+      "output": "(Laughter)"
+    },
+    {
+      "name": "fuzz 328",
+      "input": "  . aa( noise)xTHE,\n\n_",
+      "output": " . aaxTHE,\n\n_"
+    },
+    {
+      "name": "fuzz 329",
+      "input": "!!!!theory!] 😀]xx, ( noise),\t)(soft music playing)so the, \nthe)., )IIThe  café\n\ntheory . 😀umxx)",
+      "output": "!theory!] 😀]xx, ,\t)so the, \nthe)., )IIThe  café\n\ntheory . 😀umxx)"
+    },
+    {
+      "name": "fuzz 330",
+      "input": " !!!!..playing",
+      "output": " !.playing"
+    },
+    {
+      "name": "fuzz 331",
+      "input": "(Laughter)so]playing....theory\t_)]_aa[MUSIC]xxaa\n😀!( THE[MUSIC]atheory)umum soso\n ..!!!!the(😀",
+      "output": "(Laughter)so]playing.theory\t_)]_aaxxaa\n😀!( THEatheory)umum soso.!the(😀"
+    },
+    {
+      "name": "fuzz 332",
+      "input": "theory, (Laughter)aa  playing  ](music)I!xx",
+      "output": "theory, (Laughter)aa playing ](music)I!xx"
+    },
+    {
+      "name": "fuzz 333",
+      "input": " (soft music playing)]themmsomm  ,  xx(music)\n😀 so\t . \n[MUSIC]sommaa (soft music playing), sotheoryThe(!!!!.._\num,",
+      "output": " ]themmsomm , xx(music)\n😀 so\t . \nsommaa , sotheoryThe(!._\num,"
+    },
+    {
+      "name": "fuzz 334",
+      "input": "mmxthe 1a😀 caféum( noise)( noise)\nI(music)[.(Laughter)aaIso (music),x . \ncafé..[MUSIC]playing\n(",
+      "output": "mmxthe 1a😀 caféum\nI(music)playing\n("
+    },
+    {
+      "name": "fuzz 335",
+      "input": "   ), (xcafé[MUSIC]theTHEcafé\n  (music) 1mm",
+      "output": "  ),  1mm"
+    },
+    {
+      "name": "fuzz 336",
+      "input": "(Laughter)café] . x",
+      "output": "(Laughter)café] . x"
+    },
+    {
+      "name": "fuzz 337",
+      "input": "_mm_playing!!!!(soft music playing)(x\tplaying",
+      "output": "_mm_playing!(x\tplaying"
+    },
+    {
+      "name": "fuzz 338",
+      "input": " .._(soft music playing)xxxxx)..",
+      "output": "._x)."
+    },
+    {
+      "name": "fuzz 339",
+      "input": "( noise)) [( noise)um,aax . playingthe",
+      "output": ") [um,aax . playingthe"
+    },
+    {
+      "name": "fuzz 340",
+      "input": "( noise)a(Laughter).aaTHE11I!playing,.!xx😀), \t",
+      "output": "a(Laughter).aaTHE11I!playing,.!xx😀), \t"
+    },
+    {
+      "name": "fuzz 341",
+      "input": "[MUSIC](music)[ THE[THE, theory",
+      "output": "(music)[ THE[THE, theory"
+    },
+    {
+      "name": "fuzz 342",
+      "input": "athe\n,( noise)a_Ithe_])()xxa, !!!!!soso,café😀 xx,[so [ [MUSIC]aa.\n \t_",
+      "output": "athe\n,a_Ithe_])()xxa, !soso,café😀 xx,aa.\n \t_"
+    },
+    {
+      "name": "fuzz 343",
+      "input": "\nax!!!!  \n_theoryumThe!.THE!!!!so  (Laughter) theoryumcafé(Laughter)xx( aa)sothe  ",
+      "output": "\nax! \n_theoryumThe!.THE!so (Laughter) theoryumcafé(Laughter)xx( aa)sothe "
+    },
+    {
+      "name": "fuzz 344",
+      "input": "  . the[MUSIC], )!a\t\n\n\n\n!a!,  mmTHExa[MUSIC]\n\n!",
+      "output": " . the, )!a\t\n\n\n\n!a!, mmTHExa\n\n!"
+    },
+    {
+      "name": "fuzz 345",
+      "input": "! .   (music)\n(Laughter), mm!!!!\t",
+      "output": "! . (music)\n(Laughter), mm!\t"
+    },
+    {
+      "name": "fuzz 346",
+      "input": ",  playingthe\n\n[ \n\na..\n\n  \t_umcaféplaying\t_I[MUSIC]aTheum(Laughter))xx  !theory!!!!xx",
+      "output": ", playingthe\n\naTheum(Laughter))xx !theory!xx"
+    },
+    {
+      "name": "fuzz 347",
+      "input": "THE\n\n . )\t( noise) ",
+      "output": "THE\n\n . )\t "
+    },
+    {
+      "name": "fuzz 348",
+      "input": "(soft music playing)theory(Laughter)!, (soft music playing) playing[MUSIC](soft music playing)cafétheorymmxI(soft music playing)I!!!!😀\n]. . THE..x(a",
+      "output": "theory(Laughter)!,  playingcafétheorymmxII!😀\n].THE.x(a"
+    },
+    {
+      "name": "fuzz 349",
+      "input": "THE..x!!!!!!!!  . aaTHE, ]aa..!!!!( noise)Themm[café ..\t\n\n\n\nI!a(music) x,IThe\n\nI",
+      "output": "THE.x!  . aaTHE, ]aa.!Themm[café.I!a(music) x,IThe\n\nI"
+    },
+    {
+      "name": "fuzz 350",
+      "input": " !xx.playing(um_, the[um[(Laughter)\n!xx( noise)..playingum) [MUSIC]\taaumcafé )um[\n\na_",
+      "output": " !xx.playing(um_, the\taaumcafé )um[\n\na_"
+    },
+    {
+      "name": "fuzz 351",
+      "input": "aa . , (music)\taa . ,Ix)xxthe]mm😀( noise)[MUSIC]",
+      "output": "aa . , (music)\taa . ,Ix)xxthe]mm😀"
+    },
+    {
+      "name": "fuzz 352",
+      "input": "a  _xx,, the (Laughter)..Itheory[😀\n!, !!!!café",
+      "output": "a  _xx,, the (Laughter).Itheory[😀\n!, !café"
+    },
+    {
+      "name": "fuzz 353",
+      "input": "  so)Iumcafé!!!!  \n_ umTHE(Laughter)(soft music playing)themm\t..athe,(music)café)theory !caféum,(soft music playing), I\t",
+      "output": "  so)Iumcafé! \n_ umTHE(Laughter)themm.athe,(music)café)theory !caféum,, I\t"
+    },
+    {
+      "name": "fuzz 354",
+      "input": "_ . !(music)\n)1sotheoryplayingsosotheoryTHEmmaaa1theory . ",
+      "output": "_ . !(music)\n)1sotheoryplayingsosotheoryTHEmmaaa1theory . "
+    },
+    {
+      "name": "fuzz 355",
+      "input": "the1]um\n\n, THEmm_\n\nthe..a😀, (music)😀( noise)café(um . themm)[MUSIC]..",
+      "output": "the1]um\n\n, THEmm_\n\nthe.a😀, (music)😀café(um . themm)."
+    },
+    {
+      "name": "fuzz 356",
+      "input": "  \n\n ! \n\n\ncafétheum\ntheoryxx)😀xx.\n\n_( . 1( noise)..(soft music playing)a\n(Laughter)",
+      "output": "  \n\n ! \n\n\ncafétheum\ntheoryxx)😀xx.\n\n_.a\n(Laughter)"
+    },
+    {
+      "name": "fuzz 357",
+      "input": ".xx(![xa\n😀(music)(!\n\t",
+      "output": ".xx(!\n\t"
+    },
+    {
+      "name": "fuzz 358",
+      "input": "(mm.1[(soft music playing).._ \n\n_THE, ..um\n  )\na",
+      "output": "._ \n\n_THE,.um\n )\na"
+    },
+    {
+      "name": "fuzz 359",
+      "input": "theoryxxcafé(Laughter)1..]1\t  ...(Theso(Laughter)café, (..]xxx(soft music playing) Thex, (Laughter)[[1 (soft music playing)  ",
+      "output": "theoryxxcafé(Laughter)1.]1.café, Thex, (Laughter)[[1  "
+    },
+    {
+      "name": "fuzz 360",
+      "input": ",theoryTheI(so",
+      "output": ",theoryTheI(so"
+    },
+    {
+      "name": "fuzz 361",
+      "input": ", aI!!!!THE(soft music playing)\taxxsoso(Laughter)  [MUSIC][café . a\t.theory)\n\n( noise)THE]  xaa(soft music playing)(Laughter)\n\nmm1mm ",
+      "output": ", aI!THE\taxxsoso(Laughter) xaa(Laughter)\n\nmm1mm "
+    },
+    {
+      "name": "fuzz 362",
+      "input": " soaa!!!!mmtheoryaa..caféxx.\n\n\n..um[MUSIC](Laughter), café\n\nplaying, ]xxso\nTHETHE]um( noise)\n\nmm(]",
+      "output": " soaa!mmtheoryaa.caféxx.um(Laughter), café\n\nplaying, ]xxso\nTHETHE]um\n\nmm(]"
+    },
+    {
+      "name": "fuzz 363",
+      "input": "playingI um..playingTHE!!!!(music)the\n\n .  \tcafétheory\t.(music)😀!)!",
+      "output": "playingI um.playingTHE!(music)the\n\n . \tcafétheory\t.(music)😀!)!"
+    },
+    {
+      "name": "fuzz 364",
+      "input": "aa_x\n (_playingum . THE(!!!!(soft music playing)mm!mmITHEumacafé,(.aa(Laughter)the..xx    Ithe um(music)THE[..",
+      "output": "aa_x\n mm!mmITHEumacafé,the.xx Ithe um(music)THE[."
+    },
+    {
+      "name": "fuzz 365",
+      "input": "\n][(THEplaying)!..1.1xxtheum )_!!!!theory.[MUSIC]aa😀[playingtheory,a, (music)] . [ [MUSIC]I[(",
+      "output": "\n]aa😀 . I[("
+    },
+    {
+      "name": "fuzz 366",
+      "input": "THE.](Laughter)THE😀]..I(playingIxx .   x.aa( noise)[_( noise) 1",
+      "output": "THE.](Laughter)THE😀].I[_ 1"
+    },
+    {
+      "name": "fuzz 367",
+      "input": "THE   !!!!the][MUSIC]xx  (Laughter)\n\n !café[(soft music playing)x . [...so, (Laughter)1, !\n\n  ",
+      "output": "THE   !the]xx (Laughter)\n\n !café[x . [.so, (Laughter)1, !\n\n  "
+    },
+    {
+      "name": "fuzz 368",
+      "input": "](theoryxxaa][\n\n  .  theso  )!!!!]x😀aa(soft music playing).",
+      "output": "]."
+    },
+    {
+      "name": "fuzz 369",
+      "input": "playing,playing_umcafé.\na😀(themmmm[MUSIC](music), playing\n\taa,\n\n",
+      "output": "playing,playing_umcafé.\na😀, playing\n\taa,\n\n"
+    },
+    {
+      "name": "fuzz 370",
+      "input": "[)\n.Isoumso ..(soft music playing)!THE..    . 😀  the,   , !!!! ",
+      "output": "[)\n.Isoumso.!THE.😀 the,  , ! "
+    },
+    {
+      "name": "fuzz 371",
+      "input": ", caféamm! )[I\t\tum!( ",
+      "output": ", caféamm! )[I\t\tum!( "
+    },
+    {
+      "name": "fuzz 372",
+      "input": "  playing..\n\nTHE theory( noise)theory . [._",
+      "output": " playing.THE theorytheory . [._"
+    },
+    {
+      "name": "fuzz 373",
+      "input": "(]aaa)so xx(Laughter)playing!!!!(Laughter)),,\n\n1um\n\num The[MUSIC]] . café[MUSIC]( noise)(soft music playing)I  (theplayingx!!!!",
+      "output": "(]aaa)so xx(Laughter)playing!(Laughter)),,\n\n1um\n\num The] . caféI  (theplayingx!"
+    },
+    {
+      "name": "fuzz 374",
+      "input": "xtheory, _]!!!![ . (music)[THE,  . a!!!!",
+      "output": "xtheory, _]![ . (music)[THE, . a!"
+    },
+    {
+      "name": "fuzz 375",
+      "input": "_ !!!!so\n\tcafé_😀aaum!.😀\txplayingTHE\n\n\t!!!!\t x( noise)😀! the!xx(..]]",
+      "output": "_ !so\n\tcafé_😀aaum!.😀\txplayingTHE\n\n\t!\t x😀! the!xx(.]]"
+    },
+    {
+      "name": "fuzz 376",
+      "input": "_1I[](Laughter)( noise)..mm(Laughter)(caféa[[.]😀]so\n\n11 xx  xxplaying1xx . ",
+      "output": "_1I(Laughter).mm(Laughter)(caféa😀]so\n\n11 xplaying1xx . "
+    },
+    {
+      "name": "fuzz 377",
+      "input": "THE\t, the(soft music playing)(music)um[_um .aa\n\n\nsoThe\n mm.(music)THEaaTHE( noise)x!!!!][so    \n\nTHE",
+      "output": "THE\t, the(music)um[so \n\nTHE"
+    },
+    {
+      "name": "fuzz 378",
+      "input": "mmsoTHETHEum",
+      "output": "mmsoTHETHEum"
+    },
+    {
+      "name": "fuzz 379",
+      "input": "(soft music playing)(soft music playing),theoryplaying_(Laughter)um(a, xx!]\tTHEplaying\t!!!!\naaaa!café(music)xmm][mm )aTHE😀( noise)..!!!! ",
+      "output": ",theoryplaying_(Laughter)umxmm][mm )aTHE😀.! "
+    },
+    {
+      "name": "fuzz 380",
+      "input": "..((music)a](music)theoryx",
+      "output": ".a](music)theoryx"
+    },
+    {
+      "name": "fuzz 381",
+      "input": "The 1( noise)x![ I(Laughter)xxplaying]!!!!the]( noise)",
+      "output": "The 1x!the]"
+    },
+    {
+      "name": "fuzz 382",
+      "input": "[, The!theoryTHE(music)café([MUSIC]_the( noise)\n\nxxmmItheory . [x(music)so",
+      "output": "_the\n\nxxmmItheory . [x(music)so"
+    },
+    {
+      "name": "fuzz 383",
+      "input": "THE..(soft music playing)",
+      "output": "THE."
+    },
+    {
+      "name": "fuzz 384",
+      "input": "!!!!,(.x(music)mm]😀xx\ttheoryTHE, )\num  The",
+      "output": "!,mm]😀xx\ttheoryTHE, )\num The"
+    },
+    {
+      "name": "fuzz 385",
+      "input": "THE[, , .umaxsocafé( noise)[MUSIC](Laughter)I(soft music playing)1   \nxcafé1umI..1, aa( noise)(so _ . .\t!!!!a_)",
+      "output": "THE(Laughter)I1  \nxcafé1umI.1, aa(so _.!a_)"
+    },
+    {
+      "name": "fuzz 386",
+      "input": "\n)1so],cafémm\t\n(Laughter)x!!!!😀um( noise),  ",
+      "output": "\n)1so],cafémm\t\n(Laughter)x!😀um,  "
+    },
+    {
+      "name": "fuzz 387",
+      "input": "umplaying",
+      "output": "umplaying"
+    },
+    {
+      "name": "fuzz 388",
+      "input": "\nTHE[MUSIC]\n\naa (caféx,the[MUSIC]THEum1\n\n . aThe",
+      "output": "\nTHE\n\naa (caféx,theTHEum1\n\n . aThe"
+    },
+    {
+      "name": "fuzz 389",
+      "input": "theso\numthe)the(Laughter).\n\nTHEplaying[The.aplaying..amm   . ",
+      "output": "theso\numthe)the(Laughter).\n\nTHEplaying[The.aplaying.amm   . "
+    },
+    {
+      "name": "fuzz 390",
+      "input": "[.playing,)(Iaa,the . ( noise),\n)(soft music playing), aaTHExx\n\n   _😀,1[..!theoryplayingplaying!!",
+      "output": "[.playing,),\n), aaTHExx\n\n  _😀,1[.!theoryplayingplaying!!"
+    },
+    {
+      "name": "fuzz 391",
+      "input": "xplaying\n(Laughter) !the😀1playingmm(((soft music playing)(.(music)mm",
+      "output": "xplaying\n(Laughter) !the😀1playingm"
+    },
+    {
+      "name": "fuzz 392",
+      "input": "mm\n\n(soft music playing)",
+      "output": "mm\n\n"
+    },
+    {
+      "name": "fuzz 393",
+      "input": "theory1( playing(music))uma ( noise)\t[MUSIC]😀\n\n  (, ! , .,xThetheory, \t]",
+      "output": "theory1)uma \t😀\n\n (, ! , .,xThetheory, \t]"
+    },
+    {
+      "name": "fuzz 394",
+      "input": "playing.., playingaa[!!!!]!( noise)\nx.a(soft music playing)  um . ,_  [MUSIC]TheTHE😀 . aamm1..)so1",
+      "output": "playing., playingaa!\nx.a um . ,_ TheTHE😀 . aamm1.)so1"
+    },
+    {
+      "name": "fuzz 395",
+      "input": "1TheumThethe(Laughter) . xxplaying!)!I(Laughter)playing![theory.., \n\nThe",
+      "output": "1TheumThethe(Laughter) . xxplaying!)!I(Laughter)playing![theory., \n\nThe"
+    },
+    {
+      "name": "fuzz 396",
+      "input": "!!!!)!aaa . aa  (soft music playing)(soft music playing)",
+      "output": "!)!aaa . aa  "
+    },
+    {
+      "name": "fuzz 397",
+      "input": "playing( noise)\n\n(Laughter)mm",
+      "output": "playing\n\n(Laughter)mm"
+    },
+    {
+      "name": "fuzz 398",
+      "input": "soa( . , ]",
+      "output": "soa( . , ]"
+    },
+    {
+      "name": "fuzz 399",
+      "input": "[xx(Laughter)mm, )THE  \n\nThex..THE😀",
+      "output": "[xx(Laughter)mm, )THE \n\nThex.THE😀"
+    }
+  ]
+}

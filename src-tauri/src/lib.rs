@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod text;
 
 use std::time::Duration;
 
