@@ -53,7 +53,7 @@ kept audio, sample sessions, custom window chrome, Windows.
 ```
 ┌──────────────── Svelte 5 + TS (webview) ────────────────┐
 │  RecordView   SessionList   SessionDetail   Settings    │
-│        ▲ typed commands / events (tauri-specta)         │
+│        ▲ typed commands / events (ts-rs types)          │
 └────────┼────────────────────────────────────────────────┘
          │
 ┌────────▼──────────────── Rust core ─────────────────────┐
@@ -83,7 +83,7 @@ kept audio, sample sessions, custom window chrome, Windows.
 | Audio at rest | **PCM chunks stored as BLOBs in the SQLCipher database**, never as WAV files | Encrypted from the first byte with no extra crypto dependency. Chunks are written during recording, so a crash keeps the audio. `whisper-rs` reads samples straight from memory, so no WAV file is needed |
 | Transcription timing | **Streaming**: whisper runs on fixed windows while recording | The transcript is nearly finished when the user presses Stop; only the last window remains |
 | Frontend | **Svelte 5 + TypeScript + Vite** | Replaces 1.8k-line hand-written DOM views with components |
-| IPC types | **`tauri-specta`** generates `bindings.ts` | A renamed command fails at compile time instead of silently at runtime |
+| IPC types | **`ts-rs`** generates TS types from the Rust IPC structs/enums; thin hand-written `invoke`/`listen` wrappers in `src/lib/api.ts`; a Rust test checks every registered command appears in `api.ts` | A changed type or renamed command fails in tests/type-check instead of silently at runtime. `tauri-specta` was rejected: pre-release only, single maintainer (see `DEPENDENCY_REVIEW_M0.md`) |
 | Engines behind traits | `trait Transcriber`, `trait Summarizer`, `trait SystemAudio` | Fake implementations replace the `--e2e-test` flag so tests are fast and deterministic |
 
 ### Session job state machine
@@ -135,10 +135,18 @@ prompts are copied word for word from `src/store/defaults.js` in a seed migratio
 Each milestone ends with something you can demo and a check that confirms it.
 
 ### M0 — Scaffold (½ day)
-- `create-tauri-app` with the Svelte-TS template, `tauri-specta` wiring, CI with `cargo test`
-  + `vitest` + `svelte-check`.
-- **Done when:** `cargo tauri dev` opens a window and the generated `bindings.ts` is
-  type-checked.
+- Scaffold by hand instead of running `create-tauri-app`, which would pull unreviewed,
+  unpinned versions. Write `package.json` and `Cargo.toml` with the exact pins from
+  `DEPENDENCY_REVIEW_M0.md`.
+- `ts-rs` set up: `#[derive(TS)] #[ts(export, export_to = "../src/lib/types/")]` on IPC
+  types; generated files are committed.
+- `src/lib/api.ts` with one example command (`app_version`) and one example event, plus
+  the Rust command-list test.
+- CI: `cargo test` → `git diff --exit-code src/lib/types` (generated types are up to
+  date) → `svelte-check` → `vitest`.
+- **Done when:** `cargo tauri dev` opens a window that shows the result of
+  `app_version`. Renaming a field on the Rust side fails `svelte-check`, and removing the
+  wrapper from `api.ts` fails `cargo test`.
 
 ### M1 — Storage + sessions UI (1 day)
 - `store/` with SQLCipher, Keychain key, migrations, prompt seed.
@@ -256,7 +264,7 @@ at approval time.
 |---|---|---|
 | `tauri`, `tauri-build`, `@tauri-apps/api`, `@tauri-apps/cli` | Shell | No |
 | `tauri-plugin-shell` | `AudioCapCLI` sidecar (M5a/M5b only, removed in M6) | No |
-| `tauri-specta`, `specta` | Typed IPC | Possible but not worth it |
+| `ts-rs`, `ts-rs-macros` | Generated IPC types (✅ reviewed in M0 review) | Partly: the thin command wrappers stay in-house |
 | `whisper-rs` | STT bindings (`build.rs` compiles whisper.cpp) | No |
 | `llama-cpp-2` | LLM bindings (`build.rs` compiles llama.cpp) | No |
 | `cpal` | Mic capture | No |
@@ -265,7 +273,8 @@ at approval time.
 | `reqwest`, `sha2` | Model download + verify | No |
 | `tokio`, `tokio-util` | Async, `CancellationToken` | No |
 | `serde`, `serde_json`, `thiserror` | Standard | No |
-| `svelte`, `vite`, `typescript`, `vitest`, `@testing-library/svelte` | Frontend | No |
+| `svelte`, `@sveltejs/vite-plugin-svelte`, `vite`, `typescript` (6.x, because `svelte-check` doesn't support 7), `svelte-check`, `vitest` | Frontend (✅ reviewed in M0 review) | No |
+| `@testing-library/svelte` | Component tests (M1) | No |
 
 **Note:** `whisper-rs` and `llama-cpp-2` compile C++ in `build.rs`. Review those build
 scripts the same way as an npm `postinstall`.
@@ -289,6 +298,9 @@ scripts the same way as an npm `postinstall`.
 
 ## 7. Next step
 
-Run the dependency review in section 5 and get approval. M0 starts once the Tauri,
-Svelte and specta packages are approved; the other packages can be reviewed during
-M0 and M1.
+The M0 dependency review is done (`plans/DEPENDENCY_REVIEW_M0.md`) and awaits
+approval, along with installing the Rust toolchain (`rustup`, stable). M0 starts after
+that. The remaining packages in section 5 are reviewed before the milestone that needs
+them: M1 (`rusqlite`, `keyring`, `@testing-library/svelte`), M3 (`llama-cpp-2`,
+`reqwest`, `sha2`, `tokio`, `tokio-util`, `thiserror`), M4 (`whisper-rs`), M5a (`cpal`,
+`tauri-plugin-shell`).
