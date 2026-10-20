@@ -20,7 +20,7 @@ execution: code
   - The ggml link check in U1 fails and no fallback works.
   - The U6 kill gate misses its threshold (AE3).
   - A unit needs a dependency the review rejects.
-- **Execution profile:** A Rust core and a Svelte webview, built on Apple Silicon. U6, U11 and U12 need the 8 GB M2/M3, and U11 also needs the Apple Developer account.
+- **Execution profile:** A Rust core and a Svelte webview, built on Apple Silicon. U6, U11 and U12 need the M2 24 GB measurement machine, and U11 also needs the Apple Developer account.
 - **Who finishes and ships:** The developer approves each dependency review, signs the release, and makes the go/no-go call from the scorecard. Nothing is merged into the Electron repo.
 
 ---
@@ -40,13 +40,13 @@ The prototype's users are the developer and test or demo participants. The produ
 ### Key Decisions
 
 - **Three go/no-go criteria: easier install, faster processing, cheaper agent changes.** These are what a rewrite has to deliver to be worth it. Governs R14–R19. (session-settled: user-directed — chosen over an open-ended architecture test: the plan's original goal was only "test the architecture changes")
-- **"Standard Mac" means an 8–16 GB M2/M3, so 8 GB must pass.** That is the hardware therapists are likely to have. Governs R14. (session-settled: user-directed — chosen over base M1, the dev machine, or measuring first)
+- **All measurements run on an M2 with 24 GB.** This was first set as an 8–16 GB M2/M3 with 8 GB required to pass, because that is what therapists are likely to have. No 8 GB machine was available for U6, so on 2026-10-20 the developer accepted the M2 24 GB run as passing and made it the measurement machine for U6, U12 and every Success Criterion. The scorecard therefore says nothing about memory pressure on 8 GB. Governs R14. (session-settled: user-directed, amended 2026-10-20 — chosen over waiving 8 GB for U6 only, and over a later 8 GB re-run)
 - **The install clock runs from download to first recording.** It includes opening the download, granting permissions and fetching models, because that is what a new user waits through. Governs R9, R10. (session-settled: user-directed — chosen over download → app open and a relative-only comparison)
 - **Record first, LLM later.** Recording is enabled once the speech model is ready, and the summarization model keeps downloading in the background. This keeps the install clock within reach without bundling models. Governs R11, R12. (session-settled: user-approved — chosen over a smaller LLM and bundling models in the download)
 - **Agent cost is measured on 2–3 small backlog features, one spec each, built by the same agent in both repos.** Running several features evens out noise from any one of them. Governs R17. (session-settled: user-approved — chosen over one feature run several times and passive token tracking)
 - **Cut encryption at rest and the keep-audio toggle; keep the live transcript.** Live transcription is the riskiest architecture change, so it stays in the test. Encryption and retention settings don't affect any criterion. Governs R2, R8. (session-settled: user-directed — chosen over also cutting the live transcript)
 - **Always delete audio once the transcript is saved.** Audio is still written during recording so a crash doesn't lose it. Because nothing is encrypted, the prototype is for test and demo sessions only, never real clients. Governs R8. (session-settled: user-approved — chosen over never writing audio, and over keeping demo audio indefinitely)
-- **Summarization speed on 8 GB is an early kill gate.** It is the criterion most likely to fail and the one least affected by later work, so it is measured as soon as on-device summarization works. Governs R15.
+- **Summarization speed is an early kill gate.** It is the criterion most likely to fail and the one least affected by later work, so it is measured as soon as on-device summarization works. Governs R15.
 - **The scorecard reports and the developer decides.** Each criterion gets measured values and pass/fail, but there is no rule that all three must pass. Governs R19.
 
 ### Requirements
@@ -75,7 +75,7 @@ The prototype's users are the developer and test or demo participants. The produ
 **Evidence and scorecard**
 
 - R13. Each session records how long transcription and summarization took after Stop, broken down by stage, in a form the developer can copy into the scorecard.
-- R14. Install time and processing time are measured on an 8 GB M2/M3 for both the prototype and the current Electron release, along with each app's download size.
+- R14. Install time and processing time are measured on the M2 24 GB measurement machine for both the prototype and the current Electron release, along with each app's download size.
 - R15. The processing benchmark uses the same 50-minute recording for both apps. It is run on the prototype as soon as on-device summarization works, and a miss against the Success Criteria is reported to the developer before work continues.
 - R16. The existing quality bar for live transcription still holds: the M5b check in `plans/TAURI_MVP.md` (5-minute call, transcript within ~20 s, summary starts within 10 s of Stop, word count within 5% of batch).
 - R17. The agent-cost test builds each of 2–3 features in both codebases from one written spec, with the same agent and model. It records total tokens per feature per repo once that feature's tests pass.
@@ -110,14 +110,14 @@ The prototype's users are the developer and test or demo participants. The produ
   - **Given** a recording is in progress, **when** the app crashes, **then** the audio captured so far is still on disk after relaunch.
 - AE3. Kill gate miss
   - **Covers:** R15
-  - **Given** on-device summarization works, **when** the 50-minute benchmark on 8 GB takes longer than the processing threshold, **then** the developer gets the measured numbers and the per-stage breakdown before live transcription or UI work starts.
+  - **Given** on-device summarization works, **when** the 50-minute benchmark on the measurement machine takes longer than the processing threshold, **then** the developer gets the measured numbers and the per-stage breakdown before live transcription or UI work starts.
 - AE4. Cancel during summarization
   - **Covers:** R5
   - **Given** a summary is in progress, **when** the user cancels, **then** summarization stops, the transcript stays saved, and the user can regenerate later.
 
 ### Success Criteria
 
-These are the scorecard thresholds R19 checks against. All are measured on an 8 GB M2/M3.
+These are the scorecard thresholds R19 checks against. All are measured on the M2 24 GB measurement machine (see Key Decisions).
 
 - **Install time:** download → first recording in under 2 minutes.
 - **Download size:** smaller than the current Electron release.
@@ -134,7 +134,7 @@ These are the scorecard thresholds R19 checks against. All are measured on an 8 
 
 ### Dependencies / Assumptions
 
-- The developer has, or can borrow, an 8 GB M2/M3 to measure both apps on. R14 and R15 can't be met without one.
+- Both apps are measured on the developer's M2 24 GB. R14 and R15 use that machine.
 - An Apple Developer account is available for signing and notarization (R9).
 - The install time depends on connection speed, since about 150 MB of speech model downloads during the measured window. The scorecard records the connection used.
 - The Tauri prototype is a young codebase and Electron is mature. That can push the agent-cost result either way, and R19's caveats must say so.
@@ -144,7 +144,7 @@ These are the scorecard thresholds R19 checks against. All are measured on an 8 
 **Resolved During Planning**
 
 - Which 2–3 features the agent-cost test uses: KTD13.
-- How a 50-minute transcript gets summarized in 60 s on 8 GB: KTD3 and KTD5, checked by the U6 gate.
+- How a 50-minute transcript gets summarized in 60 s: KTD3 and KTD5, checked by the U6 gate.
 - Which 50-minute recording R15 uses, and how both apps receive it the same way: KTD12.
 
 ### Sources / Research
@@ -173,6 +173,7 @@ These are the scorecard thresholds R19 checks against. All are measured on an 8 
   - The LLM loads at Stop, in parallel with the tail transcription.
   - Whisper unloads before Summarizing on machines with 8 GB of RAM or less.
   - The KV cache stays f16 at 106 KB per token for gemma-2-2b, about 870 MB per 8k sequence. Because the KTD3 chunk sequences decode in one batch, the context is sized to hold all of them together, about 2.6 GB for a 3-chunk session. U6 records peak memory.
+  - The measurement machine has 24 GB, so no measurement exercises the Whisper unload. It stays as product behavior for 8 GB Macs and is covered by tests only.
   - Governs R15.
 - KTD6. Streaming follows `plans/TAURI_MVP.md` M5b. The one delta is that the overlap dedup keys on each source's own timestamps before the merge. Governs R2, R16.
 - KTD7. The job state machine adds `AwaitingModel` between `Finalizing` and `Summarizing`. Summary jobs run one at a time from a FIFO queue that persists across restarts.
@@ -248,7 +249,7 @@ Sequencing and the kill gate.
 flowchart TD
   U1[U1 scaffold + link check] --> U2 & U3 & U4
   U2 & U3 & U4 --> U5[U5 summarization + bench]
-  U5 --> U6{U6 gate: bench ≤ 50 s on 8 GB}
+  U5 --> U6{U6 gate: bench ≤ 50 s on M2 24 GB}
   U6 -- miss --> STOP[stop, report to developer]
   U6 -- pass --> U7[U7 transcription]
   U7 --> U8[U8 batch loop] --> U9[U9 streaming] --> U10[U10 first run]
@@ -294,7 +295,7 @@ plans/evidence/  kill-gate.md  m5b-check.md  release.md  scorecard.md  agent-cos
 | Risk | Mitigation |
 |---|---|
 | whisper.cpp and llama.cpp both link ggml, causing duplicate symbols | U1 link check on approved pins; fallbacks from `plans/TAURI_MVP.md` §6; stop condition if none works |
-| Summarization misses 60 s on 8 GB | U6 gate before Phase B (KTD12); on a miss, report and stop rather than swap models |
+| Summarization misses 60 s on the measurement machine | U6 gate before Phase B (KTD12); on a miss, report and stop rather than swap models |
 | GGUF output reads worse than Ollama's | KTD4; U6 includes a side-by-side read of the DORA summary from both apps |
 | Gemma GGUF host requires login, or its license limits download-on-first-run | U4 picks a host that serves the file anonymously and records the license terms next to the manifest pin |
 | Sidecar fails notarization or loses screen-recording permission once signed | U11 verifies the signed sidecar with `codesign --verify --deep --strict` and a fresh-machine run |
@@ -313,7 +314,7 @@ plans/evidence/  kill-gate.md  m5b-check.md  release.md  scorecard.md  agent-cos
 | U3 | Text pipeline port with parity fixtures | `src-tauri/src/text/`, `scripts/gen-text-fixtures.mjs` | U1 |
 | U4 | Model manager | `src-tauri/src/models/` | U1 |
 | U5 | On-device summarization job and bench harness | `src-tauri/src/llm/`, `src-tauri/src/jobs/`, `src-tauri/src/bin/bench.rs` | U2, U3, U4 |
-| U6 | Kill-gate measurement on 8 GB | `plans/evidence/kill-gate.md` | U5 |
+| U6 | Kill-gate measurement on M2 24 GB | `plans/evidence/kill-gate.md` | U5 |
 | U7 | In-process transcription | `src-tauri/src/stt/whisper.rs` | U4, U6 |
 | U8 | Recording and the batch session loop | `src-tauri/src/audio/`, `src-tauri/src/jobs/session.rs`, `RecordView`, `Settings`, `Timings` | U2, U3, U5, U7 |
 | U9 | Streaming transcription and live transcript | `src-tauri/src/stt/stream.rs`, `LiveTranscript` | U8 |
@@ -420,14 +421,14 @@ plans/evidence/  kill-gate.md  m5b-check.md  release.md  scorecard.md  agent-cos
   - (`--ignored`) The real model summarizes a 30 s fixture transcript with each of the 7 prompts and produces non-empty output.
 - **Verification:** The M3 "Done when" check in `plans/TAURI_MVP.md` passes, and so do `cargo test --features fake-engines` and `cargo test -- --ignored`.
 
-### U6. Kill-gate measurement on 8 GB
+### U6. Kill-gate measurement on M2 24 GB
 
-- **Goal:** The developer has measured summarization time for the 50-minute benchmark on an 8 GB M2/M3 before Phase B starts.
+- **Goal:** The developer has measured summarization time for the 50-minute benchmark on the M2 24 GB measurement machine before Phase B starts.
 - **Requirements:** R15, AE3; KTD12.
 - **Dependencies:** U5.
 - **Files:** `plans/evidence/kill-gate.md`.
 - **Approach:**
-  - Run a release build of the bench on the 8 GB machine: one cold run and three warm runs, reporting the median, the per-stage split and peak memory.
+  - Run a release build of the bench on the M2 24 GB machine: one cold run and three warm runs, reporting the median, the per-stage split and peak memory.
   - Include a side-by-side read of the DORA summary against Electron's output for the same transcript.
   - On a miss, stop and report per AE3.
 - **Test expectation:** none — this unit produces a measurement report, not code.
@@ -520,7 +521,7 @@ plans/evidence/  kill-gate.md  m5b-check.md  release.md  scorecard.md  agent-cos
 
 ### U12. Electron baselines and scorecard
 
-- **Goal:** One scorecard with both apps' numbers for every Success Criterion, measured on the same 8 GB machine.
+- **Goal:** One scorecard with both apps' numbers for every Success Criterion, measured on the same M2 24 GB machine.
 - **Requirements:** R14, R15, R19; KTD12.
 - **Dependencies:** U6, U9, U11.
 - **Files:** `plans/evidence/scorecard.md`.
@@ -555,7 +556,7 @@ Run from `src-tauri/` unless noted:
   - `npx svelte-check`.
   - `npx vitest run`.
 
-Metric gates, all on the 8 GB M2/M3:
+Metric gates, all on the M2 24 GB measurement machine:
 
 | Gate | Threshold | Unit |
 |---|---|---|
