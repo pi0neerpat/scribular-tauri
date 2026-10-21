@@ -370,6 +370,20 @@ fn cancelling_transcription_keeps_the_partial_transcript() {
 }
 
 #[test]
+fn cancelling_reaches_a_window_still_transcribing_from_the_recording() {
+    let h = Harness::with(|stt| stt.block_from = 0, |_| {});
+    let id = h.start(InputMode::Mic);
+    h.feed(16);
+    wait_until("a window is in flight", || h.stt.calls().len() == 1);
+    h.recorder.stop().unwrap();
+    assert!(h.recorder.cancel(&id));
+    h.events.wait_for(&id, SessionStatus::Cancelled);
+    assert_eq!(h.get(&id).status, SessionStatus::Cancelled);
+    assert!(h.summarizer.summarizer.calls().is_empty(), "no summary");
+    h.assert_rows_matched_events();
+}
+
+#[test]
 fn each_mode_records_its_sources() {
     for (mode, expected) in [
         (InputMode::Mic, &[AudioSource::Mic][..]),

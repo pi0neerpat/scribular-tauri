@@ -11,10 +11,13 @@ const speakers: [AudioSource, string][] = [
   ['mic', 'You'],
 ];
 
+// Drops whisper's non-speech tags, such as [BLANK_AUDIO].
+const clean = (text: string) => text.replace(/\[[^\]]*\]/g, '').trim();
+
 export function liveTranscript(segments: SourceSegments, labeled: boolean): string {
   if (!labeled) {
     return [...segments.system, ...segments.mic]
-      .map((s) => s.text.trim())
+      .map((s) => clean(s.text))
       .filter(Boolean)
       .join(' ');
   }
@@ -24,7 +27,7 @@ export function liveTranscript(segments: SourceSegments, labeled: boolean): stri
     .sort((a, b) => a.s.startMs - b.s.startMs);
   const lines: { name: string; texts: string[] }[] = [];
   for (const { name, s } of turns) {
-    const text = s.text.replace(/\[[^\]]*\]/g, '').trim();
+    const text = clean(s.text);
     if (!text) continue;
     const last = lines.at(-1);
     if (last?.name === name) last.texts.push(text);

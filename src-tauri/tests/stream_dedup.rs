@@ -1,7 +1,10 @@
 //! U9: the streaming window logic — overlapping windows that never drop
 //! audio, per-source dedup of the overlap, and the silent-window skip.
 
-use std::sync::{atomic::AtomicBool, Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{atomic::AtomicBool, Mutex},
+};
 
 use scribular_lib::stt::stream::{Dedup, Stream, Window, HOP, WINDOW};
 use scribular_lib::stt::{Result, Transcriber, TranscriptSegment, SAMPLE_RATE};
@@ -32,6 +35,15 @@ impl Transcriber for Scripted {
     fn transcribe(&self, samples: &[f32], _: &AtomicBool) -> Result<Vec<TranscriptSegment>> {
         self.calls.lock().unwrap().push(samples.len());
         Ok(self.segments.clone())
+    }
+}
+
+/// Returns each call's segments in turn.
+struct Sequence(Mutex<VecDeque<Vec<TranscriptSegment>>>);
+
+impl Transcriber for Sequence {
+    fn transcribe(&self, _: &[f32], _: &AtomicBool) -> Result<Vec<TranscriptSegment>> {
+        Ok(self.0.lock().unwrap().pop_front().unwrap_or_default())
     }
 }
 
@@ -129,4 +141,37 @@ fn a_silent_window_is_skipped() {
         Ok(vec![segment(10_000, 11_000, "Thank you for watching")])
     );
     assert_eq!(*stt.calls.lock().unwrap(), [20 * SECOND]);
+}
+
+#[test]
+fn a_segment_cut_off_at_a_window_end_comes_whole_from_the_next_window() {
+    let stt = Sequence(Mutex::new(VecDeque::from([
+        // 0–15 s: the last segment runs into the window's end.
+        vec![
+            segment(0, 11_000, "one"),
+            segment(11_500, 15_000, "we should ship the"),
+        ],
+        // The 10–25 s tail: that speech whole, and a segment at its end.
+        vec![
+            segment(0, 1_000, "one"),
+            segment(1_500, 8_000, "we should ship the release on Friday"),
+            segment(13_000, 15_000, "bye"),
+        ],
+    ])));
+    let cancel = AtomicBool::new(false);
+    let mut stream = Stream::default();
+    stream.push(&tone(25));
+    stream.finish();
+    let mut kept = Vec::new();
+    while let Some(window) = stream.next() {
+        kept.extend(stream.transcribe(&window, &stt, &cancel).unwrap());
+    }
+    assert_eq!(
+        kept,
+        [
+            segment(0, 11_000, "one"),
+            segment(11_500, 18_000, "we should ship the release on Friday"),
+            segment(23_000, 25_000, "bye"),
+        ]
+    );
 }

@@ -10,6 +10,12 @@ describe('liveTranscript', () => {
     );
   });
 
+  it('drops tags from one source', () => {
+    expect(liveTranscript({ mic: [seg(0, '[BLANK_AUDIO]'), seg(900, 'Hi [music] there')], system: [] }, false)).toBe(
+      'Hi  there',
+    );
+  });
+
   it('merges two sources into speaker turns', () => {
     const text = liveTranscript(
       {

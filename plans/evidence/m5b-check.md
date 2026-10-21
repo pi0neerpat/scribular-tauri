@@ -8,14 +8,16 @@
 - `src-tauri/tests/stream_dedup.rs`:
   - 20 s windows cut every 15 s cover all the audio, including the tail.
   - Overlap segments at or before the last kept end are dropped.
+  - A segment cut off at a window's end is taken whole from the next window, so its words are not lost.
   - Silent windows are skipped.
   - Catching up means more than 2 windows are queued.
 - `src-tauri/tests/session_job.rs`, with the fake engines:
   - A slow transcriber shows "Catching up...", and no audio is dropped.
   - Stop drains the queue while the summary model loads.
+  - Cancel during Finalizing stops a window that is still transcribing.
   - Segments are saved and emitted in recording time.
   - Whisper loads once at the start of a recording and is unloaded after the transcript when `unload_whisper` is set.
-- `src/lib/transcript.test.ts`: the live view merges `Client:`/`You:` turns like the final transcript.
+- `src/lib/transcript.test.ts`: the live view merges `Client:`/`You:` turns like the final transcript, and drops tags like `[BLANK_AUDIO]` from both views.
 
 ## Manual check (to run)
 

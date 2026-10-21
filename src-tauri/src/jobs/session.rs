@@ -109,7 +109,8 @@ impl Source {
 struct Recording {
     session_id: String,
     sources: Vec<Source>,
-    /// Stops the streamers of a recording that is abandoned.
+    /// Stops the streamers of a recording that is abandoned or, once
+    /// stopped, cancelled.
     cancel: Arc<AtomicBool>,
     /// Dropped with the recording, which ends its watchdog.
     _watched: mpsc::Sender<()>,
@@ -315,7 +316,8 @@ impl Recorder {
         let duration_ms =
             u32::try_from(samples * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
 
-        let cancel = Arc::new(AtomicBool::new(false));
+        // The streamers' flag, so a cancel also stops the window in flight.
+        let cancel = Arc::clone(&recording.cancel);
         lock(&inner.state)
             .finalizing
             .insert(id.clone(), Arc::clone(&cancel));

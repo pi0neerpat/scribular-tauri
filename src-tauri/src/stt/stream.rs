@@ -20,6 +20,12 @@ pub const OVERLAP: usize = WINDOW - HOP;
 pub const SILENCE_RMS: f32 = 0.002;
 /// More queued windows than this shows "Catching up...".
 pub const CATCHING_UP: usize = 2;
+/// A segment ending this close to a window's end was likely cut off there.
+const EDGE_MS: i64 = 1_000;
+
+fn ms(samples: usize) -> i64 {
+    (samples as u64 * 1000 / SAMPLE_RATE as u64) as i64
+}
 
 pub fn rms(samples: &[f32]) -> f32 {
     if samples.is_empty() {
@@ -35,11 +41,13 @@ pub fn rms(samples: &[f32]) -> f32 {
 pub struct Window {
     pub start: usize,
     pub samples: Vec<f32>,
+    /// The tail queued by [`Stream::finish`]; no window follows it.
+    pub last: bool,
 }
 
 impl Window {
     pub fn offset_ms(&self) -> i64 {
-        (self.start as u64 * 1000 / SAMPLE_RATE as u64) as i64
+        ms(self.start)
     }
 }
 
@@ -93,9 +101,13 @@ impl Stream {
         self.base + self.audio.len()
     }
 
-    fn cut(&mut self, start: usize, end: usize) {
+    fn cut(&mut self, start: usize, end: usize, last: bool) {
         let samples = self.audio[start - self.base..end - self.base].to_vec();
-        self.queue.push_back(Window { start, samples });
+        self.queue.push_back(Window {
+            start,
+            samples,
+            last,
+        });
         self.covered = end;
         let keep_from = end.saturating_sub(OVERLAP).max(self.base);
         self.audio.drain(..keep_from - self.base);
@@ -108,7 +120,7 @@ impl Stream {
         self.audio.extend_from_slice(samples);
         while self.received() >= self.covered + HOP {
             let end = self.covered + HOP;
-            self.cut(end.saturating_sub(WINDOW), end);
+            self.cut(end.saturating_sub(WINDOW), end, false);
         }
     }
 
@@ -116,7 +128,7 @@ impl Stream {
     pub fn finish(&mut self) {
         let end = self.received();
         if end > self.covered {
-            self.cut(self.covered.saturating_sub(OVERLAP), end);
+            self.cut(self.covered.saturating_sub(OVERLAP), end, true);
         }
     }
 
@@ -133,7 +145,9 @@ impl Stream {
     }
 
     /// Transcribes `window` and returns its new segments in recording time.
-    /// A silent window returns nothing without calling `stt`.
+    /// A silent window returns nothing without calling `stt`. A segment cut
+    /// off at the end of a window is left to the next one, whose overlap
+    /// holds it whole.
     pub fn transcribe(
         &mut self,
         window: &Window,
@@ -143,7 +157,17 @@ impl Stream {
         if rms(&window.samples) < SILENCE_RMS {
             return Ok(Vec::new());
         }
-        let segments = stt.transcribe(&window.samples, cancel)?;
+        let mut segments = stt.transcribe(&window.samples, cancel)?;
+        if !window.last {
+            let end = ms(window.samples.len());
+            let overlap = end - ms(OVERLAP);
+            while segments
+                .last()
+                .is_some_and(|s| s.end_ms > end - EDGE_MS && s.start_ms >= overlap)
+            {
+                segments.pop();
+            }
+        }
         Ok(self.dedup.keep(window.offset_ms(), segments))
     }
 }
