@@ -153,7 +153,6 @@ fn segment(start_ms: i64, text: &str) -> TranscriptSegment {
 }
 
 struct Harness {
-    db: TempDb,
     store: Arc<Store>,
     events: Arc<Events>,
     stt: Arc<FakeTranscriber>,
@@ -162,6 +161,8 @@ struct Harness {
     system: Arc<FakeSource>,
     queue: Arc<JobQueue>,
     recorder: Recorder,
+    /// Last, so the files go after everything that has them open.
+    db: TempDb,
 }
 
 impl Harness {
