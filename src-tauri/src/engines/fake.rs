@@ -236,12 +236,15 @@ impl FakeSource {
 
     /// Delivers `samples` (interleaved, native format). Returns whether a
     /// capture accepted them, retrying backpressure for at most ten seconds.
+    /// A block larger than the capture's ring is refused at once.
     pub fn feed(&self, samples: &[f32]) -> bool {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             {
                 let mut capture = self.sink.lock().unwrap();
                 match capture.as_mut() {
+                    // A block larger than the ring never fits, so retrying cannot help.
+                    Some(sink) if samples.len() > sink.capacity() => return false,
                     Some(sink) => {
                         if sink.try_push(samples) {
                             return true;
@@ -326,5 +329,25 @@ impl SystemAudio for FakeSystemAudio {
             return Err(AudioError::AppNotFound(app.into()));
         }
         self.source.open(Privacy::SystemAudio, sink)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::chunk_writer;
+
+    #[test]
+    fn feed_rejects_a_block_larger_than_the_ring_without_retrying() {
+        let source = Arc::new(FakeSource::new(Format {
+            sample_rate: 16_000,
+            channels: 1,
+        }));
+        let (sink, _consumer) = chunk_writer::channel_with_capacity(8);
+        let _capture = FakeMicrophone(Arc::clone(&source)).open(sink).unwrap();
+        let started = Instant::now();
+        assert!(!source.feed(&[0.0; 9]));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(source.feed(&[0.0; 8]));
     }
 }

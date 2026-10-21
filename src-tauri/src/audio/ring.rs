@@ -59,6 +59,11 @@ pub fn ring(capacity: usize) -> (Producer, Consumer) {
 }
 
 impl Producer {
+    /// The most samples one block can ever hold.
+    pub fn capacity(&self) -> usize {
+        self.shared.buf.len()
+    }
+
     /// Copies a whole block without allocating, locking or blocking; counts it
     /// as dropped if it cannot fit. A block larger than capacity can never fit.
     pub fn push(&mut self, samples: &[f32]) {
