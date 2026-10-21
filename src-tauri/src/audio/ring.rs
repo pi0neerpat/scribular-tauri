@@ -1,5 +1,7 @@
 //! A bounded SPSC sample ring: the cpal callback must not allocate or block.
 //! Overflow drops the whole block and counts its samples; the writer pads silence.
+//! Until the writer takes that count, every later block is dropped into it too,
+//! so the silence always belongs right after the samples drained with it.
 
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
@@ -24,12 +26,11 @@ pub struct Producer {
 pub struct Consumer {
     shared: Arc<Shared>,
     head: usize,
-    dropped: usize,
 }
 
 /// What one [`Consumer::drain`] found besides samples.
 pub struct Drain {
-    /// Samples dropped since the previous drain.
+    /// Samples dropped right after this drain's samples, to pad with silence.
     pub dropped: usize,
     /// This drain is complete: nothing more will ever arrive.
     pub closed: bool,
@@ -50,11 +51,7 @@ pub fn ring(capacity: usize) -> (Producer, Consumer) {
             shared: Arc::clone(&shared),
             tail: 0,
         },
-        Consumer {
-            shared,
-            head: 0,
-            dropped: 0,
-        },
+        Consumer { shared, head: 0 },
     )
 }
 
@@ -74,9 +71,13 @@ impl Producer {
         }
     }
 
-    /// Like `push`, but returns false without counting a drop when full, so
-    /// fakes and tests can retry. Whole blocks keep channel frames aligned.
+    /// Like `push`, but returns false without counting a drop when full or
+    /// while a drop awaits the writer, so fakes and tests can retry. Whole
+    /// blocks keep channel frames aligned.
     pub fn try_push(&mut self, samples: &[f32]) -> bool {
+        if self.shared.dropped.load(Ordering::Acquire) != 0 {
+            return false;
+        }
         let head = self.shared.head.load(Ordering::Acquire);
         let capacity = self.shared.buf.len();
         if samples.len() > capacity - self.tail.wrapping_sub(head) {
@@ -103,8 +104,10 @@ impl Consumer {
     pub fn drain(&mut self, out: &mut Vec<f32>) -> Drain {
         // Acquire closed first so a final drain also observes every preceding
         // drop and tail publication; acquire tail before reading its samples.
+        // A drop seen before tail is at that tail, since it holds back every
+        // later block; one made after it waits for the next drain.
         let closed = self.shared.closed.load(Ordering::Acquire);
-        let dropped = self.shared.dropped.load(Ordering::Acquire);
+        let pending = self.shared.dropped.load(Ordering::Acquire) != 0;
         let tail = self.shared.tail.load(Ordering::Acquire);
         let mask = self.shared.buf.len() - 1;
         for i in 0..tail.wrapping_sub(self.head) {
@@ -114,12 +117,14 @@ impl Consumer {
         }
         self.head = tail;
         self.shared.head.store(tail, Ordering::Release);
-        let delta = dropped.wrapping_sub(self.dropped);
-        self.dropped = dropped;
-        Drain {
-            dropped: delta,
-            closed,
-        }
+        // Taking the count lets the producer accept blocks again; the swap
+        // also takes any block dropped into it since the load above.
+        let dropped = if pending {
+            self.shared.dropped.swap(0, Ordering::AcqRel)
+        } else {
+            0
+        };
+        Drain { dropped, closed }
     }
 }
 
@@ -165,6 +170,24 @@ mod tests {
     }
 
     #[test]
+    fn a_block_after_a_drop_waits_until_the_drop_is_drained() {
+        let (mut producer, mut consumer) = ring(8);
+        let mut out = Vec::new();
+        assert!(producer.try_push(&[1.0; 6]));
+        producer.push(&[2.0; 4]);
+        // It would fit, but it must not reach the writer ahead of the silence.
+        assert!(!producer.try_push(&[3.0; 2]));
+        producer.push(&[3.0; 2]);
+        assert_eq!(consumer.drain(&mut out).dropped, 6);
+        assert_eq!(out, vec![1.0; 6]);
+
+        assert!(producer.try_push(&[4.0; 2]));
+        out.clear();
+        assert_eq!(consumer.drain(&mut out).dropped, 0);
+        assert_eq!(out, vec![4.0; 2]);
+    }
+
+    #[test]
     fn closing_returns_the_final_data_and_drops() {
         let (mut producer, mut consumer) = ring(2);
         producer.push(&[1.0, 2.0]);
@@ -205,5 +228,41 @@ mod tests {
         }
         writer.join().unwrap();
         assert_eq!(out, (0..N).map(|n| n as f32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn two_threads_keep_drops_in_place_on_the_timeline() {
+        const N: usize = 200_000;
+        let (mut producer, mut consumer) = ring(64);
+        let writer = std::thread::spawn(move || {
+            let mut start = 0;
+            let mut size = 1;
+            while start < N {
+                let end = (start + size).min(N);
+                let samples: Vec<f32> = (start..end).map(|n| n as f32).collect();
+                producer.push(&samples);
+                start = end;
+                size = size % 40 + 1;
+            }
+        });
+        let mut out = Vec::new();
+        let mut dropped = 0;
+        loop {
+            let drained = consumer.drain(&mut out);
+            out.extend(std::iter::repeat(f32::NAN).take(drained.dropped));
+            dropped += drained.dropped;
+            if drained.closed {
+                break;
+            }
+        }
+        writer.join().unwrap();
+        assert_eq!(out.len(), N);
+        assert!(dropped > 0, "the test should overflow the ring");
+        for (i, &sample) in out.iter().enumerate() {
+            assert!(
+                sample.is_nan() || sample == i as f32,
+                "sample {i} is {sample}"
+            );
+        }
     }
 }
