@@ -612,7 +612,7 @@ impl Inner {
 
         // Under the state lock, so a cancel lands either on the flag or on
         // the queued job, never between them.
-        let state = lock(&self.state);
+        let mut state = lock(&self.state);
         if partial || cancel.load(Ordering::Relaxed) {
             drop(state);
             return self.end(id, SessionStatus::Cancelled, "");
@@ -620,6 +620,8 @@ impl Inner {
         let queued = self
             .prompt_for(id)
             .and_then(|prompt| self.jobs.regenerate(id, &prompt).map_err(|e| e.to_string()));
+        // The flag is not read again, so a cancel from here must go to the job.
+        state.finalizing.remove(id);
         drop(state);
         if let Err(e) = queued {
             self.end(id, SessionStatus::Failed, &e);

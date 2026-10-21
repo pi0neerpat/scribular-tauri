@@ -393,6 +393,29 @@ fn cancelling_reaches_a_window_still_transcribing_from_the_recording() {
 }
 
 #[test]
+fn cancelling_after_the_transcript_stops_the_summary() {
+    let h = Harness::with(
+        |_| {},
+        |llm| {
+            let summarizer = Arc::get_mut(&mut llm.summarizer).unwrap();
+            summarizer.token_delay = Duration::from_millis(100);
+        },
+    );
+    let id = h.start(InputMode::Mic);
+    h.feed(6);
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Summarizing);
+    assert!(h.recorder.cancel(&id));
+    h.events.wait_for(&id, SessionStatus::Cancelled);
+
+    let s = h.get(&id);
+    assert_eq!(s.status, SessionStatus::Cancelled);
+    assert_eq!(s.transcript, TRANSCRIPT);
+    assert_eq!(s.summary, "");
+    h.assert_rows_matched_events();
+}
+
+#[test]
 fn each_mode_records_its_sources() {
     for (mode, expected) in [
         (InputMode::Mic, &[AudioSource::Mic][..]),
