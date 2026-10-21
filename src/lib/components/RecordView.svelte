@@ -21,6 +21,15 @@
   import Timings from './Timings.svelte';
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
+  // The session in flight, kept across a window reload. The backend reports
+  // only the one recording, not a session after Stop. A window session, not
+  // local storage, so a crashed app's session isn't picked up on relaunch.
+  const IN_FLIGHT_KEY = 'scribular.inFlightSession';
+
+  function remember(id: string | null) {
+    if (id) sessionStorage.setItem(IN_FLIGHT_KEY, id);
+    else sessionStorage.removeItem(IN_FLIGHT_KEY);
+  }
 
   let sessionId = $state<string | null>(null);
   // Advanced by start, stop and progress events; never by a fetch, whose
@@ -55,15 +64,25 @@
       progress = p;
       status = p.state;
       if (finished.includes(p.state)) {
+        remember(null);
         getSession(p.sessionId).then((s) => (result = s));
       }
     });
-    // The window may reload while a recording runs.
-    currentRecording().then(async (id) => {
+    // The window may reload while a session runs.
+    currentRecording().then(async (recording) => {
+      const id = recording ?? sessionStorage.getItem(IN_FLIGHT_KEY);
       if (!id) return;
       sessionId = id;
-      status = 'recording';
+      if (recording) status = 'recording';
       const session = await getSession(id);
+      if (!recording && (!session || finished.includes(session.status))) {
+        // It ended while the window reloaded.
+        sessionId = null;
+        remember(null);
+        result = session;
+        return;
+      }
+      if (session && status === null) status = session.status;
       labeled = session?.inputMode === 'micAndSystem';
       startedAt = session?.createdAt ?? Date.now();
     });
@@ -82,6 +101,7 @@
       const title = `Session ${new Date().toLocaleString()}`;
       const session = await startRecording(settings.inputMode, app, title);
       sessionId = session.id;
+      remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
       startedAt = Date.now();
