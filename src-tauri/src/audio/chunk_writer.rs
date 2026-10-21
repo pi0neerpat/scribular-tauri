@@ -16,14 +16,41 @@ use crate::stt::SAMPLE_RATE;
 /// Five seconds of 16 kHz mono per row.
 pub const CHUNK_SAMPLES: usize = 5 * SAMPLE_RATE as usize;
 
+/// Samples per buffer handed from the capture callback to the writer.
+const BLOCK_SAMPLES: usize = 4096;
+/// Buffers allocated up front: over a second of 48 kHz stereo, however the
+/// source sizes its callbacks.
+const PREALLOCATED: usize = 128;
+/// Buffers the writer may fall behind by, about 3 minutes of 48 kHz stereo,
+/// before the callback drops samples rather than block.
+const MAX_QUEUED: usize = 8192;
+
+/// The writer's end of [`channel`]: filled buffers in, empty ones back.
+pub struct Blocks {
+    filled: mpsc::Receiver<Vec<f32>>,
+    free: mpsc::SyncSender<Vec<f32>>,
+}
+
 /// A sink that hands each callback's samples to the writer thread. The
-/// capture callback only copies; resampling and SQLite stay off it.
-pub fn channel() -> (Sink, mpsc::Receiver<Vec<f32>>) {
-    let (tx, rx) = mpsc::channel();
+/// capture callback only copies into buffers the writer hands back, so it
+/// allocates only while the writer is behind; resampling and SQLite stay
+/// off it.
+pub fn channel() -> (Sink, Blocks) {
+    let (tx, filled) = mpsc::sync_channel(MAX_QUEUED);
+    let (free, pool) = mpsc::sync_channel(MAX_QUEUED);
+    for _ in 0..PREALLOCATED {
+        let _ = free.try_send(Vec::with_capacity(BLOCK_SAMPLES));
+    }
     let sink: Sink = Box::new(move |data: &[f32]| {
-        let _ = tx.send(data.to_vec());
+        for piece in data.chunks(BLOCK_SAMPLES) {
+            let mut block = pool
+                .try_recv()
+                .unwrap_or_else(|_| Vec::with_capacity(BLOCK_SAMPLES));
+            block.extend_from_slice(piece);
+            let _ = tx.try_send(block);
+        }
     });
-    (sink, rx)
+    (sink, Blocks { filled, free })
 }
 
 /// Writes until every sender is gone (the capture was dropped), then flushes
@@ -35,7 +62,7 @@ pub fn spawn(
     session_id: String,
     source: AudioSource,
     format: Format,
-    rx: mpsc::Receiver<Vec<f32>>,
+    blocks: Blocks,
     live: mpsc::Sender<Vec<f32>>,
 ) -> std::io::Result<JoinHandle<store::Result<u64>>> {
     thread::Builder::new()
@@ -52,9 +79,11 @@ pub fn spawn(
                 total += pcm.len() as u64;
                 Ok(())
             };
-            for data in rx {
+            for mut data in blocks.filled {
                 let before = pending.len();
                 resampler.process(&data, &mut pending);
+                data.clear();
+                let _ = blocks.free.try_send(data);
                 let _ = live.send(pending[before..].to_vec());
                 while pending.len() >= CHUNK_SAMPLES {
                     write(&pending[..CHUNK_SAMPLES], &mut seq)?;
