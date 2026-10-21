@@ -54,7 +54,11 @@ pub struct Dedup {
 impl Dedup {
     /// Shifts a window's segments by `offset_ms` to recording time and
     /// returns the new ones.
-    pub fn keep(&mut self, offset_ms: i64, segments: Vec<TranscriptSegment>) -> Vec<TranscriptSegment> {
+    pub fn keep(
+        &mut self,
+        offset_ms: i64,
+        segments: Vec<TranscriptSegment>,
+    ) -> Vec<TranscriptSegment> {
         let seen = self.last_end_ms;
         let kept: Vec<TranscriptSegment> = segments
             .into_iter()

@@ -492,7 +492,13 @@ fn system_audio_needs_an_app_and_one_recording_at_a_time() {
     ));
 }
 
-const WINDOW_CALLS: [usize; 5] = [15 * 16_000, 20 * 16_000, 20 * 16_000, 20 * 16_000, 7 * 16_000];
+const WINDOW_CALLS: [usize; 5] = [
+    15 * 16_000,
+    20 * 16_000,
+    20 * 16_000,
+    20 * 16_000,
+    7 * 16_000,
+];
 
 fn loads(h: &Harness) -> usize {
     h.stt.loads.load(Ordering::SeqCst)
@@ -554,7 +560,9 @@ fn segments_are_saved_and_emitted_in_recording_time() {
     let h = Harness::new();
     let id = h.start(InputMode::Mic);
     h.feed(32);
-    wait_until("two windows", || h.events.segments.lock().unwrap().len() == 2);
+    wait_until("two windows", || {
+        h.events.segments.lock().unwrap().len() == 2
+    });
     assert_eq!(h.get(&id).status, SessionStatus::Recording);
     h.recorder.stop().unwrap();
     h.events.wait_for(&id, SessionStatus::Done);
@@ -565,7 +573,12 @@ fn segments_are_saved_and_emitted_in_recording_time() {
         .lock()
         .unwrap()
         .iter()
-        .inspect(|e| assert_eq!((e.session_id.as_str(), e.source), (id.as_str(), AudioSource::Mic)))
+        .inspect(|e| {
+            assert_eq!(
+                (e.session_id.as_str(), e.source),
+                (id.as_str(), AudioSource::Mic)
+            )
+        })
         .flat_map(|e| e.segments.iter().map(|s| s.start_ms))
         .collect();
     // Windows at 0 s, 10 s and the 25 s tail, each saying both segments.

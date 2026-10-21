@@ -76,7 +76,11 @@ fn finishing_queues_only_the_new_tail() {
     let mut stream = Stream::default();
     stream.push(&tone(30));
     stream.finish();
-    assert_eq!(stream.queued(), 2, "no tail when the last window ends the audio");
+    assert_eq!(
+        stream.queued(),
+        2,
+        "no tail when the last window ends the audio"
+    );
 
     let mut stream = Stream::default();
     stream.push(&tone(3));

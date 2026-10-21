@@ -22,7 +22,10 @@ use crate::store::{
     self, AudioSource, InputMode, NewSession, Session, SessionStatus, Store, StoreError, Timings,
     ACTIVE_PROMPT_ID,
 };
-use crate::stt::{stream::Stream, SttError, Transcriber, TranscriberLoader, SAMPLE_RATE};
+use crate::stt::{
+    stream::{Stream, Window},
+    SttError, Transcriber, TranscriberLoader, SAMPLE_RATE,
+};
 use crate::text::{clean_transcript, merge_diarized_segments, Segment};
 
 #[derive(Debug)]
@@ -362,6 +365,8 @@ impl Drop for Recorder {
     /// transcription leaves it `Finalizing`; either way the next launch marks
     /// it interrupted and keeps its audio (KTD2).
     fn drop(&mut self) {
+        // Not `if let Some(..) = lock(..).take()`: the guard would live through
+        // the block, and a streamer locks `recording` before it can stop.
         let recording = lock(&self.inner.recording).take();
         if let Some(recording) = recording {
             abandon(recording.sources, &recording.cancel, true);
@@ -461,14 +466,20 @@ impl Inner {
             }
             if stream.catching_up() != catching_up {
                 catching_up = !catching_up;
-                let message = if catching_up { "Catching up..." } else { "Recording..." };
+                let message = if catching_up {
+                    "Catching up..."
+                } else {
+                    "Recording..."
+                };
                 // Only while still recording, so the row matches the event.
                 let recording = lock(&self.recording);
                 if recording.as_ref().is_some_and(|r| r.session_id == id) {
                     self.emit(id, SessionStatus::Recording, message);
                 }
             }
-            let Some(window) = stream.next() else { continue };
+            let Some(window) = stream.next() else {
+                continue;
+            };
             if !self.window(id, source, &mut stream, &window, &*stt, cancel)? {
                 return Ok(stream);
             }
@@ -482,7 +493,7 @@ impl Inner {
         id: &str,
         source: AudioSource,
         stream: &mut Stream,
-        window: &crate::stt::stream::Window,
+        window: &Window,
         stt: &dyn Transcriber,
         cancel: &AtomicBool,
     ) -> Result<bool, String> {
@@ -569,12 +580,11 @@ impl Inner {
         if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
             lock(&self.model).take();
         }
-        let (transcript, partial) = match drained.and_then(|partial| {
-            self.transcript(id).map(|t| (t, partial))
-        }) {
-            Ok(t) => t,
-            Err(e) => return self.end(id, SessionStatus::Failed, &e),
-        };
+        let (transcript, partial) =
+            match drained.and_then(|partial| self.transcript(id).map(|t| (t, partial))) {
+                Ok(t) => t,
+                Err(e) => return self.end(id, SessionStatus::Failed, &e),
+            };
         if lock(&self.state).shutdown {
             return;
         }
@@ -620,24 +630,35 @@ impl Inner {
 
     /// Transcribes what each source's streamer left: its queued windows and
     /// the tail after them. Returns whether a cancel cut it short.
-    fn drain(&self, id: &str, streamers: Vec<Streamer>, cancel: &AtomicBool) -> Result<bool, String> {
+    fn drain(
+        &self,
+        id: &str,
+        streamers: Vec<Streamer>,
+        cancel: &AtomicBool,
+    ) -> Result<bool, String> {
         // Joined first, so none outlives a failure.
         let streams: Vec<Result<Stream, String>> = streamers
             .into_iter()
-            .map(|s| s.join().unwrap_or_else(|_| Err("the transcriber crashed".into())))
+            .map(|s| {
+                s.join()
+                    .unwrap_or_else(|_| Err("the transcriber crashed".into()))
+            })
             .collect();
         let session = self.session(id)?;
         let mut partial = false;
         for (&source, stream) in sources(session.input_mode).iter().zip(streams) {
             let mut stream = stream?;
             stream.finish();
-            while let Some(window) = stream.next() {
-                partial = partial
-                    || cancel.load(Ordering::Relaxed)
-                    || !self.window(id, source, &mut stream, &window, &*self.transcriber()?, cancel)?;
-                if partial {
+            while !partial {
+                let Some(window) = stream.next() else { break };
+                if cancel.load(Ordering::Relaxed) {
+                    partial = true;
                     break;
                 }
+                // Loaded on demand: a recording that streamed every window
+                // needs no model here.
+                let stt = self.transcriber()?;
+                partial = !self.window(id, source, &mut stream, &window, &*stt, cancel)?;
             }
         }
         Ok(partial)
