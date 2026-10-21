@@ -38,7 +38,8 @@
 
   onMount(async () => {
     try {
-      [settings, prompts] = await Promise.all([getRecordingSettings(), listPrompts()]);
+      settings = await getRecordingSettings();
+      prompts = await listPrompts();
     } catch (e) {
       error = String(e);
     }
