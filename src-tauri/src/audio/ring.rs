@@ -235,7 +235,10 @@ mod tests {
         const N: usize = 200_000;
         let (mut producer, mut consumer) = ring(64);
         let writer = std::thread::spawn(move || {
-            let mut start = 0;
+            // A block larger than the ring must overflow, independent of how
+            // quickly the consumer gets scheduled.
+            producer.push(&(0..65).map(|n| n as f32).collect::<Vec<_>>());
+            let mut start = 65;
             let mut size = 1;
             while start < N {
                 let end = (start + size).min(N);
