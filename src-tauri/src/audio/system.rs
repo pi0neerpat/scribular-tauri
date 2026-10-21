@@ -86,14 +86,20 @@ impl SystemAudio for AudioCapCli {
             sample_rate: found.sample_rate,
             channels: found.channels,
         };
-        let mut child = Command::new(&self.path)
+        let child = Command::new(&self.path)
             .args(["--source", app])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        let mut stdout = child.stdout.take().expect("stdout is piped");
-        let stderr = child.stderr.take().expect("stderr is piped");
+        // From here, any early return drops `capture`, which kills the CLI.
+        let mut capture = CliCapture {
+            format,
+            child,
+            threads: Vec::new(),
+        };
+        let mut stdout = capture.child.stdout.take().expect("stdout is piped");
+        let stderr = capture.child.stderr.take().expect("stderr is piped");
 
         let flowing = Arc::new(AtomicBool::new(false));
         let reader = {
@@ -122,14 +128,12 @@ impl SystemAudio for AudioCapCli {
                     }
                 })?
         };
+        capture.threads.push(reader);
         let errors = Arc::new(Mutex::new(String::new()));
-        let collector = spawn_collector(stderr, Arc::clone(&errors))?;
+        capture
+            .threads
+            .push(spawn_collector(stderr, Arc::clone(&errors))?);
 
-        let mut capture = CliCapture {
-            format,
-            child,
-            threads: vec![reader, collector],
-        };
         let deadline = Instant::now() + STARTUP_GRACE;
         while Instant::now() < deadline && !flowing.load(Ordering::Relaxed) {
             if capture.child.try_wait()?.is_some() {
