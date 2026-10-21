@@ -2,6 +2,10 @@
 //! rate whisper takes. Downsampling uses a Kaiser-windowed-sinc low-pass
 //! filter to suppress aliasing; upsampling interpolates linearly.
 //! Electron decimated by an integer factor instead.
+//!
+//! The filter needs input half its width ahead of each output sample, so the
+//! output trails the input by [`LowPass::HALF_WIDTH`] samples (1.25 ms)
+//! rather than coming up short: a recording keeps its length.
 
 use super::Format;
 use crate::stt::SAMPLE_RATE;
@@ -35,7 +39,7 @@ impl Resampler {
         } else {
             Method::Interpolate
         };
-        let padding = match &method {
+        let reach = match &method {
             Method::Decimate(filter) => filter.half_in.ceil() as usize,
             _ => 0,
         };
@@ -44,8 +48,10 @@ impl Resampler {
             step,
             method,
             partial: Vec::new(),
-            pending: vec![0.0; padding],
-            pos: padding as f64,
+            // Silence ahead of the signal: the first output is centred `reach`
+            // samples before it, so the output trails the input.
+            pending: vec![0.0; 2 * reach],
+            pos: reach as f64,
         }
     }
 
@@ -206,7 +212,7 @@ mod tests {
         };
         let input = sine(48_000, 2, 1.0, 440.0, 0.5);
         let out = run(format, &input, 1024);
-        assert!((16_000 - 21..=16_000).contains(&out.len()), "{}", out.len());
+        assert_eq!(out.len(), 16_000);
         let expected = 0.5 / 2f32.sqrt();
         let got = rms(&out);
         assert!((got - expected).abs() / expected < 0.02, "rms {got}");
@@ -226,11 +232,7 @@ mod tests {
         for (a, b) in whole.iter().zip(&split) {
             assert!((a - b).abs() < 1e-5);
         }
-        assert!(
-            (8_000 - 21..=8_000).contains(&whole.len()),
-            "{}",
-            whole.len()
-        );
+        assert!((whole.len() as i64 - 8_000).abs() <= 1, "{}", whole.len());
     }
 
     #[test]
