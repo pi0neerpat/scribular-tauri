@@ -28,12 +28,15 @@ pub fn channel() -> (Sink, mpsc::Receiver<Vec<f32>>) {
 
 /// Writes until every sender is gone (the capture was dropped), then flushes
 /// the partial last chunk. Joins to the number of 16 kHz samples written.
+/// Each resampled slice also goes to `live`, for streaming transcription;
+/// if nothing receives it any more, recording carries on.
 pub fn spawn(
     store: Arc<Store>,
     session_id: String,
     source: AudioSource,
     format: Format,
     rx: mpsc::Receiver<Vec<f32>>,
+    live: mpsc::Sender<Vec<f32>>,
 ) -> std::io::Result<JoinHandle<store::Result<u64>>> {
     thread::Builder::new()
         .name(format!("chunks-{}", source.as_str()))
@@ -50,7 +53,9 @@ pub fn spawn(
                 Ok(())
             };
             for data in rx {
+                let before = pending.len();
                 resampler.process(&data, &mut pending);
+                let _ = live.send(pending[before..].to_vec());
                 while pending.len() >= CHUNK_SAMPLES {
                     write(&pending[..CHUNK_SAMPLES], &mut seq)?;
                     pending.drain(..CHUNK_SAMPLES);

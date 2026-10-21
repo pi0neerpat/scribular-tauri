@@ -2,6 +2,7 @@
 //! tested with a fake engine. Engines take 16 kHz mono samples from memory;
 //! [`read_wav`] exists for fixtures and the `transcribe_file` dev command.
 
+pub mod stream;
 #[cfg(not(feature = "fake-engines"))]
 pub mod whisper;
 

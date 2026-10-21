@@ -5,7 +5,7 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
+use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
 use scribular_lib::llm::llama::{LlamaLoader, LlamaSummarizer};
 use scribular_lib::llm::prompt::{chunk_budget, chunk_prompt};
 use scribular_lib::llm::Summarizer;
@@ -56,6 +56,7 @@ struct Quiet;
 impl JobEvents for Quiet {
     fn progress(&self, _: SessionProgress) {}
     fn summary_delta(&self, _: SummaryDelta) {}
+    fn segments(&self, _: SessionSegments) {}
 }
 
 /// KTD3 estimates "about 3 chunks instead of about 14"; gemma's tokenizer

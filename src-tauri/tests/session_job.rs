@@ -1,6 +1,7 @@
-//! U8: the batch session loop with fake audio and engines — chunks written
-//! while recording, the Recording → Finalizing → Summarizing → Done path,
-//! cancel during transcription, interrupted sessions, and source selection.
+//! U8/U9: the session loop with fake audio and engines — chunks written and
+//! transcribed while recording, the Recording → Finalizing → Summarizing →
+//! Done path, catching up, cancel during transcription, interrupted
+//! sessions, source selection, and when each model loads.
 #![cfg(feature = "fake-engines")]
 
 use std::{
@@ -18,7 +19,7 @@ use scribular_lib::engines::fake::{
     FakeTranscriberLoader,
 };
 use scribular_lib::jobs::{
-    JobEvents, JobQueue, RecordError, Recorder, SessionProgress, SummaryDelta,
+    JobEvents, JobQueue, RecordError, Recorder, SessionProgress, SessionSegments, SummaryDelta,
 };
 use scribular_lib::llm::LlmError;
 use scribular_lib::store::{AudioSource, InputMode, Session, SessionStatus, Store};
@@ -71,6 +72,7 @@ impl Drop for TempDb {
 struct Events {
     store: Arc<Store>,
     progress: Mutex<Vec<SessionProgress>>,
+    segments: Mutex<Vec<SessionSegments>>,
     stale_rows: Mutex<Vec<String>>,
     changed: Condvar,
 }
@@ -87,6 +89,19 @@ impl Events {
             .collect();
         states.dedup();
         states
+    }
+
+    fn messages(&self, id: &str) -> Vec<String> {
+        let mut messages: Vec<String> = self
+            .progress
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.session_id == id)
+            .map(|p| p.message.clone())
+            .collect();
+        messages.dedup();
+        messages
     }
 
     fn wait_for(&self, id: &str, state: SessionStatus) {
@@ -115,6 +130,18 @@ impl JobEvents for Events {
     }
 
     fn summary_delta(&self, _: SummaryDelta) {}
+
+    fn segments(&self, s: SessionSegments) {
+        self.segments.lock().unwrap().push(s);
+    }
+}
+
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let deadline = Instant::now() + WAIT;
+    while !done() {
+        assert!(Instant::now() < deadline, "timed out waiting until {what}");
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 fn segment(start_ms: i64, text: &str) -> TranscriptSegment {
@@ -151,6 +178,7 @@ impl Harness {
         let events = Arc::new(Events {
             store: store.clone(),
             progress: Mutex::default(),
+            segments: Mutex::default(),
             stale_rows: Mutex::default(),
             changed: Condvar::new(),
         });
@@ -336,7 +364,7 @@ fn cancelling_transcription_keeps_the_partial_transcript() {
     assert_eq!(s.status, SessionStatus::Cancelled);
     assert_eq!(s.transcript, format!("Client: {TRANSCRIPT}"));
     assert_eq!(h.chunks(&id), 0);
-    assert_eq!(h.summarizer.loads.load(Ordering::Relaxed), 0, "no summary");
+    assert!(h.summarizer.summarizer.calls().is_empty(), "no summary");
     assert!(!h.recorder.cancel(&id), "nothing left to cancel");
     h.assert_rows_matched_events();
 }
@@ -462,4 +490,120 @@ fn system_audio_needs_an_app_and_one_recording_at_a_time() {
         h.recorder.start(InputMode::Mic, None, "Again"),
         Err(RecordError::AlreadyRecording)
     ));
+}
+
+const WINDOW_CALLS: [usize; 5] = [15 * 16_000, 20 * 16_000, 20 * 16_000, 20 * 16_000, 7 * 16_000];
+
+fn loads(h: &Harness) -> usize {
+    h.stt.loads.load(Ordering::SeqCst)
+}
+
+#[test]
+fn a_slow_transcriber_catches_up_without_dropping_audio() {
+    let h = Harness::new();
+    h.stt.hold.store(true, Ordering::SeqCst);
+    let id = h.start(InputMode::Mic);
+    h.feed(62);
+    h.wait_chunks(&id, 12);
+    h.stt.hold.store(false, Ordering::SeqCst);
+    // Three windows queued behind the first, then all done while recording.
+    wait_until("the queue drains", || h.stt.calls().len() == 4);
+    wait_until("caught up", || {
+        h.events.messages(&id).last().map(String::as_str) == Some("Recording...")
+    });
+    assert_eq!(
+        h.events.messages(&id),
+        ["Recording...", "Catching up...", "Recording..."]
+    );
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    // 0–15, 10–30, 25–45, 40–60, then the 55–62 tail at Stop.
+    assert_eq!(h.stt.calls(), WINDOW_CALLS);
+    assert_eq!(h.get(&id).duration_ms, Some(62_000));
+    h.assert_rows_matched_events();
+}
+
+#[test]
+fn stop_drains_queued_windows_while_the_summary_model_loads() {
+    let h = Harness::new();
+    h.stt.hold.store(true, Ordering::SeqCst);
+    let id = h.start(InputMode::Mic);
+    h.feed(62);
+    h.wait_chunks(&id, 12);
+    h.recorder.stop().unwrap();
+    assert_eq!(h.get(&id).status, SessionStatus::Finalizing);
+    // The summary model loads at Stop, while whisper is still busy.
+    wait_until("the summary model loads", || {
+        h.summarizer.loads.load(Ordering::SeqCst) == 1
+    });
+    assert_eq!(h.get(&id).status, SessionStatus::Finalizing);
+    assert_eq!(h.stt.calls().len(), 1);
+
+    h.stt.hold.store(false, Ordering::SeqCst);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(h.stt.calls(), WINDOW_CALLS);
+    assert_eq!(h.summarizer.loads.load(Ordering::SeqCst), 1, "loaded once");
+    assert_eq!(h.get(&id).timings.unwrap().model_load_ms, Some(0));
+    h.assert_rows_matched_events();
+}
+
+#[test]
+fn segments_are_saved_and_emitted_in_recording_time() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.feed(32);
+    wait_until("two windows", || h.events.segments.lock().unwrap().len() == 2);
+    assert_eq!(h.get(&id).status, SessionStatus::Recording);
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+
+    let starts: Vec<i64> = h
+        .events
+        .segments
+        .lock()
+        .unwrap()
+        .iter()
+        .inspect(|e| assert_eq!((e.session_id.as_str(), e.source), (id.as_str(), AudioSource::Mic)))
+        .flat_map(|e| e.segments.iter().map(|s| s.start_ms))
+        .collect();
+    // Windows at 0 s, 10 s and the 25 s tail, each saying both segments.
+    assert_eq!(starts, [0, 1000, 10_000, 11_000, 25_000, 26_000]);
+    let saved: Vec<i64> = h
+        .store
+        .segments(&id, AudioSource::Mic)
+        .unwrap()
+        .iter()
+        .map(|s| s.start_ms)
+        .collect();
+    assert_eq!(saved, starts);
+    assert_eq!(h.get(&id).transcript, [TRANSCRIPT; 3].join(" "));
+}
+
+#[test]
+fn whisper_loads_when_recording_starts_and_unloads_on_small_macs() {
+    let h = Harness::new();
+    let record = |mode| {
+        let id = h.start(mode);
+        h.feed(3);
+        h.recorder.stop().unwrap();
+        h.events.wait_for(&id, SessionStatus::Done);
+    };
+
+    h.recorder.set_unload_whisper(false);
+    let id = h.start(InputMode::MicAndSystem);
+    wait_until("whisper loads", || loads(&h) == 1);
+    assert!(h.stt.calls().is_empty(), "loaded before any audio");
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    record(InputMode::Mic);
+    assert_eq!(loads(&h), 1, "both sources and sessions share one load");
+
+    h.recorder.set_unload_whisper(true);
+    // The first reuses the loaded model and unloads it; the next reloads.
+    record(InputMode::Mic);
+    record(InputMode::Mic);
+    assert_eq!(loads(&h), 2, "unloaded after the transcript");
 }

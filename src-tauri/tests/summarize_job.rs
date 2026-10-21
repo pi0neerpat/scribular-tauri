@@ -13,7 +13,7 @@ use std::{
 };
 
 use scribular_lib::engines::fake::{FakeLoader, FakeSummarizer, TEMPLATE_TOKENS};
-use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
+use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
 use scribular_lib::llm::prompt::{chunk_prompt, combine_prompt, CHUNK_NOTE_TOKENS};
 use scribular_lib::llm::{Generation, LlmError};
 use scribular_lib::store::{InputMode, NewSession, Session, SessionStatus, Store, Timings};
@@ -122,6 +122,8 @@ impl JobEvents for Recorder {
     fn summary_delta(&self, d: SummaryDelta) {
         self.deltas.lock().unwrap().push(d);
     }
+
+    fn segments(&self, _: SessionSegments) {}
 }
 
 struct Harness {

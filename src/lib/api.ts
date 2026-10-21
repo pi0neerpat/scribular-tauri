@@ -16,6 +16,7 @@ import type { Session } from './types/Session';
 import type { SessionListItem } from './types/SessionListItem';
 import type { SessionPatch } from './types/SessionPatch';
 import type { SessionProgress } from './types/SessionProgress';
+import type { SessionSegments } from './types/SessionSegments';
 import type { SummaryDelta } from './types/SummaryDelta';
 import type { TranscriptSegment } from './types/TranscriptSegment';
 
@@ -138,4 +139,11 @@ export function onSessionProgress(
 /** Text of the final summary pass as it decodes. */
 export function onSummaryDelta(handler: (delta: SummaryDelta) => void): Promise<UnlistenFn> {
   return listen<SummaryDelta>('session://summary-delta', (event) => handler(event.payload));
+}
+
+/** New transcript segments while a session records. */
+export function onSessionSegments(
+  handler: (segments: SessionSegments) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionSegments>('session://segments', (event) => handler(event.payload));
 }

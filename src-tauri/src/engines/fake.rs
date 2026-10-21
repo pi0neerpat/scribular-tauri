@@ -156,6 +156,10 @@ pub struct FakeTranscriber {
     /// Calls from this index on wait for their cancel flag, then return
     /// `Cancelled`.
     pub block_from: usize,
+    /// While set, calls wait before answering, as a slow machine would.
+    pub hold: AtomicBool,
+    /// How many times the loader handed this transcriber out.
+    pub loads: AtomicUsize,
 }
 
 impl FakeTranscriber {
@@ -164,6 +168,8 @@ impl FakeTranscriber {
             segments,
             calls: Mutex::default(),
             block_from: usize::MAX,
+            hold: AtomicBool::new(false),
+            loads: AtomicUsize::new(0),
         }
     }
 
@@ -183,6 +189,9 @@ impl Transcriber for FakeTranscriber {
             calls.push(samples.len());
             calls.len() - 1
         };
+        while self.hold.load(Ordering::SeqCst) && !cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
         if index >= self.block_from {
             while !cancel.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(2));
@@ -195,11 +204,12 @@ impl Transcriber for FakeTranscriber {
     }
 }
 
-/// Hands out one shared [`FakeTranscriber`].
+/// Hands out one shared [`FakeTranscriber`] and counts loads.
 pub struct FakeTranscriberLoader(pub Arc<FakeTranscriber>);
 
 impl TranscriberLoader for FakeTranscriberLoader {
     fn load(&self) -> SttResult<Arc<dyn Transcriber>> {
+        self.0.loads.fetch_add(1, Ordering::SeqCst);
         Ok(self.0.clone())
     }
 }

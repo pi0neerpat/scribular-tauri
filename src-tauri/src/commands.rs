@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
-use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SummaryDelta};
+use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::{
     InputMode, Prompt, RecordingSettings, Session, SessionListItem, SessionPatch, Store,
@@ -30,6 +30,7 @@ pub const EVENTS: &[&str] = &[
     MODELS_PROGRESS_EVENT,
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
+    SESSION_SEGMENTS_EVENT,
 ];
 
 /// Download and verification progress, one [`ModelProgress`] per change.
@@ -40,6 +41,10 @@ pub const SESSION_PROGRESS_EVENT: &str = "session://progress";
 
 /// Summary text as it decodes, one [`SummaryDelta`] per token.
 pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
+
+/// Transcript segments as a recording transcribes, one [`SessionSegments`]
+/// per window that had speech.
+pub const SESSION_SEGMENTS_EVENT: &str = "session://segments";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +73,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     ModelProgress::export_all(cfg)?;
     SessionProgress::export_all(cfg)?;
     SummaryDelta::export_all(cfg)?;
+    SessionSegments::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
     AudioApp::export_all(cfg)?;
     RecordingSettings::export_all(cfg)?;
@@ -262,6 +268,10 @@ impl JobEvents for TauriJobEvents {
 
     fn summary_delta(&self, delta: SummaryDelta) {
         let _ = self.0.emit(SUMMARY_DELTA_EVENT, delta);
+    }
+
+    fn segments(&self, segments: SessionSegments) {
+        let _ = self.0.emit(SESSION_SEGMENTS_EVENT, segments);
     }
 }
 

@@ -61,6 +61,8 @@ struct Running {
 struct State {
     pending: VecDeque<Job>,
     running: Option<Running>,
+    /// Load the model now, ahead of the job a finishing recording queues.
+    preload: bool,
     shutdown: bool,
 }
 
@@ -136,6 +138,13 @@ impl JobQueue {
         }
         self.shared.changed.notify_all();
         Ok(())
+    }
+
+    /// Starts loading the summary model in the background, so a recording's
+    /// summary doesn't wait for it after the transcript is done (M5b).
+    pub fn preload(&self) {
+        self.shared.lock().preload = true;
+        self.shared.changed.notify_all();
     }
 
     /// Drops a waiting job or stops the running one. Returns whether
@@ -222,10 +231,22 @@ fn work(shared: &Shared) {
             let state = shared.lock();
             let mut state = shared
                 .changed
-                .wait_while(state, |s| s.pending.is_empty() && !s.shutdown)
+                .wait_while(state, |s| s.pending.is_empty() && !s.preload && !s.shutdown)
                 .unwrap_or_else(|p| p.into_inner());
             if state.shutdown {
                 return;
+            }
+            if std::mem::take(&mut state.preload) {
+                drop(state);
+                if llm.is_none() {
+                    match catch_unwind(AssertUnwindSafe(|| shared.loader.load())) {
+                        Ok(Ok(model)) => llm = Some(model),
+                        // The job loads it again and reports the error.
+                        Ok(Err(e)) => eprintln!("preloading the summary model failed: {e}"),
+                        Err(_) => eprintln!("preloading the summary model crashed"),
+                    }
+                }
+                continue;
             }
             let job = state.pending.pop_front().expect("pending is non-empty");
             let cancel = Arc::new(AtomicBool::new(false));

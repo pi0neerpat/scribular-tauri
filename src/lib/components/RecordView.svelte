@@ -17,6 +17,7 @@
   import type { Session } from '../types/Session';
   import type { SessionProgress } from '../types/SessionProgress';
   import type { SessionStatus } from '../types/SessionStatus';
+  import LiveTranscript from './LiveTranscript.svelte';
   import Timings from './Timings.svelte';
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
@@ -32,6 +33,8 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let startedAt = $state(0);
+  // Two sources show speaker labels.
+  let labeled = $state(false);
   let now = $state(Date.now());
 
   let recording = $derived(status === 'recording');
@@ -60,7 +63,9 @@
       if (!id) return;
       sessionId = id;
       status = 'recording';
-      startedAt = (await getSession(id))?.createdAt ?? Date.now();
+      const session = await getSession(id);
+      labeled = session?.inputMode === 'micAndSystem';
+      startedAt = session?.createdAt ?? Date.now();
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -77,6 +82,7 @@
       const title = `Session ${new Date().toLocaleString()}`;
       const session = await startRecording(settings.inputMode, app, title);
       sessionId = session.id;
+      labeled = session.inputMode === 'micAndSystem';
       status = session.status;
       startedAt = Date.now();
     } catch (e) {
@@ -108,7 +114,10 @@
 <section>
   <h2>Record</h2>
   {#if recording}
-    <p>Recording… {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</p>
+    <p>
+      {progress?.message ?? 'Recording…'}
+      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+    </p>
     <button onclick={stop} disabled={busy}>Stop</button>
   {:else if working}
     <p>
@@ -118,6 +127,10 @@
     <button onclick={cancel}>Cancel</button>
   {:else}
     <button onclick={start} disabled={busy}>Start recording</button>
+  {/if}
+
+  {#if sessionId && (recording || working)}
+    <LiveTranscript {sessionId} {labeled} />
   {/if}
 
   {#if denied}
