@@ -149,7 +149,7 @@
     <button onclick={start} disabled={busy}>Start recording</button>
   {/if}
 
-  {#if sessionId && (recording || working)}
+  {#if sessionId && (recording || working || status === 'failed')}
     <LiveTranscript {sessionId} {labeled} />
   {/if}
 
