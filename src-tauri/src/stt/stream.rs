@@ -124,10 +124,12 @@ impl Stream {
         }
     }
 
-    /// Queues the audio after the last window, with its overlap.
+    /// Queues the audio after the last window, with its overlap. A recording
+    /// that ends on a hop still gets its last `OVERLAP` as a tail, since
+    /// the last window left its edge segments to the window after it.
     pub fn finish(&mut self) {
         let end = self.received();
-        if end > self.covered {
+        if end > 0 {
             self.cut(self.covered.saturating_sub(OVERLAP), end, true);
         }
     }

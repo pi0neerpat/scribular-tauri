@@ -84,21 +84,36 @@ fn more_than_two_queued_windows_is_catching_up() {
 }
 
 #[test]
-fn finishing_queues_only_the_new_tail() {
-    let mut stream = Stream::default();
-    stream.push(&tone(30));
-    stream.finish();
-    assert_eq!(
-        stream.queued(),
-        2,
-        "no tail when the last window ends the audio"
-    );
-
+fn finishing_queues_the_tail() {
     let mut stream = Stream::default();
     stream.push(&tone(3));
     stream.finish();
     let tail = stream.next().unwrap();
     assert_eq!((tail.start, tail.samples.len()), (0, 3 * SECOND));
+    assert_eq!(stream.next().map(|w| w.start), None);
+}
+
+#[test]
+fn finishing_on_a_hop_queues_the_last_overlap_as_the_tail() {
+    let mut stream = Stream::default();
+    stream.push(&tone(30));
+    stream.finish();
+    let mut windows = Vec::new();
+    while let Some(w) = stream.next() {
+        windows.push(w);
+    }
+    assert_eq!(spans(&windows), [(0, 15), (10, 30), (25, 30)]);
+    assert_eq!(
+        windows.iter().map(|w| w.last).collect::<Vec<_>>(),
+        [false, false, true]
+    );
+}
+
+#[test]
+fn nothing_is_queued_for_an_empty_recording() {
+    let mut stream = Stream::default();
+    stream.finish();
+    assert_eq!(stream.queued(), 0);
 }
 
 #[test]
@@ -172,6 +187,36 @@ fn a_segment_cut_off_at_a_window_end_comes_whole_from_the_next_window() {
             segment(0, 11_000, "one"),
             segment(11_500, 18_000, "we should ship the release on Friday"),
             segment(23_000, 25_000, "bye"),
+        ]
+    );
+}
+
+#[test]
+fn a_segment_cut_off_at_the_end_of_a_recording_on_a_hop_is_kept_from_the_tail() {
+    let stt = Sequence(Mutex::new(VecDeque::from([
+        vec![segment(0, 11_000, "one")],
+        // The 10–30 s window: a segment runs into its end and is left to the tail.
+        vec![
+            segment(1_500, 5_000, "two"),
+            segment(16_000, 20_000, "we should ship the"),
+        ],
+        // The 25–30 s tail holds that speech whole.
+        vec![segment(1_000, 5_000, "we should ship the release")],
+    ])));
+    let cancel = AtomicBool::new(false);
+    let mut stream = Stream::default();
+    stream.push(&tone(30));
+    stream.finish();
+    let mut kept = Vec::new();
+    while let Some(window) = stream.next() {
+        kept.extend(stream.transcribe(&window, &stt, &cancel).unwrap());
+    }
+    assert_eq!(
+        kept,
+        [
+            segment(0, 11_000, "one"),
+            segment(11_500, 15_000, "two"),
+            segment(26_000, 30_000, "we should ship the release"),
         ]
     );
 }
