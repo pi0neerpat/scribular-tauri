@@ -60,6 +60,7 @@
   async function changeMode() {
     await save();
     if (settings && settings.inputMode !== 'mic') await refreshApps();
+    else denied = null;
   }
 
   async function save() {
