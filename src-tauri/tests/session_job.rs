@@ -173,6 +173,14 @@ impl Harness {
         configure_stt: impl FnOnce(&mut FakeTranscriber),
         configure_llm: impl FnOnce(&mut FakeLoader),
     ) -> Self {
+        Self::with_format(NATIVE, configure_stt, configure_llm)
+    }
+
+    fn with_format(
+        format: Format,
+        configure_stt: impl FnOnce(&mut FakeTranscriber),
+        configure_llm: impl FnOnce(&mut FakeLoader),
+    ) -> Self {
         let db = TempDb::new();
         let store = Arc::new(Store::open(&db.0).unwrap());
         let events = Arc::new(Events {
@@ -196,8 +204,8 @@ impl Harness {
             summarizer.clone(),
             events.clone(),
         ));
-        let mic = Arc::new(FakeSource::new(NATIVE));
-        let system = Arc::new(FakeSource::new(NATIVE));
+        let mic = Arc::new(FakeSource::new(format));
+        let system = Arc::new(FakeSource::new(format));
         let recorder = Recorder::new(
             store.clone(),
             queue.clone(),
@@ -489,6 +497,22 @@ fn a_refused_source_leaves_no_session() {
     );
     assert!(h.store.list_sessions().unwrap().is_empty());
     assert_eq!(h.recorder.current(), None);
+}
+
+#[test]
+fn a_zero_sample_rate_is_refused() {
+    let zero = Format {
+        sample_rate: 0,
+        channels: 2,
+    };
+    let h = Harness::with_format(zero, |_| {}, |_| {});
+    let err = h
+        .recorder
+        .start(InputMode::Mic, None, "Session")
+        .unwrap_err();
+    assert!(err.to_string().contains("0 Hz"), "{err}");
+    assert!(!h.mic.is_open(), "the capture is stopped");
+    assert!(h.store.list_sessions().unwrap().is_empty());
 }
 
 #[test]

@@ -402,11 +402,20 @@ impl Inner {
                 .system
                 .open(app.ok_or(RecordError::NoTargetApp)?, sink)?,
         };
+        let format = capture.format();
+        // A zero rate would stall the resampler forever.
+        if format.sample_rate == 0 {
+            return Err(AudioError::Device(format!(
+                "{} reports a 0 Hz sample rate",
+                source.as_str()
+            ))
+            .into());
+        }
         let writer = chunk_writer::spawn(
             Arc::clone(&self.store),
             session_id.into(),
             source,
-            capture.format(),
+            format,
             rx,
             live,
         )?;
