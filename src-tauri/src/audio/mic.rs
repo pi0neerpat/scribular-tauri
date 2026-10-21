@@ -140,7 +140,7 @@ where
         move |data: &[T], _| {
             buf.clear();
             buf.extend(data.iter().map(|&s| s.to_sample::<f32>()));
-            sink(&buf);
+            sink.push(&buf);
         },
         move |e| {
             eprintln!("microphone: {e}");

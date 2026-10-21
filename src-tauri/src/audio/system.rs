@@ -123,7 +123,7 @@ impl SystemAudio for AudioCapCli {
                         samples.extend(whole.iter().map(|b| f32::from_le_bytes(*b)));
                         carry.drain(..used);
                         if !samples.is_empty() {
-                            sink(&samples);
+                            sink.push(&samples);
                         }
                     }
                 })?
