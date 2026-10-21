@@ -585,6 +585,7 @@ fn a_slow_transcriber_catches_up_without_dropping_audio() {
     let id = h.start(InputMode::Mic);
     h.feed(62);
     h.wait_chunks(&id, 12);
+    wait_until("the first window is held", || h.stt.calls().len() == 1);
     h.stt.hold.store(false, Ordering::SeqCst);
     // Three windows queued behind the first, then all done while recording.
     wait_until("the queue drains", || h.stt.calls().len() == 4);
