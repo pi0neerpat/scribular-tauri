@@ -19,6 +19,10 @@
   - Whisper loads once at the start of a recording and is unloaded after the transcript when `unload_whisper` is set.
 - `src/lib/transcript.test.ts`: the live view merges `Client:`/`You:` turns like the final transcript, and drops tags like `[BLANK_AUDIO]` from both views.
 
+## Smoke check (2026-10-20)
+
+On a recording longer than 20 s, the live transcript appeared while recording, and Stop gave the full transcript. Recordings under 20 s show no live text, because the first window is cut at 15 s and still has to be transcribed. The timed criteria below have not been measured yet.
+
 ## Manual check (to run)
 
 1. Run `npm run tauri dev`. In Settings, choose Mic + app audio and FaceTime.
