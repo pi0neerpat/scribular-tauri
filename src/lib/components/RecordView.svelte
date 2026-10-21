@@ -75,6 +75,8 @@
       sessionId = id;
       if (recording) status = 'recording';
       const session = await getSession(id);
+      // Start may have begun a new session while this fetch ran.
+      if (sessionId !== id) return;
       if (!recording && (!session || finished.includes(session.status))) {
         // It ended while the window reloaded.
         sessionId = null;
