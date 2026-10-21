@@ -490,13 +490,25 @@ fn a_refused_source_leaves_no_session() {
         .recorder
         .start(InputMode::MicAndSystem, Some(APP), "Session")
         .unwrap_err();
-    assert!(err.to_string().contains("permission denied"), "{err}");
+    assert_eq!(err.to_string(), "microphone permission denied");
     assert!(
         !h.system.is_open(),
         "the system capture that started is stopped"
     );
     assert!(h.store.list_sessions().unwrap().is_empty());
     assert_eq!(h.recorder.current(), None);
+}
+
+#[test]
+fn a_refused_system_capture_names_system_audio() {
+    let h = Harness::new();
+    h.system.deny.store(true, Ordering::Relaxed);
+    let err = h
+        .recorder
+        .start(InputMode::System, Some(APP), "Session")
+        .unwrap_err();
+    assert_eq!(err.to_string(), "system audio recording permission denied");
+    assert!(h.store.list_sessions().unwrap().is_empty());
 }
 
 #[test]

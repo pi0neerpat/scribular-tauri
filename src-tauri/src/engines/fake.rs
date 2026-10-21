@@ -255,9 +255,9 @@ impl FakeSource {
         self.sink.lock().unwrap().is_some()
     }
 
-    fn open(&self, sink: Sink) -> AudioResult<Box<dyn Capture>> {
+    fn open(&self, privacy: Privacy, sink: Sink) -> AudioResult<Box<dyn Capture>> {
         if self.deny.load(Ordering::Relaxed) {
-            return Err(AudioError::PermissionDenied(Privacy::Microphone));
+            return Err(AudioError::PermissionDenied(privacy));
         }
         *self.sink.lock().unwrap() = Some(sink);
         self.opened.fetch_add(1, Ordering::Relaxed);
@@ -289,7 +289,7 @@ pub struct FakeMicrophone(pub Arc<FakeSource>);
 
 impl Microphone for FakeMicrophone {
     fn open(&self, sink: Sink) -> AudioResult<Box<dyn Capture>> {
-        self.0.open(sink)
+        self.0.open(Privacy::Microphone, sink)
     }
 }
 
@@ -313,6 +313,6 @@ impl SystemAudio for FakeSystemAudio {
         if app != self.app {
             return Err(AudioError::AppNotFound(app.into()));
         }
-        self.source.open(sink)
+        self.source.open(Privacy::SystemAudio, sink)
     }
 }
