@@ -1,7 +1,7 @@
 //! Streaming conversion of any interleaved f32 format to 16 kHz mono, the
-//! rate whisper takes. Downsampling averages each output sample's window of
-//! input (a box filter, enough to keep speech-band aliasing out); upsampling
-//! interpolates linearly. Electron decimated by an integer factor instead.
+//! rate whisper takes. Downsampling uses a Kaiser-windowed-sinc low-pass
+//! filter to suppress aliasing; upsampling interpolates linearly.
+//! Electron decimated by an integer factor instead.
 
 use super::Format;
 use crate::stt::SAMPLE_RATE;
@@ -10,22 +10,42 @@ pub struct Resampler {
     channels: usize,
     /// Input samples per output sample.
     step: f64,
+    method: Method,
     /// Samples of a frame split across two calls.
     partial: Vec<f32>,
     /// Downmixed input not yet fully consumed.
     pending: Vec<f32>,
-    /// Start of the next output sample, as an index into `pending`.
+    /// Centre of the next output sample, as an index into `pending`.
     pos: f64,
+}
+
+enum Method {
+    Copy,
+    Interpolate,
+    Decimate(LowPass),
 }
 
 impl Resampler {
     pub fn new(format: Format) -> Self {
+        let step = f64::from(format.sample_rate) / f64::from(SAMPLE_RATE);
+        let method = if step > 1.0 {
+            Method::Decimate(LowPass::new(step))
+        } else if step == 1.0 {
+            Method::Copy
+        } else {
+            Method::Interpolate
+        };
+        let padding = match &method {
+            Method::Decimate(filter) => filter.half_in.ceil() as usize,
+            _ => 0,
+        };
         Self {
             channels: usize::from(format.channels.max(1)),
-            step: f64::from(format.sample_rate) / f64::from(SAMPLE_RATE),
+            step,
+            method,
             partial: Vec::new(),
-            pending: Vec::new(),
-            pos: 0.0,
+            pending: vec![0.0; padding],
+            pos: padding as f64,
         }
     }
 
@@ -48,35 +68,100 @@ impl Resampler {
         self.pending
             .extend(frames.map(|frame| frame.iter().sum::<f32>() / n));
         let len = self.pending.len() as f64;
-        if self.step >= 1.0 {
-            while self.pos + self.step <= len {
-                out.push(box_average(&self.pending, self.pos, self.pos + self.step));
-                self.pos += self.step;
+        let consumed = match &self.method {
+            Method::Copy => {
+                out.append(&mut self.pending);
+                return;
             }
-        } else {
-            while self.pos.floor() + 1.0 < len {
-                let i = self.pos.floor() as usize;
-                let f = (self.pos - i as f64) as f32;
-                out.push(self.pending[i] * (1.0 - f) + self.pending[i + 1] * f);
-                self.pos += self.step;
+            Method::Interpolate => {
+                while self.pos.floor() + 1.0 < len {
+                    let i = self.pos.floor() as usize;
+                    let f = (self.pos - i as f64) as f32;
+                    out.push(self.pending[i] * (1.0 - f) + self.pending[i + 1] * f);
+                    self.pos += self.step;
+                }
+                self.pos.floor() as usize
             }
-        }
-        let consumed = (self.pos.floor() as usize).min(self.pending.len());
+            Method::Decimate(filter) => {
+                while (self.pos + filter.half_in).floor() < len {
+                    out.push(filter.apply(&self.pending, self.pos));
+                    self.pos += self.step;
+                }
+                (self.pos - filter.half_in).floor() as usize
+            }
+        };
+        let consumed = consumed.min(self.pending.len());
         self.pending.drain(..consumed);
         self.pos -= consumed as f64;
     }
 }
 
-/// Mean of the piecewise-constant signal `x` over `[a, b)`, `b <= x.len()`.
-fn box_average(x: &[f32], a: f64, b: f64) -> f32 {
-    let mut sum = 0.0;
-    let mut i = a.floor() as usize;
-    while (i as f64) < b {
-        let overlap = b.min(i as f64 + 1.0) - a.max(i as f64);
-        sum += f64::from(x[i]) * overlap;
-        i += 1;
+/// Kaiser-windowed-sinc low-pass for decimating by `step`. The half kernel is
+/// tabulated once; `apply` interpolates it at each tap's fractional offset.
+struct LowPass {
+    table: Vec<f32>,
+    /// Taps on each side of a centre, in input samples.
+    half_in: f64,
+}
+
+impl LowPass {
+    /// Cycles per output sample: 7.2 kHz at 16 kHz.
+    const CUTOFF: f64 = 0.45;
+    /// Kernel reach on each side, in output samples.
+    const HALF_WIDTH: f64 = 20.0;
+    /// Kaiser window shape, about 70 dB of stop-band rejection.
+    const BETA: f64 = 7.0;
+    /// Table entries per input sample.
+    const RESOLUTION: f64 = 256.0;
+
+    fn new(step: f64) -> Self {
+        let half_in = Self::HALF_WIDTH * step;
+        let fc = Self::CUTOFF / step;
+        let denominator = bessel_i0(Self::BETA);
+        let table = (0..=(half_in * Self::RESOLUTION).ceil() as usize)
+            .map(|i| {
+                let d = (i as f64 / Self::RESOLUTION).min(half_in);
+                let arg = 2.0 * fc * d * std::f64::consts::PI;
+                let sinc = if arg == 0.0 { 1.0 } else { arg.sin() / arg };
+                let u = d / half_in;
+                let window = bessel_i0(Self::BETA * (1.0 - u * u).sqrt()) / denominator;
+                (2.0 * fc * sinc * window) as f32
+            })
+            .collect();
+        Self { table, half_in }
     }
-    (sum / (b - a)) as f32
+
+    fn apply(&self, x: &[f32], centre: f64) -> f32 {
+        let start = (centre - self.half_in).ceil() as usize;
+        let end = (centre + self.half_in).floor() as usize;
+        let mut sum = 0.0;
+        let mut weights = 0.0;
+        for (offset, &sample) in x[start..=end].iter().enumerate() {
+            let index = ((start + offset) as f64 - centre).abs() * Self::RESOLUTION;
+            let i = index.floor() as usize;
+            let fraction = index - i as f64;
+            let a = f64::from(self.table[i]);
+            let b = f64::from(self.table[(i + 1).min(self.table.len() - 1)]);
+            let weight = a + (b - a) * fraction;
+            sum += f64::from(sample) * weight;
+            weights += weight;
+        }
+        (sum / weights) as f32
+    }
+}
+
+fn bessel_i0(x: f64) -> f64 {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let mut k = 1.0;
+    loop {
+        term *= (x / (2.0 * k)).powi(2);
+        sum += term;
+        if term < sum * 1e-15 {
+            return sum;
+        }
+        k += 1.0;
+    }
 }
 
 /// Full-scale f32 to i16, clipping out-of-range samples.
@@ -92,7 +177,9 @@ mod tests {
         let frames = (rate as f32 * seconds) as usize;
         (0..frames)
             .flat_map(|i| {
-                let v = amp * (2.0 * std::f32::consts::PI * hz * i as f32 / rate as f32).sin();
+                let v = amp
+                    * (2.0 * std::f64::consts::PI * hz as f64 * i as f64 / rate as f64).sin()
+                        as f32;
                 std::iter::repeat_n(v, usize::from(channels))
             })
             .collect()
@@ -119,7 +206,7 @@ mod tests {
         };
         let input = sine(48_000, 2, 1.0, 440.0, 0.5);
         let out = run(format, &input, 1024);
-        assert_eq!(out.len(), 16_000);
+        assert!((16_000 - 21..=16_000).contains(&out.len()), "{}", out.len());
         let expected = 0.5 / 2f32.sqrt();
         let got = rms(&out);
         assert!((got - expected).abs() / expected < 0.02, "rms {got}");
@@ -139,7 +226,68 @@ mod tests {
         for (a, b) in whole.iter().zip(&split) {
             assert!((a - b).abs() < 1e-5);
         }
-        assert!((whole.len() as i64 - 8_000).abs() <= 1, "{}", whole.len());
+        assert!(
+            (8_000 - 21..=8_000).contains(&whole.len()),
+            "{}",
+            whole.len()
+        );
+    }
+
+    #[test]
+    fn downsampling_rejects_stopband_tones() {
+        for (rate, tones) in [
+            (
+                48_000,
+                &[9_000.0, 12_000.0, 16_000.0, 20_000.0, 23_000.0][..],
+            ),
+            (44_100, &[12_000.0, 10_000.0][..]),
+        ] {
+            for &hz in tones {
+                let input = sine(rate, 1, 1.0, hz, 0.5);
+                let out = run(
+                    Format {
+                        sample_rate: rate,
+                        channels: 1,
+                    },
+                    &input,
+                    1024,
+                );
+                let ratio = rms(&out[100..out.len() - 100]) / rms(&input);
+                assert!(ratio < 1e-3, "{hz} Hz at {rate}: rms ratio {ratio}");
+            }
+        }
+    }
+
+    #[test]
+    fn downsampling_preserves_passband_tones() {
+        for rate in [48_000, 44_100] {
+            for hz in [440.0, 1_000.0, 5_000.0] {
+                let input = sine(rate, 1, 1.0, hz, 0.5);
+                let out = run(
+                    Format {
+                        sample_rate: rate,
+                        channels: 1,
+                    },
+                    &input,
+                    1024,
+                );
+                let gain = rms(&out[100..out.len() - 100]) / rms(&input);
+                assert!((gain - 1.0).abs() < 0.01, "{hz} Hz at {rate}: gain {gain}");
+            }
+        }
+    }
+
+    #[test]
+    fn downsampling_preserves_dc() {
+        let out = run(
+            Format {
+                sample_rate: 48_000,
+                channels: 1,
+            },
+            &vec![0.5; 48_000],
+            1024,
+        );
+        assert!(out[50..].iter().all(|sample| (sample - 0.5).abs() < 1e-4));
     }
 
     #[test]
