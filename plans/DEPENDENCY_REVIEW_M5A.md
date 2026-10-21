@@ -19,8 +19,9 @@ exact pin, in-house check).
 **Notes**
 - **cpal is the microphone path only.** It opens the default input device through
   CoreAudio and hands the callback interleaved samples at the device's own rate. The
-  unbounded callback-to-writer queue (`std::sync::mpsc::channel`), the resampler to 16 kHz mono, and the chunk writer are in-house
-  (`src-tauri/src/audio/`), as the plan says.
+  bounded callback-to-writer ring buffer (`src-tauri/src/audio/ring.rs`; it drops a
+  block it cannot fit and the writer pads silence), the resampler to 16 kHz mono,
+  and the chunk writer are in-house (`src-tauri/src/audio/`), as the plan says.
 - **No optional features.** `asio`, `jack`, `audioworklet` and friends stay off. cpal's
   default feature set is empty.
 - **`tauri-plugin-shell` is not added (deviation from KTD11's wording).** The plugin is

@@ -4,10 +4,12 @@
 use std::{
     sync::{mpsc, Arc},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use super::{
     resample::{to_i16, Resampler},
+    ring::{ring, Consumer},
     Format, Sink,
 };
 use crate::store::{self, AudioSource, Store};
@@ -16,44 +18,24 @@ use crate::stt::SAMPLE_RATE;
 /// Five seconds of 16 kHz mono per row.
 pub const CHUNK_SAMPLES: usize = 5 * SAMPLE_RATE as usize;
 
-/// Samples per buffer handed from the capture callback to the writer.
-const BLOCK_SAMPLES: usize = 4096;
-/// Buffers allocated up front: over a second of 48 kHz stereo, however the
-/// source sizes its callbacks.
-const PREALLOCATED: usize = 128;
-/// Buffers the writer may fall behind by, about 3 minutes of 48 kHz stereo,
-/// before the callback drops samples rather than block.
-const MAX_QUEUED: usize = 8192;
+/// 8 MB per source: the writer may stall (SQLite, a slow disk) for about
+/// 22 seconds of 48 kHz stereo before audio is dropped.
+pub const RING_SAMPLES: usize = 1 << 21;
 
-/// The writer's end of [`channel`]: filled buffers in, empty ones back.
-pub struct Blocks {
-    filled: mpsc::Receiver<Vec<f32>>,
-    free: mpsc::SyncSender<Vec<f32>>,
+const POLL: Duration = Duration::from_millis(5);
+
+/// A sink that only copies callback samples into a preallocated bounded ring;
+/// resampling and SQLite stay on the writer thread.
+pub fn channel() -> (Sink, Consumer) {
+    channel_with_capacity(RING_SAMPLES)
 }
 
-/// A sink that hands each callback's samples to the writer thread. The
-/// capture callback only copies into buffers the writer hands back, so it
-/// allocates only while the writer is behind; resampling and SQLite stay
-/// off it.
-pub fn channel() -> (Sink, Blocks) {
-    let (tx, filled) = mpsc::sync_channel(MAX_QUEUED);
-    let (free, pool) = mpsc::sync_channel(MAX_QUEUED);
-    for _ in 0..PREALLOCATED {
-        let _ = free.try_send(Vec::with_capacity(BLOCK_SAMPLES));
-    }
-    let sink: Sink = Box::new(move |data: &[f32]| {
-        for piece in data.chunks(BLOCK_SAMPLES) {
-            let mut block = pool
-                .try_recv()
-                .unwrap_or_else(|_| Vec::with_capacity(BLOCK_SAMPLES));
-            block.extend_from_slice(piece);
-            let _ = tx.try_send(block);
-        }
-    });
-    (sink, Blocks { filled, free })
+/// Like `channel`, with a sample capacity rounded up to a power of two.
+pub fn channel_with_capacity(capacity: usize) -> (Sink, Consumer) {
+    ring(capacity)
 }
 
-/// Writes until every sender is gone (the capture was dropped), then flushes
+/// Writes until the producer is gone (the capture was dropped), then flushes
 /// the partial last chunk. Joins to the number of 16 kHz samples written.
 /// Each resampled slice also goes to `live`, for streaming transcription;
 /// if nothing receives it any more, recording carries on.
@@ -62,7 +44,7 @@ pub fn spawn(
     session_id: String,
     source: AudioSource,
     format: Format,
-    blocks: Blocks,
+    mut consumer: Consumer,
     live: mpsc::Sender<Vec<f32>>,
 ) -> std::io::Result<JoinHandle<store::Result<u64>>> {
     thread::Builder::new()
@@ -79,15 +61,45 @@ pub fn spawn(
                 total += pcm.len() as u64;
                 Ok(())
             };
-            for mut data in blocks.filled {
-                let before = pending.len();
-                resampler.process(&data, &mut pending);
-                data.clear();
-                let _ = blocks.free.try_send(data);
-                let _ = live.send(pending[before..].to_vec());
-                while pending.len() >= CHUNK_SAMPLES {
-                    write(&pending[..CHUNK_SAMPLES], &mut seq)?;
-                    pending.drain(..CHUNK_SAMPLES);
+            {
+                let mut process = |samples: &[f32]| -> store::Result<()> {
+                    let before = pending.len();
+                    resampler.process(samples, &mut pending);
+                    let _ = live.send(pending[before..].to_vec());
+                    while pending.len() >= CHUNK_SAMPLES {
+                        write(&pending[..CHUNK_SAMPLES], &mut seq)?;
+                        pending.drain(..CHUNK_SAMPLES);
+                    }
+                    Ok(())
+                };
+                let mut data = Vec::new();
+                let silence = [0.0; 4096];
+                loop {
+                    data.clear();
+                    let drained = consumer.drain(&mut data);
+                    if !data.is_empty() {
+                        process(&data)?;
+                    }
+                    if drained.dropped > 0 {
+                        eprintln!(
+                            "{} samples of {} dropped for session {}",
+                            drained.dropped,
+                            source.as_str(),
+                            session_id
+                        );
+                        let mut remaining = drained.dropped;
+                        while remaining > 0 {
+                            let n = remaining.min(silence.len());
+                            process(&silence[..n])?;
+                            remaining -= n;
+                        }
+                    }
+                    if drained.closed {
+                        break;
+                    }
+                    if data.is_empty() && drained.dropped == 0 {
+                        thread::sleep(POLL);
+                    }
                 }
             }
             if !pending.is_empty() {

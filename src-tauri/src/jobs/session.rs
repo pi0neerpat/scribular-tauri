@@ -394,7 +394,7 @@ impl Inner {
         app: Option<&str>,
         cancel: &Arc<AtomicBool>,
     ) -> Result<Source, RecordError> {
-        let (sink, blocks) = chunk_writer::channel();
+        let (sink, audio_in) = chunk_writer::channel();
         let (live, audio) = mpsc::channel();
         let capture = match source {
             AudioSource::Mic => self.mic.open(sink)?,
@@ -416,7 +416,7 @@ impl Inner {
             session_id.into(),
             source,
             format,
-            blocks,
+            audio_in,
             live,
         )?;
         let streamer = {

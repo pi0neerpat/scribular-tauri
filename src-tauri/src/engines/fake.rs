@@ -8,7 +8,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crate::audio::{
@@ -235,14 +235,26 @@ impl FakeSource {
     }
 
     /// Delivers `samples` (interleaved, native format). Returns whether a
-    /// capture was open to receive them.
+    /// capture accepted them, retrying backpressure for at most ten seconds.
     pub fn feed(&self, samples: &[f32]) -> bool {
-        match self.sink.lock().unwrap().as_mut() {
-            Some(sink) => {
-                sink(samples);
-                true
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            {
+                let mut capture = self.sink.lock().unwrap();
+                match capture.as_mut() {
+                    Some(sink) => {
+                        if sink.try_push(samples) {
+                            return true;
+                        }
+                    }
+                    None => return false,
+                }
             }
-            None => false,
+            // Let lose() and capture drop take the mutex between attempts.
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
 

@@ -5,6 +5,7 @@
 pub mod chunk_writer;
 pub mod mic;
 pub mod resample;
+pub mod ring;
 pub mod system;
 
 use std::fmt;
@@ -83,7 +84,9 @@ pub struct Format {
 }
 
 /// Receives interleaved samples, on whichever thread the source delivers.
-pub type Sink = Box<dyn FnMut(&[f32]) + Send>;
+/// `push` never blocks, allocates or locks because audio callbacks call it.
+/// A block the writer has no room for is dropped whole and counted.
+pub type Sink = ring::Producer;
 
 /// A running capture. Dropping it stops the source and drops its sink, and
 /// returns only once the sink will not be called again. A source that stops

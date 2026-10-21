@@ -384,6 +384,7 @@ fn cancelling_reaches_a_window_still_transcribing_from_the_recording() {
     let id = h.start(InputMode::Mic);
     h.feed(16);
     wait_until("a window is in flight", || h.stt.calls().len() == 1);
+    wait_until("the first window is in flight", || h.stt.calls().len() == 1);
     h.recorder.stop().unwrap();
     assert!(h.recorder.cancel(&id));
     h.events.wait_for(&id, SessionStatus::Cancelled);
