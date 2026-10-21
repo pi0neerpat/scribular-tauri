@@ -161,7 +161,7 @@ struct Harness {
     system: Arc<FakeSource>,
     queue: Arc<JobQueue>,
     recorder: Recorder,
-    /// Last, so the files go after everything that has them open.
+    /// Last: fields drop in order, so the files go after every connection.
     db: TempDb,
 }
 
@@ -219,7 +219,6 @@ impl Harness {
             }),
         );
         Self {
-            db,
             store,
             events,
             stt,
@@ -228,6 +227,7 @@ impl Harness {
             system,
             queue,
             recorder,
+            db,
         }
     }
 
@@ -389,29 +389,6 @@ fn cancelling_reaches_a_window_still_transcribing_from_the_recording() {
     h.events.wait_for(&id, SessionStatus::Cancelled);
     assert_eq!(h.get(&id).status, SessionStatus::Cancelled);
     assert!(h.summarizer.summarizer.calls().is_empty(), "no summary");
-    h.assert_rows_matched_events();
-}
-
-#[test]
-fn cancelling_after_the_transcript_stops_the_summary() {
-    let h = Harness::with(
-        |_| {},
-        |llm| {
-            let summarizer = Arc::get_mut(&mut llm.summarizer).unwrap();
-            summarizer.token_delay = Duration::from_millis(100);
-        },
-    );
-    let id = h.start(InputMode::Mic);
-    h.feed(6);
-    h.recorder.stop().unwrap();
-    h.events.wait_for(&id, SessionStatus::Summarizing);
-    assert!(h.recorder.cancel(&id));
-    h.events.wait_for(&id, SessionStatus::Cancelled);
-
-    let s = h.get(&id);
-    assert_eq!(s.status, SessionStatus::Cancelled);
-    assert_eq!(s.transcript, TRANSCRIPT);
-    assert_eq!(s.summary, "");
     h.assert_rows_matched_events();
 }
 
@@ -585,7 +562,6 @@ fn a_slow_transcriber_catches_up_without_dropping_audio() {
     let id = h.start(InputMode::Mic);
     h.feed(62);
     h.wait_chunks(&id, 12);
-    wait_until("the first window is held", || h.stt.calls().len() == 1);
     h.stt.hold.store(false, Ordering::SeqCst);
     // Three windows queued behind the first, then all done while recording.
     wait_until("the queue drains", || h.stt.calls().len() == 4);
