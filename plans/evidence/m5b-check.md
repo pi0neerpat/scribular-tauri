@@ -21,7 +21,7 @@
 
 ## Smoke check (2026-10-20)
 
-On a recording longer than 20 s, the live transcript appeared while recording, and Stop gave the full transcript. Recordings under 20 s show no live text, because the first window is cut at 15 s and still has to be transcribed. The timed criteria below have not been measured yet.
+On a recording longer than 20 s, the live transcript appeared while recording, and Stop gave the full transcript. Live text starts only once the first window, cut at 15 s, has been transcribed, so how short a recording can be and show none depends on transcription speed. Recordings under 20 s showed none here. The timed criteria below have not been measured yet.
 
 ## Manual check (to run)
 
