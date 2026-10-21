@@ -13,9 +13,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use ts_rs::TS;
 
-use crate::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
+use crate::audio::{AudioApp, Privacy};
+use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
-use crate::store::{Prompt, Session, SessionListItem, SessionPatch, Store};
+use crate::store::{
+    InputMode, Prompt, RecordingSettings, Session, SessionListItem, SessionPatch, Store,
+};
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
 /// Event the core emits once a second, as the example of a typed event.
@@ -27,6 +30,7 @@ pub const EVENTS: &[&str] = &[
     MODELS_PROGRESS_EVENT,
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
+    SESSION_SEGMENTS_EVENT,
 ];
 
 /// Download and verification progress, one [`ModelProgress`] per change.
@@ -37,6 +41,10 @@ pub const SESSION_PROGRESS_EVENT: &str = "session://progress";
 
 /// Summary text as it decodes, one [`SummaryDelta`] per token.
 pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
+
+/// Transcript segments as a recording transcribes, one [`SessionSegments`]
+/// per window that had speech.
+pub const SESSION_SEGMENTS_EVENT: &str = "session://segments";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -65,7 +73,11 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     ModelProgress::export_all(cfg)?;
     SessionProgress::export_all(cfg)?;
     SummaryDelta::export_all(cfg)?;
+    SessionSegments::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
+    AudioApp::export_all(cfg)?;
+    RecordingSettings::export_all(cfg)?;
+    Privacy::export_all(cfg)?;
     Ok(())
 }
 
@@ -136,7 +148,7 @@ pub fn download_models(app: AppHandle, models: State<Arc<ModelManager>>) {
 /// Queues a fresh summary; progress arrives on [`SESSION_PROGRESS_EVENT`].
 #[tauri::command]
 pub fn regenerate_summary(
-    jobs: State<JobQueue>,
+    jobs: State<Arc<JobQueue>>,
     session_id: String,
     prompt_id: String,
 ) -> Result<(), String> {
@@ -144,10 +156,89 @@ pub fn regenerate_summary(
         .map_err(|e| e.to_string())
 }
 
-/// Stops the session's job. Returns whether it had one.
+/// Stops the session's transcription or summary. Returns whether it had
+/// either.
 #[tauri::command]
-pub fn cancel_job(jobs: State<JobQueue>, session_id: String) -> bool {
-    jobs.cancel(&session_id)
+pub fn cancel_job(recorder: State<Arc<Recorder>>, session_id: String) -> bool {
+    recorder.cancel(&session_id)
+}
+
+#[tauri::command]
+pub fn get_recording_settings(store: State<Arc<Store>>) -> Result<RecordingSettings, String> {
+    store.recording_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_recording_settings(
+    store: State<Arc<Store>>,
+    settings: RecordingSettings,
+) -> Result<(), String> {
+    store
+        .set_recording_settings(&settings)
+        .map_err(|e| e.to_string())
+}
+
+/// Apps playing audio now. Runs AudioCapCLI, so off the main thread.
+#[tauri::command]
+pub async fn list_audio_apps(recorder: State<'_, Arc<Recorder>>) -> Result<Vec<AudioApp>, String> {
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || {
+        recorder
+            .system_audio()
+            .list_apps()
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Starts recording a new session; `app_id` is required unless `mode` is
+/// mic only. A refused permission fails with "<source> permission denied";
+/// [`open_privacy_settings`] then takes the user to the pane.
+#[tauri::command]
+pub async fn start_recording(
+    recorder: State<'_, Arc<Recorder>>,
+    mode: InputMode,
+    app_id: Option<String>,
+    title: String,
+) -> Result<Session, String> {
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || {
+        recorder
+            .start(mode, app_id.as_deref(), &title)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stops recording and starts transcription; returns the session id.
+#[tauri::command]
+pub async fn stop_recording(recorder: State<'_, Arc<Recorder>>) -> Result<String, String> {
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || recorder.stop().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Opens the System Settings pane that grants `pane`'s permission.
+#[tauri::command]
+pub fn open_privacy_settings(pane: Privacy) -> Result<(), String> {
+    std::process::Command::new("/usr/bin/open")
+        .arg(pane.settings_url())
+        .status()
+        .map_err(|e| e.to_string())
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| "System Settings did not open".to_string())
+        })
+}
+
+/// The id of the session being recorded, if any.
+#[tauri::command]
+pub fn current_recording(recorder: State<Arc<Recorder>>) -> Option<String> {
+    recorder.current()
 }
 
 /// Development only (M4): transcribes a 16-bit, 16 kHz mono WAV file.
@@ -177,6 +268,10 @@ impl JobEvents for TauriJobEvents {
 
     fn summary_delta(&self, delta: SummaryDelta) {
         let _ = self.0.emit(SUMMARY_DELTA_EVENT, delta);
+    }
+
+    fn segments(&self, segments: SessionSegments) {
+        let _ = self.0.emit(SESSION_SEGMENTS_EVENT, segments);
     }
 }
 

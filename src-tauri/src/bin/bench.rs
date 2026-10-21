@@ -33,7 +33,9 @@ mod real {
         time::{Duration, Instant},
     };
 
-    use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SummaryDelta};
+    use scribular_lib::jobs::{
+        JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta,
+    };
     use scribular_lib::llm::llama::LlamaLoader;
     use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_2_2B};
     use scribular_lib::store::{InputMode, NewSession, SessionStatus, Store, Timings};
@@ -120,6 +122,8 @@ mod real {
         }
 
         fn summary_delta(&self, _: SummaryDelta) {}
+
+        fn segments(&self, _: SessionSegments) {}
     }
 
     /// Peak resident memory of this process so far, in bytes.

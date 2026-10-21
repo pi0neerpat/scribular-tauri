@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use super::{state::can_transition, summarize, JobEvents};
+use super::{state::can_transition, summarize, JobEvents, SessionProgress};
 use crate::llm::{Summarizer, SummarizerLoader};
 use crate::store::{SessionStatus, Store, StoreError};
 
@@ -61,6 +61,8 @@ struct Running {
 struct State {
     pending: VecDeque<Job>,
     running: Option<Running>,
+    /// Load the model now, ahead of the job a finishing recording queues.
+    preload: bool,
     shutdown: bool,
 }
 
@@ -138,8 +140,17 @@ impl JobQueue {
         Ok(())
     }
 
-    /// Drops a waiting job (its status stays as it was) or stops the running
-    /// one. Returns whether `session_id` had a job.
+    /// Starts loading the summary model in the background, so a recording's
+    /// summary doesn't wait for it after the transcript is done (M5b).
+    pub fn preload(&self) {
+        self.shared.lock().preload = true;
+        self.shared.changed.notify_all();
+    }
+
+    /// Drops a waiting job or stops the running one. Returns whether
+    /// `session_id` had a job. A dropped job's session keeps its status,
+    /// except one still `Finalizing` from its recording, which would
+    /// otherwise never leave it.
     pub fn cancel(&self, session_id: &str) -> bool {
         let mut state = self.shared.lock();
         if let Some(i) = state
@@ -149,6 +160,8 @@ impl JobQueue {
         {
             state.pending.remove(i);
             self.shared.changed.notify_all();
+            drop(state);
+            self.cancel_finalizing(session_id);
             return true;
         }
         match &state.running {
@@ -158,6 +171,25 @@ impl JobQueue {
             }
             _ => false,
         }
+    }
+
+    fn cancel_finalizing(&self, session_id: &str) {
+        let store = &self.shared.store;
+        match store.get_session(session_id) {
+            Ok(Some(s)) if s.status == SessionStatus::Finalizing => {}
+            _ => return,
+        }
+        if let Err(e) = store.set_status(session_id, SessionStatus::Cancelled, None) {
+            eprintln!("cancel {session_id}: saving Cancelled failed: {e}");
+            return;
+        }
+        self.shared.events.progress(SessionProgress {
+            session_id: session_id.into(),
+            state: SessionStatus::Cancelled,
+            step_index: 1,
+            step_count: 1,
+            message: "Summarization stopped.".into(),
+        });
     }
 
     /// Blocks until nothing is queued or running, or `timeout` passes.
@@ -199,10 +231,22 @@ fn work(shared: &Shared) {
             let state = shared.lock();
             let mut state = shared
                 .changed
-                .wait_while(state, |s| s.pending.is_empty() && !s.shutdown)
+                .wait_while(state, |s| s.pending.is_empty() && !s.preload && !s.shutdown)
                 .unwrap_or_else(|p| p.into_inner());
             if state.shutdown {
                 return;
+            }
+            if std::mem::take(&mut state.preload) {
+                drop(state);
+                if llm.is_none() {
+                    match catch_unwind(AssertUnwindSafe(|| shared.loader.load())) {
+                        Ok(Ok(model)) => llm = Some(model),
+                        // The job loads it again and reports the error.
+                        Ok(Err(e)) => eprintln!("preloading the summary model failed: {e}"),
+                        Err(_) => eprintln!("preloading the summary model crashed"),
+                    }
+                }
+                continue;
             }
             let job = state.pending.pop_front().expect("pending is non-empty");
             let cancel = Arc::new(AtomicBool::new(false));

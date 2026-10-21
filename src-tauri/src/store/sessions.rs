@@ -54,21 +54,25 @@ impl SessionStatus {
 pub enum InputMode {
     /// Microphone only.
     Mic,
+    /// One app's audio only.
+    System,
     /// Microphone plus system audio, diarized by source.
     MicAndSystem,
 }
 
 impl InputMode {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Mic => "mic",
+            Self::System => "system",
             Self::MicAndSystem => "micAndSystem",
         }
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
             "mic" => Some(Self::Mic),
+            "system" => Some(Self::System),
             "micAndSystem" => Some(Self::MicAndSystem),
             _ => None,
         }
@@ -83,7 +87,7 @@ pub enum AudioSource {
 }
 
 impl AudioSource {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Mic => "mic",
             Self::System => "system",

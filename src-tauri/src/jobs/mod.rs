@@ -2,15 +2,18 @@
 //! session state machine, and the progress events the UI listens to.
 
 mod queue;
+mod session;
 pub mod state;
 mod summarize;
 
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::store::SessionStatus;
+use crate::store::{AudioSource, SessionStatus};
+use crate::stt::TranscriptSegment;
 
 pub use queue::{JobError, JobQueue};
+pub use session::{RecordError, Recorder};
 
 /// Payload of `session://progress`. The session's status row already says
 /// `state` by the time this is emitted.
@@ -34,8 +37,19 @@ pub struct SummaryDelta {
     pub text: String,
 }
 
+/// Payload of `session://segments`: one source's new transcript segments,
+/// in milliseconds from the start of the recording.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSegments {
+    pub session_id: String,
+    pub source: AudioSource,
+    pub segments: Vec<TranscriptSegment>,
+}
+
 /// Where jobs report; the app emits Tauri events, tests record.
 pub trait JobEvents: Send + Sync {
     fn progress(&self, progress: SessionProgress);
     fn summary_delta(&self, delta: SummaryDelta);
+    fn segments(&self, segments: SessionSegments);
 }

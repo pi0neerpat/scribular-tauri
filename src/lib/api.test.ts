@@ -5,7 +5,8 @@ const listen = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
-const { appVersion, onHeartbeat } = await import('./api');
+const { appVersion, deniedPrivacy, onHeartbeat, onSessionSegments, startRecording } =
+  await import('./api');
 
 describe('api', () => {
   beforeEach(() => {
@@ -27,5 +28,31 @@ describe('api', () => {
     expect(name).toBe('app://heartbeat');
     cb({ payload: { seq: 3 } });
     expect(seen).toEqual([3]);
+  });
+
+  it('onSessionSegments listens on session://segments', async () => {
+    listen.mockResolvedValue(() => {});
+    const seen: string[] = [];
+    await onSessionSegments((s) => seen.push(s.source));
+    const [name, cb] = listen.mock.calls[0];
+    expect(name).toBe('session://segments');
+    cb({ payload: { sessionId: 's1', source: 'mic', segments: [] } });
+    expect(seen).toEqual(['mic']);
+  });
+
+  it('startRecording sends camelCase arguments', async () => {
+    invoke.mockResolvedValue({ id: 's1' });
+    await startRecording('micAndSystem', 'Zoom', 'Session');
+    expect(invoke).toHaveBeenCalledWith('start_recording', {
+      mode: 'micAndSystem',
+      appId: 'Zoom',
+      title: 'Session',
+    });
+  });
+
+  it('deniedPrivacy maps permission errors to their pane', () => {
+    expect(deniedPrivacy('audio: microphone permission denied')).toBe('microphone');
+    expect(deniedPrivacy('audio: system audio recording permission denied')).toBe('systemAudio');
+    expect(deniedPrivacy('choose an app to record in Settings')).toBeNull();
   });
 });

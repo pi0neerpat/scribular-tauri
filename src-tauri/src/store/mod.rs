@@ -1,6 +1,7 @@
 //! SQLite session store (KTD1): plain `rusqlite` with bundled SQLite, WAL
-//! mode, foreign keys on. One connection behind a mutex serves the commands;
-//! the recording-time audio writer (U8) gets its own connection and thread.
+//! mode, foreign keys on. One connection behind a mutex serves the commands
+//! and the recording-time chunk writers (U8). A second `Store::open` would run
+//! launch recovery and mark the live recording interrupted.
 
 mod migrations;
 mod prompts;
@@ -16,7 +17,7 @@ pub use sessions::{
     AudioSource, InputMode, NewSession, Session, SessionListItem, SessionPatch, SessionStatus,
     Timings,
 };
-pub use settings::ACTIVE_PROMPT_ID;
+pub use settings::{RecordingSettings, ACTIVE_PROMPT_ID};
 
 #[derive(Debug)]
 pub enum StoreError {

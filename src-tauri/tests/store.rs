@@ -3,12 +3,12 @@
 
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use scribular_lib::store::{
-    AudioSource, InputMode, NewSession, SessionPatch, SessionStatus, Store, Timings,
-    ACTIVE_PROMPT_ID,
+    AudioSource, InputMode, NewSession, RecordingSettings, SessionPatch, SessionStatus, Store,
+    Timings, ACTIVE_PROMPT_ID,
 };
 use scribular_lib::text::Segment;
 
@@ -296,6 +296,65 @@ fn settings_upsert() {
     assert_eq!(store.get_setting("k").unwrap().as_deref(), Some("2"));
     drop(store);
     assert_eq!(db.open().get_setting("k").unwrap().as_deref(), Some("2"));
+}
+
+#[test]
+fn recording_settings_round_trip_and_clear() {
+    let db = TempDb::new();
+    let store = db.open();
+    let seeded = store.recording_settings().unwrap();
+    assert_eq!(seeded.input_mode, InputMode::Mic);
+    assert_eq!(seeded.target_app, None);
+    assert!(seeded.prompt_id.is_some());
+
+    let chosen = RecordingSettings {
+        input_mode: InputMode::System,
+        target_app: Some("Zoom".into()),
+        prompt_id: Some("default-therapy-dora".into()),
+    };
+    store.set_recording_settings(&chosen).unwrap();
+    drop(store);
+    let store = db.open();
+    assert_eq!(store.recording_settings().unwrap(), chosen);
+
+    let cleared = RecordingSettings {
+        input_mode: InputMode::MicAndSystem,
+        target_app: None,
+        prompt_id: None,
+    };
+    store.set_recording_settings(&cleared).unwrap();
+    assert_eq!(store.recording_settings().unwrap(), cleared);
+    assert_eq!(store.get_setting(ACTIVE_PROMPT_ID).unwrap(), None);
+}
+
+#[test]
+fn recording_settings_are_read_whole_while_saving() {
+    let db = TempDb::new();
+    let store = db.open();
+    let a = RecordingSettings {
+        input_mode: InputMode::Mic,
+        target_app: None,
+        prompt_id: Some("default-therapy-dora".into()),
+    };
+    let b = RecordingSettings {
+        input_mode: InputMode::System,
+        target_app: Some("Zoom".into()),
+        prompt_id: None,
+    };
+    store.set_recording_settings(&a).unwrap();
+    let saving = AtomicBool::new(true);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for settings in [&b, &a].into_iter().cycle().take(2000) {
+                store.set_recording_settings(settings).unwrap();
+            }
+            saving.store(false, Ordering::Relaxed);
+        });
+        while saving.load(Ordering::Relaxed) {
+            let read = store.recording_settings().unwrap();
+            assert!(read == a || read == b, "torn read: {read:?}");
+        }
+    });
 }
 
 #[test]

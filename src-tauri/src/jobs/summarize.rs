@@ -91,7 +91,7 @@ impl Reporter<'_> {
     }
 }
 
-fn ms(since: Instant) -> u32 {
+pub(super) fn ms(since: Instant) -> u32 {
     u32::try_from(since.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
@@ -159,7 +159,13 @@ fn summarize(
         return Err(Some(ChunkError::InsufficientAudio.into()));
     }
 
-    let mut timings = Timings::default();
+    let mut timings = Timings {
+        tail_transcription_ms: session
+            .timings
+            .as_ref()
+            .and_then(|t| t.tail_transcription_ms),
+        ..Timings::default()
+    };
     r.step(1, 1, "Loading summary model...");
     let model = match llm {
         Some(model) => {
