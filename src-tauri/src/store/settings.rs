@@ -31,30 +31,33 @@ pub(super) fn insert(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()?)
+}
+
 impl Store {
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        self.with(|c| {
-            Ok(
-                c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
-                    r.get(0)
-                })
-                .optional()?,
-            )
-        })
+        self.with(|c| select(c, key))
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.with(|c| insert(c, key, value))
     }
 
+    /// Reads all three under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
-        Ok(RecordingSettings {
-            input_mode: self
-                .get_setting(INPUT_MODE)?
-                .and_then(|m| InputMode::parse(&m))
-                .unwrap_or(InputMode::Mic),
-            target_app: self.get_setting(TARGET_APP)?,
-            prompt_id: self.get_setting(ACTIVE_PROMPT_ID)?,
+        self.with(|c| {
+            Ok(RecordingSettings {
+                input_mode: select(c, INPUT_MODE)?
+                    .and_then(|m| InputMode::parse(&m))
+                    .unwrap_or(InputMode::Mic),
+                target_app: select(c, TARGET_APP)?,
+                prompt_id: select(c, ACTIVE_PROMPT_ID)?,
+            })
         })
     }
 

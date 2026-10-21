@@ -3,7 +3,7 @@
 
 use std::{
     path::PathBuf,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
 use scribular_lib::store::{
@@ -325,6 +325,36 @@ fn recording_settings_round_trip_and_clear() {
     store.set_recording_settings(&cleared).unwrap();
     assert_eq!(store.recording_settings().unwrap(), cleared);
     assert_eq!(store.get_setting(ACTIVE_PROMPT_ID).unwrap(), None);
+}
+
+#[test]
+fn recording_settings_are_read_whole_while_saving() {
+    let db = TempDb::new();
+    let store = db.open();
+    let a = RecordingSettings {
+        input_mode: InputMode::Mic,
+        target_app: None,
+        prompt_id: Some("default-therapy-dora".into()),
+    };
+    let b = RecordingSettings {
+        input_mode: InputMode::System,
+        target_app: Some("Zoom".into()),
+        prompt_id: None,
+    };
+    store.set_recording_settings(&a).unwrap();
+    let saving = AtomicBool::new(true);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for settings in [&b, &a].into_iter().cycle().take(2000) {
+                store.set_recording_settings(settings).unwrap();
+            }
+            saving.store(false, Ordering::Relaxed);
+        });
+        while saving.load(Ordering::Relaxed) {
+            let read = store.recording_settings().unwrap();
+            assert!(read == a || read == b, "torn read: {read:?}");
+        }
+    });
 }
 
 #[test]
