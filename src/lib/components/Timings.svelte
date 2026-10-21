@@ -11,7 +11,15 @@
     ['Combine', timings.combineMs],
     ['Save', timings.saveMs],
   ]);
-  let total = $derived(rows.reduce((sum, [, ms]) => sum + (ms ?? 0), 0));
+  // The chunks decode in one batch and each entry is its finish time from the
+  // batch start, so the largest one is the chunk stage; summing would overstate it.
+  let total = $derived(
+    (timings.tailTranscriptionMs ?? 0) +
+      (timings.modelLoadMs ?? 0) +
+      Math.max(0, ...timings.chunkMs) +
+      (timings.combineMs ?? 0) +
+      (timings.saveMs ?? 0),
+  );
   let copied = $state(false);
 
   function markdown(): string {
