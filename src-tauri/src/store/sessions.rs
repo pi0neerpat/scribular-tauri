@@ -159,7 +159,7 @@ pub struct NewSession {
     pub model_id: Option<String>,
 }
 
-/// Statuses a crash can strand; reopening turns them into `Failed`.
+/// A capture without a queued transcript cannot safely resume after restart.
 const IN_FLIGHT: [SessionStatus; 2] = [SessionStatus::Recording, SessionStatus::Finalizing];
 pub const INTERRUPTED: &str = "interrupted";
 
@@ -232,13 +232,53 @@ impl Store {
         })
     }
 
-    pub fn queue_status(&self, id: &str, prompt_id: &str, status: SessionStatus) -> Result<()> {
+    pub fn queue_status(
+        &self,
+        id: &str,
+        prompt_id: &str,
+        status: SessionStatus,
+        restore_status: SessionStatus,
+    ) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
-            tx.execute("INSERT INTO summary_queue (session_id, prompt_id) VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET prompt_id = excluded.prompt_id", params![id, prompt_id])?;
-            tx.execute("UPDATE sessions SET status = ?2, error = NULL WHERE id = ?1", params![id, status.as_str()])?;
+            tx.execute("INSERT INTO summary_queue (session_id, prompt_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO UPDATE SET prompt_id = excluded.prompt_id", params![id, prompt_id, restore_status.as_str()])?;
+            tx.execute("UPDATE sessions SET status = ?2 WHERE id = ?1", params![id, status.as_str()])?;
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    /// Cancels durable queued work, restoring an earlier finished result when
+    /// this was a queued re-summary.
+    pub fn cancel_queued_summary(&self, id: &str) -> Result<Option<SessionStatus>> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            let restore: Option<String> = tx
+                .query_row(
+                    "SELECT restore_status FROM summary_queue WHERE session_id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(restore) = restore else {
+                return Ok(None);
+            };
+            let restore = SessionStatus::parse(&restore).ok_or_else(|| bad_column(0, restore))?;
+            let status = if matches!(
+                restore,
+                SessionStatus::Done | SessionStatus::Cancelled | SessionStatus::Failed
+            ) {
+                restore
+            } else {
+                SessionStatus::Cancelled
+            };
+            tx.execute("DELETE FROM summary_queue WHERE session_id = ?1", [id])?;
+            tx.execute(
+                "UPDATE sessions SET status = ?2 WHERE id = ?1",
+                params![id, status.as_str()],
+            )?;
+            tx.commit()?;
+            Ok(Some(status))
         })
     }
 
@@ -504,20 +544,33 @@ impl Store {
         })
     }
 
-    /// KTD2 launch recovery: a session still `Recording` or `Finalizing`
-    /// means the app died mid-capture. It becomes `Failed("interrupted")`
-    /// and keeps its audio so U10 can offer to transcribe it.
+    /// Capture without a queued transcript is interrupted; queued work returns
+    /// to AwaitingModel in its original FIFO position after a crash.
     pub(super) fn recover_interrupted(&self) -> Result<usize> {
         self.with(|c| {
-            Ok(c.execute(
-                "UPDATE sessions SET status = ?1, error = ?2 WHERE status IN (?3, ?4)",
+            let tx = c.transaction()?;
+            let resumed = tx.execute(
+                "UPDATE sessions SET status = ?1, error = NULL
+                 WHERE status IN (?2, ?3) AND id IN (SELECT session_id FROM summary_queue)",
+                params![
+                    SessionStatus::AwaitingModel.as_str(),
+                    SessionStatus::Finalizing.as_str(),
+                    SessionStatus::Summarizing.as_str(),
+                ],
+            )?;
+            let interrupted = tx.execute(
+                "UPDATE sessions SET status = ?1, error = ?2
+                 WHERE status IN (?3, ?4)
+                 AND (status = ?3 OR id NOT IN (SELECT session_id FROM summary_queue))",
                 params![
                     SessionStatus::Failed.as_str(),
                     INTERRUPTED,
                     IN_FLIGHT[0].as_str(),
                     IN_FLIGHT[1].as_str(),
                 ],
-            )?)
+            )?;
+            tx.commit()?;
+            Ok(resumed + interrupted)
         })
     }
 }

@@ -138,15 +138,17 @@ impl JobQueue {
         }
         let mut state = self.shared.lock();
         let waiting = !self.shared.loader.ready();
-        self.shared.store.queue_status(
-            session_id,
-            prompt_id,
-            if waiting {
-                SessionStatus::AwaitingModel
-            } else {
-                session.status
-            },
-        )?;
+        let queued_status = if waiting {
+            SessionStatus::AwaitingModel
+        } else {
+            session.status
+        };
+        if waiting {
+            debug_assert!(can_transition(session.status, queued_status));
+        }
+        self.shared
+            .store
+            .queue_status(session_id, prompt_id, queued_status, session.status)?;
         match state
             .pending
             .iter_mut()
@@ -209,18 +211,15 @@ impl JobQueue {
 
     fn cancel_finalizing(&self, session_id: &str) {
         let store = &self.shared.store;
-        match store.get_session(session_id) {
-            Ok(Some(s))
-                if matches!(s.status, SessionStatus::Finalizing | SessionStatus::AwaitingModel) =>
-            {
-                if let Err(e) = store.dequeue_summary(session_id) {
-                    eprintln!("cancel {session_id}: removing queued summary failed: {e}");
-                }
+        let status = match store.cancel_queued_summary(session_id) {
+            Ok(Some(status)) => status,
+            Ok(None) => return,
+            Err(e) => {
+                eprintln!("cancel {session_id}: removing queued summary failed: {e}");
+                return;
             }
-            _ => return,
-        }
-        if let Err(e) = store.set_status(session_id, SessionStatus::Cancelled, None) {
-            eprintln!("cancel {session_id}: saving Cancelled failed: {e}");
+        };
+        if status != SessionStatus::Cancelled {
             return;
         }
         self.shared.events.progress(SessionProgress {
@@ -297,12 +296,6 @@ fn work(shared: &Shared) {
                 continue;
             }
             let job = state.pending.pop_front().expect("pending is non-empty");
-            if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
-                eprintln!(
-                    "queue {}: removing persisted job failed: {e}",
-                    job.session_id
-                );
-            }
             let cancel = Arc::new(AtomicBool::new(false));
             state.running = Some(Running {
                 session_id: job.session_id.clone(),
@@ -317,6 +310,12 @@ fn work(shared: &Shared) {
             // The engine may be in a bad state; load it again next time.
             llm = None;
             summarize::fail_after_panic(shared, &job);
+        }
+        if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
+            eprintln!(
+                "queue {}: removing persisted job failed: {e}",
+                job.session_id
+            );
         }
         shared.lock().running = None;
         shared.changed.notify_all();

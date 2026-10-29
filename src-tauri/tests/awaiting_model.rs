@@ -150,10 +150,12 @@ fn waiting_sessions_resume_from_persistent_queue_after_relaunch() {
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
-    let id = session(&store);
+    let first = session(&store);
+    let second = session(&store);
     {
         let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
-        queue.regenerate(&id, PROMPT).unwrap();
+        queue.regenerate(&first, PROMPT).unwrap();
+        queue.regenerate(&second, PROMPT).unwrap();
     }
     drop(events);
     let reopened = Arc::new(Store::open(&db.0).unwrap());
@@ -162,10 +164,54 @@ fn waiting_sessions_resume_from_persistent_queue_after_relaunch() {
     let queue = JobQueue::new(reopened.clone(), loader, events.clone());
     assert!(queue.wait_idle(WAIT));
     assert_eq!(
-        reopened.get_session(&id).unwrap().unwrap().status,
+        reopened.get_session(&first).unwrap().unwrap().status,
         SessionStatus::Done
     );
-    assert_eq!(events.wait_done(1), [id]);
+    assert_eq!(
+        reopened.get_session(&second).unwrap().unwrap().status,
+        SessionStatus::Done
+    );
+    assert_eq!(events.wait_done(2), [first, second]);
+}
+
+#[test]
+fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let first = session(&store);
+    let second = session(&store);
+    store
+        .queue_status(
+            &first,
+            PROMPT,
+            SessionStatus::Summarizing,
+            SessionStatus::Finalizing,
+        )
+        .unwrap();
+    store
+        .queue_status(
+            &second,
+            PROMPT,
+            SessionStatus::Finalizing,
+            SessionStatus::Finalizing,
+        )
+        .unwrap();
+    drop(store);
+
+    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    assert_eq!(
+        reopened.get_session(&first).unwrap().unwrap().status,
+        SessionStatus::AwaitingModel
+    );
+    assert_eq!(
+        reopened.get_session(&second).unwrap().unwrap().status,
+        SessionStatus::AwaitingModel
+    );
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(reopened, loader, events.clone());
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(events.wait_done(2), [first, second]);
 }
 
 #[test]
@@ -180,6 +226,29 @@ fn cancelling_a_waiting_session_removes_its_persisted_job() {
     queue.regenerate(&id, PROMPT).unwrap();
 
     assert!(queue.cancel(&id));
-    assert_eq!(store.get_session(&id).unwrap().unwrap().status, SessionStatus::Cancelled);
+    assert_eq!(
+        store.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Cancelled
+    );
+    assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn cancelling_a_queued_resummary_keeps_the_completed_session_and_drops_the_row() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    loader.ready.store(false, Ordering::SeqCst);
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(store.clone(), loader, events);
+    let id = session(&store);
+    store.set_status(&id, SessionStatus::Done, None).unwrap();
+    queue.regenerate(&id, PROMPT).unwrap();
+
+    assert!(queue.cancel(&id));
+    assert_eq!(
+        store.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Done
+    );
     assert!(store.queued_summaries().unwrap().is_empty());
 }

@@ -8,10 +8,17 @@ use super::{prompts, settings, Result, StoreError};
 type Migration = fn(&Transaction) -> Result<()>;
 
 /// Append only. Never edit a migration that has shipped.
-const MIGRATIONS: &[Migration] = &[v1_initial, v2_summary_queue];
+const MIGRATIONS: &[Migration] = &[v1_initial, v2_summary_queue, v3_queue_restore_status];
 
 fn v2_summary_queue(tx: &Transaction) -> Result<()> {
     tx.execute_batch("CREATE TABLE summary_queue (position INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE, prompt_id TEXT NOT NULL);")?;
+    Ok(())
+}
+
+fn v3_queue_restore_status(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE summary_queue ADD COLUMN restore_status TEXT NOT NULL DEFAULT 'finalizing';",
+    )?;
     Ok(())
 }
 
