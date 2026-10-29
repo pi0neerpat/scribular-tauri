@@ -4,6 +4,7 @@ import SummaryPanel from './SummaryPanel.svelte';
 import PermissionNotice from './PermissionNotice.svelte';
 import RecordView from './RecordView.svelte';
 import FirstRun from './FirstRun.svelte';
+import SpeechModelStatus from './SpeechModelStatus.svelte';
 import { isWorking } from './record-status';
 import { deniedPrivacy } from '../api';
 
@@ -49,5 +50,14 @@ describe('first run components', () => {
     const { body } = render(FirstRun, { props: { speechReady: false } });
     expect(body).toContain('Open Microphone Settings');
     expect(body).toContain('Open System Audio Settings');
+  });
+
+  it('shows a failed speech download and an actionable retry', () => {
+    const { body } = render(SpeechModelStatus, { props: { speech: {
+      modelId: 'whisper-base', state: 'failed', downloadedBytes: 0, totalBytes: 10,
+      error: 'network unavailable',
+    } } });
+    expect(body).toContain('Speech model download failed: network unavailable');
+    expect(body).toContain('Retry speech model download');
   });
 });

@@ -2,10 +2,12 @@
   import { onMount } from 'svelte';
   import { downloadModels, modelsStatus, onModelsProgress, openPrivacySettings } from '../api';
   import type { ModelProgress } from '../types/ModelProgress';
+  import SpeechModelStatus from './SpeechModelStatus.svelte';
 
   const SPEECH_MODEL = 'whisper-base';
   let { speechReady = $bindable(false) } = $props();
   let models = $state<ModelProgress[]>([]);
+  let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
 
   function update(p: ModelProgress[]) {
     models = p;
@@ -32,7 +34,7 @@
         Allow Screen &amp; System Audio Recording when prompted for app audio.
         <button onclick={() => openPrivacySettings('systemAudio')}>Open System Audio Settings</button>
       </li>
-      <li>Downloading the speech model{#if models.find((m) => m.modelId === SPEECH_MODEL)} ({Math.floor((models.find((m) => m.modelId === SPEECH_MODEL)!.downloadedBytes / Math.max(1, models.find((m) => m.modelId === SPEECH_MODEL)!.totalBytes)) * 100)}%){/if}.</li>
+      <SpeechModelStatus {speech} />
     </ol>
     <p>Recording becomes available when the speech model is ready.</p>
   </section>
