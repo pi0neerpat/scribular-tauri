@@ -9,7 +9,6 @@
     getRecordingSettings,
     getSession,
     onSessionProgress,
-    openPrivacySettings,
     startRecording,
     stopRecording,
   } from '../api';
@@ -19,6 +18,10 @@
   import type { SessionStatus } from '../types/SessionStatus';
   import LiveTranscript from './LiveTranscript.svelte';
   import Timings from './Timings.svelte';
+  import SummaryPanel from './SummaryPanel.svelte';
+  import PermissionNotice from './PermissionNotice.svelte';
+
+  let { speechReady = false }: { speechReady: boolean } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -63,7 +66,7 @@
       if (p.sessionId !== sessionId) return;
       progress = p;
       status = p.state;
-      if (finished.includes(p.state)) {
+      if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
         remember(null);
         getSession(p.sessionId).then((s) => (result = s));
       }
@@ -85,6 +88,7 @@
         return;
       }
       if (session && status === null) status = session.status;
+      if (session?.status === 'awaitingModel') result = session;
       labeled = session?.inputMode === 'micAndSystem';
       startedAt = session?.createdAt ?? Date.now();
     });
@@ -148,7 +152,7 @@
     </p>
     <button onclick={cancel}>Cancel</button>
   {:else}
-    <button onclick={start} disabled={busy}>Start recording</button>
+    <button onclick={start} disabled={busy || !speechReady}>Start recording</button>
   {/if}
 
   {#if sessionId && (recording || working || status === 'failed')}
@@ -156,40 +160,14 @@
   {/if}
 
   {#if denied}
-    <p role="alert">
-      {denied === 'microphone' ? 'Microphone' : 'App audio'} access is off.
-      <button onclick={() => openPrivacySettings(denied!)}>Open System Settings</button>
-    </p>
+    <PermissionNotice pane={denied} />
   {:else if error}
     <p role="alert">{error}</p>
   {/if}
 
   {#if result}
     {@const session = result}
-    <article>
-      <h3>{session.title}</h3>
-      {#if session.status === 'failed'}
-        <p role="alert">{session.error}</p>
-      {:else if session.status === 'cancelled'}
-        <p>Stopped.</p>
-      {/if}
-      {#if session.summary}
-        <h4>Summary</h4>
-        <pre>{session.summary}</pre>
-      {/if}
-      {#if session.transcript}
-        <h4>Transcript</h4>
-        <pre>{session.transcript}</pre>
-      {/if}
-      {#if session.timings}
-        <Timings timings={session.timings} />
-      {/if}
-    </article>
+    <SummaryPanel {session} />
+    {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>
-
-<style>
-  pre {
-    white-space: pre-wrap;
-  }
-</style>
