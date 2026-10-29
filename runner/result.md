@@ -49,3 +49,44 @@ After verification, `cargo clean` removed the generated 1.7 GiB `src-tauri/targe
 - Manual fresh-macOS-user check remains pending for the developer, including granting permissions and recording a second session while the summary model downloads.
 
 No dependency blocker. U9 remains accepted as passed per Patrick; no U9 evidence or measurements were changed or added.
+
+## Follow-up repair (2026-10-29)
+
+This section records the post-review repair; the earlier report above is preserved. Existing implementation commits remain unchanged.
+
+### Changes
+
+- `FirstRun` now renders failed speech-model errors and an explicit Retry action that calls the existing `downloadModels`; progress still shows download percentage. `SpeechModelStatus` is a small renderable component for meaningful failed-state coverage.
+- `regenerate` now reads session state while holding the queue mutex, skips the debug transition assertion for a same-state `AwaitingModel` update, and keeps worker cleanup serialized with requeue. A job requeued after summary completion retains its FIFO row. Existing SQLite upsert behavior updates only `prompt_id`, retaining the original `restore_status` across repeated updates.
+- Normal `JobQueue` shutdown now leaves an interrupted active job in its durable row and returns its status to `Summarizing`, which launch recovery moves back to `AwaitingModel`. Pending queue cancellation is serialized with queue mutation.
+- Added `awaiting_model::updating_a_waiting_job_keeps_its_original_restore_status`, `awaiting_model::requeue_during_completion_keeps_the_new_durable_row`, and `awaiting_model::dropping_during_a_summary_keeps_the_job_for_relaunch`; added a speech failure/retry render test.
+- No dependencies, IPC changes, U9 edits, or model downloads.
+
+### Review observations and scope
+
+- The failed speech download, repeated AwaitingModel queue update, and completion/requeue race were concrete defects and are repaired above.
+- The active-job quit cancellation was also concrete against KTD7's persistent FIFO queue requirement, so it is repaired and regression-tested across reopening the store.
+- The missing way to reopen an earlier session and the lack of a UI cancel action are session-history/navigation concerns. R6 and the TAURI_MVP architecture specify session browsing/detail, but U10's scope and six scenarios cover first-run readiness, record-while-summary-downloads, and immediate transcript availability (R10–R12), not adding session navigation. The existing saved session remains in SQLite and U10 queue work continues; R6 UI navigation remains a separate requirement gap. No unrelated navigation UI was added in this repair.
+- The prior review's frontend tests are server-rendered; the new failure test verifies visible error and retry affordance, not a browser click or native download.
+
+### Verification after repair
+
+All Rust commands used `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`.
+
+| Command | Result |
+|---|---|
+| `cargo test` | Exit 0; 80 passed, 4 ignored (real-model tests) |
+| `cargo test --features fake-engines` | Exit 0; 117 passed, 0 failed |
+| `cargo clippy --all-targets --features fake-engines` | Exit 0; 3 warnings remain in unchanged `src/jobs/session.rs`, `src/stt/stream.rs`, and `src/audio/ring.rs`; no warnings from changed files |
+| `cargo test -- --ignored` | Exit 0; 4 passed (2 llama, 2 whisper), using already-installed models |
+| `npx svelte-check` | Exit 0; 0 errors, 0 warnings |
+| `npx vitest run` | Exit 0; 15 passed across 3 files |
+| `git diff --exit-code src/lib/types` | Exit 0; no generated IPC type changes |
+| `cargo fmt --check` / `git diff --check` | Exit 0 |
+
+`npm ci` was unnecessary because `node_modules` exists. A first targeted Rust test compile caught `let_underscore_lock` in the new test harness; it was fixed, and the rerun passed. The added shutdown regression initially asserted before reopening the store; it was corrected to exercise actual launch recovery and then passed. These transient failures were test-harness issues, not product test failures.
+
+### Still pending
+
+- Manual fresh macOS user check remains pending: grant mic/system-audio permissions, wait through speech setup, record, and record again while the summary model downloads. No readiness or U10 sign-off is claimed pending that manual check and independent review.
+- U9 remains passed per Patrick; no measurements or `m5b-check.md` were changed.
