@@ -127,23 +127,23 @@ impl JobQueue {
     /// already waiting keeps its place and takes the new prompt.
     pub fn regenerate(&self, session_id: &str, prompt_id: &str) -> Result<(), JobError> {
         let store = &self.shared.store;
-        let session = store
-            .get_session(session_id)?
-            .ok_or_else(|| JobError::SessionNotFound(session_id.into()))?;
         if store.get_prompt(prompt_id)?.is_none() {
             return Err(JobError::PromptNotFound(prompt_id.into()));
         }
+        let mut state = self.shared.lock();
+        let session = store
+            .get_session(session_id)?
+            .ok_or_else(|| JobError::SessionNotFound(session_id.into()))?;
         if !can_transition(session.status, SessionStatus::Summarizing) {
             return Err(JobError::Busy(session.status));
         }
-        let mut state = self.shared.lock();
         let waiting = !self.shared.loader.ready();
         let queued_status = if waiting {
             SessionStatus::AwaitingModel
         } else {
             session.status
         };
-        if waiting {
+        if waiting && session.status != queued_status {
             debug_assert!(can_transition(session.status, queued_status));
         }
         self.shared
@@ -195,9 +195,9 @@ impl JobQueue {
             .position(|j| j.session_id == session_id)
         {
             state.pending.remove(i);
-            self.shared.changed.notify_all();
-            drop(state);
             self.cancel_finalizing(session_id);
+            drop(state);
+            self.shared.changed.notify_all();
             return true;
         }
         match &state.running {
@@ -311,13 +311,36 @@ fn work(shared: &Shared) {
             llm = None;
             summarize::fail_after_panic(shared, &job);
         }
-        if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
-            eprintln!(
-                "queue {}: removing persisted job failed: {e}",
-                job.session_id
-            );
+        let mut state = shared.lock();
+        let requeued = state.pending.iter().any(|j| j.session_id == job.session_id);
+        let interrupted_by_shutdown = state.shutdown
+            && shared
+                .store
+                .get_session(&job.session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| s.status == SessionStatus::Cancelled);
+        if interrupted_by_shutdown {
+            if let Err(e) =
+                shared
+                    .store
+                    .set_status(&job.session_id, SessionStatus::Summarizing, None)
+            {
+                eprintln!(
+                    "queue {}: preserving interrupted job failed: {e}",
+                    job.session_id
+                );
+            }
+        } else if !requeued {
+            if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
+                eprintln!(
+                    "queue {}: removing persisted job failed: {e}",
+                    job.session_id
+                );
+            }
         }
-        shared.lock().running = None;
+        state.running = None;
+        drop(state);
         shared.changed.notify_all();
     }
 }

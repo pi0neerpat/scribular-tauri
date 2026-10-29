@@ -46,6 +46,10 @@ impl Drop for Db {
 struct Events {
     progress: Mutex<Vec<SessionProgress>>,
     changed: Condvar,
+    pause_at: Option<SessionStatus>,
+    done_entered: Mutex<bool>,
+    release_done: Mutex<bool>,
+    release: Condvar,
 }
 impl Events {
     fn wait_done(&self, n: usize) -> Vec<String> {
@@ -66,11 +70,47 @@ impl Events {
 }
 impl JobEvents for Events {
     fn progress(&self, p: SessionProgress) {
+        if self.pause_at == Some(p.state) {
+            *self.done_entered.lock().unwrap() = true;
+            self.changed.notify_all();
+            let released = self.release_done.lock().unwrap();
+            let _released = self
+                .release
+                .wait_while(released, |released| !*released)
+                .unwrap();
+        }
         self.progress.lock().unwrap().push(p);
         self.changed.notify_all();
     }
     fn summary_delta(&self, _: SummaryDelta) {}
     fn segments(&self, _: SessionSegments) {}
+}
+
+impl Events {
+    fn paused() -> Self {
+        Self::paused_at(SessionStatus::Done)
+    }
+
+    fn paused_at(state: SessionStatus) -> Self {
+        Self {
+            pause_at: Some(state),
+            ..Self::default()
+        }
+    }
+
+    fn wait_done_callback(&self) {
+        let entered = self.done_entered.lock().unwrap();
+        let (entered, result) = self
+            .changed
+            .wait_timeout_while(entered, WAIT, |entered| !*entered)
+            .unwrap();
+        assert!(*entered && !result.timed_out());
+    }
+
+    fn release_done_callback(&self) {
+        *self.release_done.lock().unwrap() = true;
+        self.release.notify_all();
+    }
 }
 
 fn session(store: &Store) -> String {
@@ -246,6 +286,88 @@ fn cancelling_a_queued_resummary_keeps_the_completed_session_and_drops_the_row()
     queue.regenerate(&id, PROMPT).unwrap();
 
     assert!(queue.cancel(&id));
+    assert_eq!(
+        store.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Done
+    );
+    assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn updating_a_waiting_job_keeps_its_original_restore_status() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    loader.ready.store(false, Ordering::SeqCst);
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(store.clone(), loader, events);
+    let id = session(&store);
+    store.set_status(&id, SessionStatus::Done, None).unwrap();
+
+    queue.regenerate(&id, PROMPT).unwrap();
+    queue.regenerate(&id, PROMPT).unwrap();
+    assert!(queue.cancel(&id));
+
+    assert_eq!(
+        store.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Done
+    );
+    assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn requeue_during_completion_keeps_the_new_durable_row() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::paused());
+    let id = session(&store);
+    {
+        let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
+        queue.regenerate(&id, PROMPT).unwrap();
+        events.wait_done_callback();
+
+        loader.ready.store(false, Ordering::SeqCst);
+        queue.regenerate(&id, PROMPT).unwrap();
+        events.release_done_callback();
+        assert!(!queue.wait_idle(Duration::from_millis(50)));
+    }
+    assert_eq!(store.queued_summaries().unwrap().len(), 1);
+
+    loader.ready.store(true, Ordering::SeqCst);
+    let resumed_events = Arc::new(Events::default());
+    let queue = JobQueue::new(store.clone(), loader, resumed_events.clone());
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(
+        store.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Done
+    );
+    assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn dropping_during_a_summary_keeps_the_job_for_relaunch() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::paused_at(SessionStatus::Summarizing));
+    let id = session(&store);
+    let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
+    queue.regenerate(&id, PROMPT).unwrap();
+    events.wait_done_callback();
+
+    std::thread::scope(|scope| {
+        scope.spawn(move || drop(queue));
+        std::thread::sleep(Duration::from_millis(50));
+        events.release_done_callback();
+    });
+    assert_eq!(store.queued_summaries().unwrap().len(), 1);
+    drop(store);
+    let store = Arc::new(Store::open(&db.0).unwrap());
+
+    let resumed_events = Arc::new(Events::default());
+    let queue = JobQueue::new(store.clone(), loader, resumed_events.clone());
+    assert!(queue.wait_idle(WAIT));
     assert_eq!(
         store.get_session(&id).unwrap().unwrap().status,
         SessionStatus::Done
