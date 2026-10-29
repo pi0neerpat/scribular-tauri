@@ -120,6 +120,7 @@ impl Summarizer for FakeSummarizer {
 pub struct FakeLoader {
     pub summarizer: Arc<FakeSummarizer>,
     pub loads: AtomicUsize,
+    pub ready: AtomicBool,
     /// When set, `load` fails with this error instead.
     pub fail: Option<LlmError>,
 }
@@ -129,6 +130,7 @@ impl FakeLoader {
         Self {
             summarizer: Arc::new(summarizer),
             loads: AtomicUsize::new(0),
+            ready: AtomicBool::new(true),
             fail: None,
         }
     }
@@ -137,6 +139,10 @@ impl FakeLoader {
 impl SummarizerLoader for FakeLoader {
     fn model_id(&self) -> &str {
         "fake-llm"
+    }
+
+    fn ready(&self) -> bool {
+        self.ready.load(Ordering::SeqCst)
     }
 
     fn load(&self) -> Result<Arc<dyn Summarizer>> {

@@ -73,6 +73,10 @@ impl SummarizerLoader for LlamaLoader {
         GEMMA_2_2B
     }
 
+    fn ready(&self) -> bool {
+        self.models.readiness.get(GEMMA_2_2B) == ModelState::Ready
+    }
+
     fn load(&self) -> Result<Arc<dyn Summarizer>> {
         if self.models.readiness.get(GEMMA_2_2B) != ModelState::Ready {
             return Err(LlmError::NotReady);

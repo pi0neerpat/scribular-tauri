@@ -8,7 +8,12 @@ use super::{prompts, settings, Result, StoreError};
 type Migration = fn(&Transaction) -> Result<()>;
 
 /// Append only. Never edit a migration that has shipped.
-const MIGRATIONS: &[Migration] = &[v1_initial];
+const MIGRATIONS: &[Migration] = &[v1_initial, v2_summary_queue];
+
+fn v2_summary_queue(tx: &Transaction) -> Result<()> {
+    tx.execute_batch("CREATE TABLE summary_queue (position INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE, prompt_id TEXT NOT NULL);")?;
+    Ok(())
+}
 
 pub(super) fn migrate(conn: &mut Connection) -> Result<()> {
     let known = MIGRATIONS.len() as u32;

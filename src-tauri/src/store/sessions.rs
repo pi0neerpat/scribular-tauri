@@ -214,6 +214,34 @@ fn session_not_found(id: &str) -> StoreError {
 }
 
 impl Store {
+    pub fn queued_summaries(&self) -> Result<Vec<(String, String)>> {
+        self.with(|c| {
+            let mut s =
+                c.prepare("SELECT session_id, prompt_id FROM summary_queue ORDER BY position")?;
+            let rows = s
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            Ok(rows)
+        })
+    }
+
+    pub fn dequeue_summary(&self, id: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("DELETE FROM summary_queue WHERE session_id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn queue_status(&self, id: &str, prompt_id: &str, status: SessionStatus) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("INSERT INTO summary_queue (session_id, prompt_id) VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET prompt_id = excluded.prompt_id", params![id, prompt_id])?;
+            tx.execute("UPDATE sessions SET status = ?2, error = NULL WHERE id = ?1", params![id, status.as_str()])?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     /// Inserts a session in `Recording` and returns it. The id comes from
     /// SQLite's CSPRNG, so no UUID crate is needed.
     pub fn create_session(&self, new: &NewSession) -> Result<Session> {

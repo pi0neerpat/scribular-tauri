@@ -61,6 +61,10 @@ pub trait Transcriber: Send + Sync {
 /// Loads the transcriber on demand, so the model only takes memory while
 /// audio needs it (KTD5).
 pub trait TranscriberLoader: Send + Sync {
+    fn ready(&self) -> bool {
+        true
+    }
+
     fn load(&self) -> Result<Arc<dyn Transcriber>>;
 }
 
