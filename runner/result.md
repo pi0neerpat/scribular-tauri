@@ -40,6 +40,7 @@ Commands were run with `CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV
 | `git diff --check` | Exit 0 |
 
 `npm ci` was skipped because `node_modules` was present. No new package was added.
+After verification, `cargo clean` removed the generated 1.7 GiB `src-tauri/target`; free disk is 2.9 GiB (97% used).
 
 ## Deferred / pending
 
