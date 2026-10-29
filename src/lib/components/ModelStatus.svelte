@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { modelsStatus, onModelsProgress } from '../api';
+  import { downloadModels, modelsStatus, onModelsProgress } from '../api';
   import type { ModelProgress } from '../types/ModelProgress';
 
   const SUMMARY_MODEL = 'gemma-2-2b-it-q4km';
@@ -20,7 +20,9 @@
   {#if summary?.state === 'ready'}
     Summary model ready
   {:else if summary?.state === 'failed'}
-    Summary model download failed: {summary.error}
+    Summary model download failed: {summary.error} <button onclick={downloadModels}>Retry download</button>
+  {:else if !summary || summary.state === 'missing'}
+    Summary model download has not started
   {:else}
     Summary model downloading{#if summary && summary.totalBytes > 0} ({Math.floor(summary.downloadedBytes / summary.totalBytes * 100)}%){/if}
   {/if}

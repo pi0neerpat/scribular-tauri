@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import SummaryPanel from './SummaryPanel.svelte';
 import PermissionNotice from './PermissionNotice.svelte';
 import RecordView from './RecordView.svelte';
+import FirstRun from './FirstRun.svelte';
+import { isWorking } from './record-status';
+import { deniedPrivacy } from '../api';
 
 const session = {
   id: 'session-1', title: 'Test', createdAt: 0, inputMode: 'mic' as const,
@@ -18,7 +21,10 @@ describe('first run components', () => {
   });
 
   it('shows the System Settings action when microphone permission is denied', () => {
-    const { body } = render(PermissionNotice, { props: { pane: 'microphone' } });
+    const pane = deniedPrivacy('microphone permission denied');
+    expect(pane).toBe('microphone');
+    if (!pane) throw new Error('denied microphone was not recognized');
+    const { body } = render(PermissionNotice, { props: { pane } });
     expect(body).toContain('Microphone access is off.');
     expect(body).toContain('Open System Settings');
   });
@@ -26,5 +32,22 @@ describe('first run components', () => {
   it('keeps Start recording disabled until the speech model is ready', () => {
     const { body } = render(RecordView, { props: { speechReady: false } });
     expect(body).toMatch(/<button[^>]*disabled[^>]*>Start recording<\/button>/);
+  });
+
+  it('enables Start recording once the speech model is ready', () => {
+    const { body } = render(RecordView, { props: { speechReady: true } });
+    expect(body).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
+  });
+
+  it('keeps recording available while a prior session awaits the summary model', () => {
+    expect(isWorking('awaitingModel')).toBe(false);
+    expect(isWorking('finalizing')).toBe(true);
+    expect(isWorking('summarizing')).toBe(true);
+  });
+
+  it('shows first-run actions for both macOS permission panes', () => {
+    const { body } = render(FirstRun, { props: { speechReady: false } });
+    expect(body).toContain('Open Microphone Settings');
+    expect(body).toContain('Open System Audio Settings');
   });
 });

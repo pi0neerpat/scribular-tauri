@@ -20,6 +20,7 @@
   import Timings from './Timings.svelte';
   import SummaryPanel from './SummaryPanel.svelte';
   import PermissionNotice from './PermissionNotice.svelte';
+  import { isWorking } from './record-status';
 
   let { speechReady = false }: { speechReady: boolean } = $props();
 
@@ -50,7 +51,7 @@
   let now = $state(Date.now());
 
   let recording = $derived(status === 'recording');
-  let working = $derived(status !== null && !recording && !finished.includes(status));
+  let working = $derived(isWorking(status));
   let elapsed = $derived(Math.max(0, Math.floor((now - startedAt) / 1000)));
 
   // The clock only ticks during a recording.
