@@ -703,3 +703,36 @@ fn whisper_loads_when_recording_starts_and_unloads_on_small_macs() {
     record(InputMode::Mic);
     assert_eq!(loads(&h), 2, "unloaded after the transcript");
 }
+
+#[test]
+fn first_run_refuses_recording_until_speech_is_ready_without_creating_a_session() {
+    struct DownloadingSpeech;
+    impl scribular_lib::stt::TranscriberLoader for DownloadingSpeech {
+        fn ready(&self) -> bool {
+            false
+        }
+        fn load(&self) -> scribular_lib::stt::Result<Arc<dyn scribular_lib::stt::Transcriber>> {
+            Err(scribular_lib::stt::SttError::NotReady)
+        }
+    }
+    let h = Harness::new();
+    let recorder = Recorder::new(
+        h.store.clone(),
+        h.queue.clone(),
+        Arc::new(DownloadingSpeech),
+        h.events.clone(),
+        Arc::new(FakeMicrophone(h.mic.clone())),
+        Arc::new(FakeSystemAudio {
+            source: h.system.clone(),
+            app: APP.into(),
+        }),
+    );
+    assert!(matches!(
+        recorder.start(InputMode::MicAndSystem, Some(APP), "First recording"),
+        Err(RecordError::SpeechModelNotReady)
+    ));
+    assert!(h.store.list_sessions().unwrap().is_empty());
+    assert!(!h.mic.is_open());
+    assert!(!h.system.is_open());
+    assert_eq!(recorder.current(), None);
+}

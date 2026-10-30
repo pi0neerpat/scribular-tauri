@@ -327,8 +327,29 @@ fn speech_model_downloads_before_the_llm() {
             spec(&server, "llm", ModelKind::Llm, &llm),
         ],
     );
-    let (_, on_progress) = recorder();
-    run(manager.ensure_all(&on_progress));
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
+    let timeout = std::time::Duration::from_secs(10);
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            run(manager.ensure_all(&|p| {
+                if p.model_id == "speech"
+                    && p.state == ModelState::Downloading
+                    && p.downloaded_bytes == 0
+                {
+                    started_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv_timeout(timeout).unwrap();
+                }
+            }))
+        });
+        started_rx.recv_timeout(timeout).unwrap();
+        run(manager.ensure_all(&|_| {}));
+        let llm_state = manager.readiness.get("llm");
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        assert_eq!(llm_state, ModelState::Missing);
+    });
 
     let paths: Vec<_> = server.seen().into_iter().map(|(p, _)| p).collect();
     assert_eq!(paths, ["speech.bin", "llm.bin"]);
@@ -338,4 +359,66 @@ fn speech_model_downloads_before_the_llm() {
             .wait_settled("llm", std::time::Duration::ZERO),
         ModelState::Ready
     );
+}
+
+#[test]
+fn speech_retry_finishes_while_llm_download_is_still_running() {
+    let speech = body(MB / 4, 7);
+    let llm = body(MB / 4, 8);
+    let server = Server::start(
+        HashMap::from([
+            ("speech.bin".into(), speech.clone()),
+            ("llm.bin".into(), llm.clone()),
+        ]),
+        HashMap::from([("speech.bin".into(), 1024)]),
+    );
+    let dir = TempDir::new();
+    let manager = ModelManager::new(
+        dir.0.clone(),
+        vec![
+            spec(&server, "speech", ModelKind::Speech, &speech),
+            spec(&server, "llm", ModelKind::Llm, &llm),
+        ],
+    );
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
+    let timeout = std::time::Duration::from_secs(10);
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            run(manager.ensure_all(&|p| {
+                if p.model_id == "llm"
+                    && p.state == ModelState::Downloading
+                    && p.downloaded_bytes == 0
+                {
+                    started_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv_timeout(timeout).unwrap();
+                }
+            }))
+        });
+        started_rx.recv_timeout(timeout).unwrap();
+        assert_eq!(manager.readiness.get("speech"), ModelState::Failed);
+        // Repeated clicks must neither wait for the LLM nor duplicate its request.
+        std::thread::scope(|retries| {
+            for _ in 0..8 {
+                retries.spawn(|| run(manager.ensure_all(&|_| {})));
+            }
+        });
+        let speech_state = manager.readiness.get("speech");
+        let llm_state = manager.readiness.get("llm");
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        assert_eq!(speech_state, ModelState::Ready);
+        assert_eq!(llm_state, ModelState::Downloading);
+    });
+    assert_eq!(
+        server.seen(),
+        [
+            ("speech.bin".into(), None),
+            ("llm.bin".into(), None),
+            ("speech.bin".into(), Some("bytes=1024-".into())),
+        ]
+    );
+    assert_eq!(std::fs::read(dir.0.join("speech.bin")).unwrap(), speech);
+    assert_eq!(std::fs::read(dir.0.join("llm.bin")).unwrap(), llm);
 }
