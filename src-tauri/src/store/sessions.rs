@@ -238,11 +238,31 @@ impl Store {
         prompt_id: &str,
         status: SessionStatus,
         restore_status: SessionStatus,
+        already_pending: bool,
     ) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
+            // A new job replaces a finishing job's row and takes a fresh FIFO position.
+            if !already_pending {
+                tx.execute("DELETE FROM summary_queue WHERE session_id = ?1", [id])?;
+            }
             tx.execute("INSERT INTO summary_queue (session_id, prompt_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(session_id) DO UPDATE SET prompt_id = excluded.prompt_id", params![id, prompt_id, restore_status.as_str()])?;
             tx.execute("UPDATE sessions SET status = ?2 WHERE id = ?1", params![id, status.as_str()])?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Persists explicit cancellation even if the process exits before the worker does.
+    pub fn cancel_running_summary(&self, id: &str) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("DELETE FROM summary_queue WHERE session_id = ?1", [id])?;
+            tx.execute(
+                "UPDATE sessions SET status = 'cancelled', error = NULL
+                 WHERE id = ?1 AND status IN ('finalizing', 'awaitingModel', 'summarizing')",
+                [id],
+            )?;
             tx.commit()?;
             Ok(())
         })

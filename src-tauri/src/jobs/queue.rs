@@ -55,6 +55,7 @@ pub(super) struct Job {
 struct Running {
     session_id: String,
     cancel: Arc<AtomicBool>,
+    cancelled_by_user: bool,
 }
 
 #[derive(Default)]
@@ -134,7 +135,12 @@ impl JobQueue {
         let session = store
             .get_session(session_id)?
             .ok_or_else(|| JobError::SessionNotFound(session_id.into()))?;
-        if !can_transition(session.status, SessionStatus::Summarizing) {
+        if state
+            .running
+            .as_ref()
+            .is_some_and(|r| r.session_id == session_id && r.cancelled_by_user)
+            || !can_transition(session.status, SessionStatus::Summarizing)
+        {
             return Err(JobError::Busy(session.status));
         }
         let waiting = !self.shared.loader.ready();
@@ -146,9 +152,14 @@ impl JobQueue {
         if waiting && session.status != queued_status {
             debug_assert!(can_transition(session.status, queued_status));
         }
-        self.shared
-            .store
-            .queue_status(session_id, prompt_id, queued_status, session.status)?;
+        let already_pending = state.pending.iter().any(|j| j.session_id == session_id);
+        self.shared.store.queue_status(
+            session_id,
+            prompt_id,
+            queued_status,
+            session.status,
+            already_pending,
+        )?;
         match state
             .pending
             .iter_mut()
@@ -200,8 +211,13 @@ impl JobQueue {
             self.shared.changed.notify_all();
             return true;
         }
-        match &state.running {
+        match &mut state.running {
             Some(r) if r.session_id == session_id => {
+                if let Err(e) = self.shared.store.cancel_running_summary(session_id) {
+                    eprintln!("cancel {session_id}: persisting cancellation failed: {e}");
+                    return false;
+                }
+                r.cancelled_by_user = true;
                 r.cancel.store(true, Ordering::Relaxed);
                 true
             }
@@ -300,6 +316,7 @@ fn work(shared: &Shared) {
             state.running = Some(Running {
                 session_id: job.session_id.clone(),
                 cancel: Arc::clone(&cancel),
+                cancelled_by_user: false,
             });
             (job, cancel)
         };
@@ -313,7 +330,9 @@ fn work(shared: &Shared) {
         }
         let mut state = shared.lock();
         let requeued = state.pending.iter().any(|j| j.session_id == job.session_id);
-        let interrupted_by_shutdown = state.shutdown
+        let interrupted_by_shutdown = !requeued
+            && state.shutdown
+            && state.running.as_ref().is_some_and(|r| !r.cancelled_by_user)
             && shared
                 .store
                 .get_session(&job.session_id)

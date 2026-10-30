@@ -48,6 +48,7 @@ struct Events {
     changed: Condvar,
     pause_at: Option<SessionStatus>,
     done_entered: Mutex<bool>,
+    pause_entered: Condvar,
     release_done: Mutex<bool>,
     release: Condvar,
 }
@@ -72,7 +73,7 @@ impl JobEvents for Events {
     fn progress(&self, p: SessionProgress) {
         if self.pause_at == Some(p.state) {
             *self.done_entered.lock().unwrap() = true;
-            self.changed.notify_all();
+            self.pause_entered.notify_all();
             let released = self.release_done.lock().unwrap();
             let _released = self
                 .release
@@ -101,7 +102,7 @@ impl Events {
     fn wait_done_callback(&self) {
         let entered = self.done_entered.lock().unwrap();
         let (entered, result) = self
-            .changed
+            .pause_entered
             .wait_timeout_while(entered, WAIT, |entered| !*entered)
             .unwrap();
         assert!(*entered && !result.timed_out());
@@ -226,6 +227,7 @@ fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
             PROMPT,
             SessionStatus::Summarizing,
             SessionStatus::Finalizing,
+            false,
         )
         .unwrap();
     store
@@ -234,6 +236,7 @@ fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
             PROMPT,
             SessionStatus::Finalizing,
             SessionStatus::Finalizing,
+            false,
         )
         .unwrap();
     drop(store);
@@ -373,4 +376,197 @@ fn dropping_during_a_summary_keeps_the_job_for_relaunch() {
         SessionStatus::Done
     );
     assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn cancelling_a_requeue_during_completion_restores_the_new_done_status() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::paused());
+    let id = session(&store);
+    let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
+    queue.regenerate(&id, PROMPT).unwrap();
+    events.wait_done_callback();
+    let summary = store.get_session(&id).unwrap().unwrap().summary;
+    loader.ready.store(false, Ordering::SeqCst);
+    queue.regenerate(&id, PROMPT).unwrap();
+    let cancelled = queue.cancel(&id);
+    events.release_done_callback();
+    assert!(queue.wait_idle(WAIT));
+    drop(queue);
+    drop(store);
+    let reopened = Store::open(&db.0).unwrap();
+    let saved = reopened.get_session(&id).unwrap().unwrap();
+    assert!(cancelled);
+    assert_eq!(saved.status, SessionStatus::Done);
+    assert_eq!(saved.summary, summary);
+    assert!(reopened.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn requeue_during_completion_moves_to_the_tail_across_restart() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::paused());
+    let first = session(&store);
+    let second = session(&store);
+    let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
+    queue.regenerate(&first, PROMPT).unwrap();
+    events.wait_done_callback();
+    loader.ready.store(false, Ordering::SeqCst);
+    queue.regenerate(&second, PROMPT).unwrap();
+    queue.regenerate(&first, PROMPT).unwrap();
+    events.release_done_callback();
+    drop(queue);
+    drop(store);
+    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    loader.ready.store(true, Ordering::SeqCst);
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(reopened, loader, events.clone());
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(events.wait_done(2), [second, first]);
+}
+
+#[test]
+fn explicit_cancel_then_quit_does_not_resume_on_reopen() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let mut model = FakeSummarizer::new(8192);
+    model.token_delay = Duration::from_millis(100);
+    let loader = Arc::new(FakeLoader::new(model));
+    let events = Arc::new(Events::paused_at(SessionStatus::Cancelled));
+    let id = session(&store);
+    let queue = JobQueue::new(store.clone(), loader.clone(), events.clone());
+    queue.regenerate(&id, PROMPT).unwrap();
+    // Wait for a running job using the loading event before asking it to stop.
+    {
+        let progress = events.progress.lock().unwrap();
+        let (_progress, result) = events
+            .changed
+            .wait_timeout_while(progress, WAIT, |p| {
+                !p.iter().any(|p| p.state == SessionStatus::Summarizing)
+            })
+            .unwrap();
+        assert!(!result.timed_out());
+    }
+    assert!(queue.cancel(&id));
+    events.wait_done_callback();
+    let queued_before_shutdown = store.queued_summaries().unwrap();
+    std::thread::scope(|scope| {
+        scope.spawn(move || drop(queue));
+        std::thread::sleep(Duration::from_millis(50));
+        events.release_done_callback();
+    });
+    drop(store);
+    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(reopened.clone(), loader, events.clone());
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(
+        reopened.get_session(&id).unwrap().unwrap().status,
+        SessionStatus::Cancelled
+    );
+    assert!(reopened.queued_summaries().unwrap().is_empty());
+    assert!(events.progress.lock().unwrap().is_empty());
+    assert!(
+        queued_before_shutdown.is_empty(),
+        "user cancellation must be durable before worker cleanup or Drop"
+    );
+}
+
+#[test]
+fn updating_the_same_pending_job_preserves_fifo_across_restart() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    loader.ready.store(false, Ordering::SeqCst);
+    let first = session(&store);
+    let second = session(&store);
+    let prompt = store
+        .list_prompts()
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id != PROMPT)
+        .unwrap()
+        .id;
+    let queue = JobQueue::new(store.clone(), loader.clone(), Arc::new(Events::default()));
+    queue.regenerate(&first, PROMPT).unwrap();
+    queue.regenerate(&second, PROMPT).unwrap();
+    queue.regenerate(&first, &prompt).unwrap();
+    drop(queue);
+    drop(store);
+    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    assert_eq!(
+        reopened.queued_summaries().unwrap(),
+        [
+            (first.clone(), prompt.clone()),
+            (second.clone(), PROMPT.into()),
+        ]
+    );
+    loader.ready.store(true, Ordering::SeqCst);
+    let events = Arc::new(Events::default());
+    let queue = JobQueue::new(reopened.clone(), loader, events.clone());
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(events.wait_done(2), [first.clone(), second]);
+    assert_eq!(
+        reopened.get_session(&first).unwrap().unwrap().prompt_id,
+        Some(prompt)
+    );
+}
+
+#[test]
+fn explicit_cancel_is_durable_before_the_worker_can_finish() {
+    let db = Db::new();
+    let store = Arc::new(Store::open(&db.0).unwrap());
+    let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
+    let events = Arc::new(Events::paused_at(SessionStatus::Summarizing));
+    let id = session(&store);
+    let queue = JobQueue::new(store.clone(), loader, events.clone());
+    queue.regenerate(&id, PROMPT).unwrap();
+    events.wait_done_callback();
+    let cancelled = queue.cancel(&id);
+    let requeue = queue.regenerate(&id, PROMPT);
+    // A process exit may skip Drop and worker cleanup entirely.
+    let reopened = Store::open(&db.0).unwrap();
+    let status = reopened.get_session(&id).unwrap().unwrap().status;
+    let pending = reopened.queued_summaries().unwrap();
+    events.release_done_callback();
+    assert!(queue.wait_idle(WAIT));
+    assert!(cancelled);
+    assert!(
+        requeue.is_err(),
+        "the cancelled worker still owns this session"
+    );
+    assert_eq!(status, SessionStatus::Cancelled);
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn durable_running_cancellation_covers_the_gap_before_summarizing() {
+    for (before, after) in [
+        (SessionStatus::Finalizing, SessionStatus::Cancelled),
+        (SessionStatus::AwaitingModel, SessionStatus::Cancelled),
+        (SessionStatus::Summarizing, SessionStatus::Cancelled),
+        (SessionStatus::Done, SessionStatus::Done),
+        (SessionStatus::Failed, SessionStatus::Failed),
+        (SessionStatus::Cancelled, SessionStatus::Cancelled),
+    ] {
+        let db = Db::new();
+        let store = Store::open(&db.0).unwrap();
+        let id = session(&store);
+        store
+            .queue_status(&id, PROMPT, before, SessionStatus::Finalizing, false)
+            .unwrap();
+        store.cancel_running_summary(&id).unwrap();
+        drop(store);
+        let reopened = Store::open(&db.0).unwrap();
+        assert_eq!(
+            reopened.get_session(&id).unwrap().unwrap().status,
+            after,
+            "{before:?}"
+        );
+        assert!(reopened.queued_summaries().unwrap().is_empty());
+    }
 }
