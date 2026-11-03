@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { downloadModels, modelsStatus, onModelsProgress, openPrivacySettings } from '../api';
+  import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
   import SpeechModelStatus from './SpeechModelStatus.svelte';
 
@@ -20,7 +21,7 @@
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
     unlisten
       .then(() => modelsStatus())
-      .then((s) => update([...s.filter((v) => !models.some((m) => m.modelId === v.modelId)), ...models]))
+      .then((s) => update(mergeSnapshot(s, models)))
       .finally(downloadModels);
     return () => { unlisten.then((fn) => fn()); };
   });
