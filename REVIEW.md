@@ -24,8 +24,7 @@ prompt, so keep it short. Edit it when the product scope or architecture changes
   settings, migrations), `commands.rs` IPC commands.
 - `src/` (Svelte 5 + TypeScript): `lib/api.ts` is the only IPC wrapper;
   `lib/components/` holds the views. Rust types reach TS through `ts-rs`.
-- Everything runs in-process. Audio is deleted after transcription unless the
-  `keep_audio` setting is on.
+- Everything runs in-process; nothing leaves the machine except model downloads.
 
 ## What to look for
 
