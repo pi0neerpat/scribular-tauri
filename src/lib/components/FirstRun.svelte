@@ -15,12 +15,13 @@
   }
 
   onMount(() => {
-    // Listen before the snapshot and download, so no progress event is missed.
+    // Listen before the snapshot and download, so no progress event is missed;
+    // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
-    unlisten.then(() => modelsStatus()).then((s) => {
-      update(s);
-      downloadModels();
-    });
+    unlisten
+      .then(() => modelsStatus())
+      .then((s) => update([...s.filter((v) => !models.some((m) => m.modelId === v.modelId)), ...models]))
+      .finally(downloadModels);
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>

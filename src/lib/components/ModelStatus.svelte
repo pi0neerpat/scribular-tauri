@@ -11,8 +11,11 @@
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
     });
-    // Snapshot after the listener is live, so no progress event is missed.
-    unlisten.then(() => modelsStatus()).then((value) => (models = value));
+    // Snapshot after the listener is live, so no progress event is missed;
+    // entries already updated by an event are newer than the snapshot.
+    unlisten
+      .then(() => modelsStatus())
+      .then((value) => (models = [...value.filter((v) => !models.some((m) => m.modelId === v.modelId)), ...models]));
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>
