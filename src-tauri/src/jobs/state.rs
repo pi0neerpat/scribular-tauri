@@ -13,7 +13,7 @@ pub fn can_transition(from: SessionStatus, to: SessionStatus) -> bool {
             | (Finalizing, AwaitingModel | Summarizing | Cancelled | Failed)
             | (AwaitingModel, Summarizing | Cancelled | Failed)
             | (Summarizing, Done | Cancelled | Failed)
-            | (Done | Cancelled | Failed, Summarizing)
+            | (Done | Cancelled | Failed, AwaitingModel | Summarizing)
     )
 }
 
@@ -29,6 +29,15 @@ mod tests {
         for from in [Recording, Summarizing] {
             assert!(!can_transition(from, Summarizing), "{from:?}");
         }
+    }
+
+    #[test]
+    fn finished_sessions_can_wait_for_a_queued_resummary() {
+        for from in [Done, Cancelled, Failed] {
+            assert!(can_transition(from, AwaitingModel), "{from:?}");
+        }
+        assert!(!can_transition(Recording, AwaitingModel));
+        assert!(!can_transition(Summarizing, AwaitingModel));
     }
 
     #[test]

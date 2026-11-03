@@ -3,12 +3,15 @@
   import { appVersion, onHeartbeat } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
+  import FirstRun from './lib/components/FirstRun.svelte';
+  import ModelStatus from './lib/components/ModelStatus.svelte';
   import type { AppVersion } from './lib/types/AppVersion';
 
   let version = $state<AppVersion | null>(null);
   let error = $state<string | null>(null);
   let beats = $state(0);
   let view = $state<'record' | 'settings'>('record');
+  let speechReady = $state(false);
 
   onMount(() => {
     appVersion()
@@ -22,6 +25,8 @@
 </script>
 
 <main>
+  <FirstRun bind:speechReady />
+  <ModelStatus />
   {#if version}
     <h1>{version.name} <span data-testid="version">{version.version}</span></h1>
   {:else if error}
@@ -34,7 +39,7 @@
     <button onclick={() => (view = 'settings')} aria-pressed={view === 'settings'}>Settings</button>
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
-  <div hidden={view !== 'record'}><RecordView /></div>
+  <div hidden={view !== 'record'}><RecordView {speechReady} /></div>
   {#if view === 'settings'}
     <Settings />
   {/if}

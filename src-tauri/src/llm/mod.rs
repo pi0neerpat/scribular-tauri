@@ -79,5 +79,10 @@ pub trait SummarizerLoader: Send + Sync {
     /// The model id stored on sessions summarized with this engine.
     fn model_id(&self) -> &str;
 
+    /// Whether the model has downloaded and passed verification.
+    fn ready(&self) -> bool {
+        true
+    }
+
     fn load(&self) -> Result<Arc<dyn Summarizer>>;
 }
