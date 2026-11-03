@@ -88,7 +88,9 @@ impl SystemAudio for AudioCapCli {
         };
         let child = Command::new(&self.path)
             .args(["--source", app])
-            .stdin(Stdio::null())
+            // Match Electron's spawn default: AudioCapCLI delivers no PCM
+            // with null/closed stdin. Child owns this unused pipe until drop.
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -270,6 +272,108 @@ mod tests {
         let names: Vec<_> = apps.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["Brave Browser", "Brave Browser Helper"]);
         assert_eq!(apps[1].icon.as_deref(), Some("a"));
+    }
+
+    /// AudioCapCLI needs a live stdin pipe even though we send it no commands.
+    /// Model that contract without depending on macOS permissions or playback.
+    #[cfg(unix)]
+    #[test]
+    fn keeps_sidecar_stdin_open_while_delivering_pcm() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+
+        struct Fixture(PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+        let fixture = Fixture(
+            std::env::temp_dir().join(format!("scribular-audio-stdin-{}.sh", std::process::id())),
+        );
+        fs::write(
+            &fixture.0,
+            b"#!/bin/sh\n\
+              if [ \"$1\" = --list-sources ]; then\n\
+                printf 'Fixture|16000 Hz, 1 ch|\\n'\n\
+                exit 0\n\
+              fi\n\
+              [ -p /dev/stdin ] || { echo 'stdin must stay piped' >&2; exit 1; }\n\
+              printf '\\000\\000\\000\\077\\000\\000\\000\\277'\n\
+              exec sleep 30\n",
+        )
+        .unwrap();
+        fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o700)).unwrap();
+        let cli = AudioCapCli {
+            path: fixture.0.clone(),
+        };
+        let (sink, mut consumer) = super::super::ring::ring(64);
+        let capture = cli.open("Fixture", sink).unwrap();
+        assert_eq!(
+            capture.format(),
+            Format {
+                sample_rate: 16_000,
+                channels: 1
+            }
+        );
+        let mut samples = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while samples.len() < 2 && Instant::now() < deadline {
+            consumer.drain(&mut samples);
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(samples, [0.5, -0.5]);
+        drop(capture);
+        assert!(consumer.drain(&mut Vec::new()).closed);
+    }
+
+    /// Opt-in native check: needs audio-capture permission and an output device.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "plays a local WAV and requires macOS audio-capture permission"]
+    fn bundled_helper_delivers_audio_during_playback() {
+        struct Player(Child);
+        impl Drop for Player {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut player = Player(
+            Command::new("/usr/bin/afplay")
+                .arg(root.join("tests/fixtures/audio/2-speakers-12s.wav"))
+                .spawn()
+                .unwrap(),
+        );
+        thread::sleep(Duration::from_millis(300));
+        let cli = AudioCapCli {
+            path: root.join("binaries/AudioCapCLI-aarch64-apple-darwin"),
+        };
+        let (sink, mut consumer) = super::super::ring::ring(1 << 20);
+        let capture = cli.open("afplay", sink).unwrap();
+        let mut samples = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            consumer.drain(&mut samples);
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            player.0.try_wait().unwrap().is_none(),
+            "playback ended early"
+        );
+        let format = capture.format();
+        drop(capture);
+        consumer.drain(&mut samples);
+        assert!(!samples.is_empty(), "helper delivered no PCM");
+        assert!(samples.iter().all(|x| x.is_finite()), "invalid PCM");
+        let rms = (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
+        eprintln!(
+            "real helper: {} samples, {:?}, RMS {rms}",
+            samples.len(),
+            format
+        );
+        assert!(rms > 0.002, "helper delivered silence: RMS {rms}");
+        assert!(consumer.drain(&mut Vec::new()).closed);
     }
 
     #[test]
