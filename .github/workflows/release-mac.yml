@@ -36,12 +36,17 @@ jobs:
           BUNDLE=src-tauri/target/release/bundle
           APP="$BUNDLE/macos/Scribular.app"
           DMG=$(ls "$BUNDLE"/dmg/*.dmg)
-          otool -L "$APP/Contents/MacOS/"* | grep -E 'rpath|llama|ggml' || true
           ls -la "$APP/Contents/Frameworks"
+          # Every @rpath dylib the main binary links (llama/ggml) must be in Frameworks, or the app aborts at launch.
+          BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")"
+          otool -l "$BIN" | grep -A2 LC_RPATH | grep '@executable_path/../Frameworks' >/dev/null
+          LIBS=$(otool -L "$BIN" | awk '/@rpath\//{sub("@rpath/","",$1); print $1}')
+          grep libllama <<<"$LIBS" >/dev/null
+          for lib in $LIBS; do test -f "$APP/Contents/Frameworks/$lib" || { echo "::error::missing Frameworks/$lib"; exit 1; }; done
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --verify --strict --verbose=2 "$APP/Contents/MacOS/AudioCapCLI"
-          codesign -dv --verbose=4 "$APP/Contents/MacOS/AudioCapCLI" 2>&1 | grep -E 'flags|Authority=Developer'
-          spctl -a -vv "$APP" 2>&1 | tee /dev/stderr | grep -q "Notarized Developer ID"
+          codesign -dv --verbose=4 "$APP/Contents/MacOS/AudioCapCLI" 2>&1 | grep 'Authority=Developer ID Application' >/dev/null
+          spctl -a -vv "$APP" 2>&1 | tee /dev/stderr | grep "Notarized Developer ID" >/dev/null
           xcrun stapler validate "$APP"
           xcrun stapler validate "$DMG" || echo "::warning::DMG itself is not stapled (app inside is)"
           du -h "$DMG" | tee -a "$GITHUB_STEP_SUMMARY"
