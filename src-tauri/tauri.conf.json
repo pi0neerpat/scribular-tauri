@@ -22,9 +22,20 @@
     }
   },
   "bundle": {
-    "macOS": { "minimumSystemVersion": "14.0" },
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "entitlements": "entitlements.plist",
+      "frameworks": [
+        "target/release/libllama.0.dylib",
+        "target/release/libllama-common.0.dylib",
+        "target/release/libggml.0.dylib",
+        "target/release/libggml-base.0.dylib",
+        "target/release/libggml-cpu.0.dylib",
+        "target/release/libggml-metal.0.dylib"
+      ]
+    },
     "active": true,
-    "targets": ["app"],
+    "targets": ["app", "dmg"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,0 +1,52 @@
+name: Release macOS (signed + notarized)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # arm64 only: the AudioCapCLI sidecar is named for aarch64 and llama uses Metal.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+
+      # Tauri imports the cert into a temp keychain, signs with the hardened runtime,
+      # notarizes with notarytool and staples when these are set. Same secrets as notes-assistant-electron.
+      - name: Build, sign, notarize
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run tauri build
+
+      - name: Verify signature, notarization, staple
+        run: |
+          set -euo pipefail
+          BUNDLE=src-tauri/target/release/bundle
+          APP="$BUNDLE/macos/Scribular.app"
+          DMG=$(ls "$BUNDLE"/dmg/*.dmg)
+          otool -L "$APP/Contents/MacOS/"* | grep -E 'rpath|llama|ggml' || true
+          ls -la "$APP/Contents/Frameworks"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --strict --verbose=2 "$APP/Contents/MacOS/AudioCapCLI"
+          codesign -dv --verbose=4 "$APP/Contents/MacOS/AudioCapCLI" 2>&1 | grep -E 'flags|Authority=Developer'
+          spctl -a -vv "$APP" 2>&1 | tee /dev/stderr | grep -q "Notarized Developer ID"
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG" || echo "::warning::DMG itself is not stapled (app inside is)"
+          du -h "$DMG" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Scribular-macos-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
