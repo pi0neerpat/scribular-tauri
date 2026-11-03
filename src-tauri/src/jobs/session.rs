@@ -32,6 +32,7 @@ use crate::text::{clean_transcript, merge_diarized_segments, Segment};
 pub enum RecordError {
     AlreadyRecording,
     NotRecording,
+    SpeechModelNotReady,
     /// System audio was asked for without an app to capture.
     NoTargetApp,
     Audio(AudioError),
@@ -43,6 +44,7 @@ impl fmt::Display for RecordError {
         match self {
             Self::AlreadyRecording => f.write_str("a recording is already running"),
             Self::NotRecording => f.write_str("nothing is recording"),
+            Self::SpeechModelNotReady => f.write_str("The speech model isn't downloaded yet."),
             Self::NoTargetApp => f.write_str("choose an app to record in Settings"),
             Self::Audio(e) => e.fmt(f),
             Self::Store(e) => e.fmt(f),
@@ -231,6 +233,9 @@ impl Recorder {
         title: &str,
     ) -> Result<Session, RecordError> {
         let inner = &self.inner;
+        if !inner.stt.ready() {
+            return Err(RecordError::SpeechModelNotReady);
+        }
         let mut recording = lock(&inner.recording);
         if recording.is_some() {
             return Err(RecordError::AlreadyRecording);

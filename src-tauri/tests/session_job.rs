@@ -311,6 +311,37 @@ fn a_session_records_transcribes_and_summarizes() {
 }
 
 #[test]
+fn stopping_while_the_llm_is_downloading_saves_transcript_and_resumes() {
+    let h = Harness::with(|_| {}, |loader| loader.ready.store(false, Ordering::SeqCst));
+    let id = h.start(InputMode::Mic);
+    h.feed(12);
+    h.wait_chunks(&id, 2);
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::AwaitingModel);
+    let waiting = h.get(&id);
+    assert_eq!(waiting.status, SessionStatus::AwaitingModel);
+    assert_eq!(waiting.transcript, TRANSCRIPT);
+    assert!(waiting.summary.is_empty());
+    assert_eq!(h.chunks(&id), 0);
+
+    h.summarizer.ready.store(true, Ordering::SeqCst);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(h.get(&id).status, SessionStatus::Done);
+    assert_eq!(
+        h.events.states(&id),
+        [
+            SessionStatus::Recording,
+            SessionStatus::Finalizing,
+            SessionStatus::AwaitingModel,
+            SessionStatus::Summarizing,
+            SessionStatus::Done
+        ]
+    );
+    h.assert_rows_matched_events();
+}
+
+#[test]
 fn chunks_are_written_while_recording() {
     let h = Harness::new();
     let id = h.start(InputMode::Mic);
@@ -671,4 +702,37 @@ fn whisper_loads_when_recording_starts_and_unloads_on_small_macs() {
     record(InputMode::Mic);
     record(InputMode::Mic);
     assert_eq!(loads(&h), 2, "unloaded after the transcript");
+}
+
+#[test]
+fn first_run_refuses_recording_until_speech_is_ready_without_creating_a_session() {
+    struct DownloadingSpeech;
+    impl scribular_lib::stt::TranscriberLoader for DownloadingSpeech {
+        fn ready(&self) -> bool {
+            false
+        }
+        fn load(&self) -> scribular_lib::stt::Result<Arc<dyn scribular_lib::stt::Transcriber>> {
+            Err(scribular_lib::stt::SttError::NotReady)
+        }
+    }
+    let h = Harness::new();
+    let recorder = Recorder::new(
+        h.store.clone(),
+        h.queue.clone(),
+        Arc::new(DownloadingSpeech),
+        h.events.clone(),
+        Arc::new(FakeMicrophone(h.mic.clone())),
+        Arc::new(FakeSystemAudio {
+            source: h.system.clone(),
+            app: APP.into(),
+        }),
+    );
+    assert!(matches!(
+        recorder.start(InputMode::MicAndSystem, Some(APP), "First recording"),
+        Err(RecordError::SpeechModelNotReady)
+    ));
+    assert!(h.store.list_sessions().unwrap().is_empty());
+    assert!(!h.mic.is_open());
+    assert!(!h.system.is_open());
+    assert_eq!(recorder.current(), None);
 }

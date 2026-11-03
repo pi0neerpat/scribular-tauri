@@ -38,6 +38,10 @@ impl WhisperLoader {
 }
 
 impl TranscriberLoader for WhisperLoader {
+    fn ready(&self) -> bool {
+        self.models.readiness.get(WHISPER_BASE) == ModelState::Ready
+    }
+
     fn load(&self) -> Result<Arc<dyn Transcriber>> {
         if self.models.readiness.get(WHISPER_BASE) != ModelState::Ready {
             return Err(SttError::NotReady);

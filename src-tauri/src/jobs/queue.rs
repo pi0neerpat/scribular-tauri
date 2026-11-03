@@ -55,6 +55,7 @@ pub(super) struct Job {
 struct Running {
     session_id: String,
     cancel: Arc<AtomicBool>,
+    cancelled_by_user: bool,
 }
 
 #[derive(Default)]
@@ -98,6 +99,18 @@ impl JobQueue {
             state: Mutex::default(),
             changed: Condvar::new(),
         });
+        match shared.store.queued_summaries() {
+            Ok(queued) => {
+                shared
+                    .lock()
+                    .pending
+                    .extend(queued.into_iter().map(|(session_id, prompt_id)| Job {
+                        session_id,
+                        prompt_id,
+                    }))
+            }
+            Err(e) => eprintln!("restoring summary queue failed: {e}"),
+        }
         let worker = {
             let shared = Arc::clone(&shared);
             std::thread::Builder::new()
@@ -115,16 +128,38 @@ impl JobQueue {
     /// already waiting keeps its place and takes the new prompt.
     pub fn regenerate(&self, session_id: &str, prompt_id: &str) -> Result<(), JobError> {
         let store = &self.shared.store;
-        let session = store
-            .get_session(session_id)?
-            .ok_or_else(|| JobError::SessionNotFound(session_id.into()))?;
         if store.get_prompt(prompt_id)?.is_none() {
             return Err(JobError::PromptNotFound(prompt_id.into()));
         }
-        if !can_transition(session.status, SessionStatus::Summarizing) {
+        let mut state = self.shared.lock();
+        let session = store
+            .get_session(session_id)?
+            .ok_or_else(|| JobError::SessionNotFound(session_id.into()))?;
+        if state
+            .running
+            .as_ref()
+            .is_some_and(|r| r.session_id == session_id && r.cancelled_by_user)
+            || !can_transition(session.status, SessionStatus::Summarizing)
+        {
             return Err(JobError::Busy(session.status));
         }
-        let mut state = self.shared.lock();
+        let waiting = !self.shared.loader.ready();
+        let queued_status = if waiting {
+            SessionStatus::AwaitingModel
+        } else {
+            session.status
+        };
+        if waiting && session.status != queued_status {
+            debug_assert!(can_transition(session.status, queued_status));
+        }
+        let already_pending = state.pending.iter().any(|j| j.session_id == session_id);
+        self.shared.store.queue_status(
+            session_id,
+            prompt_id,
+            queued_status,
+            session.status,
+            already_pending,
+        )?;
         match state
             .pending
             .iter_mut()
@@ -136,6 +171,16 @@ impl JobQueue {
                 prompt_id: prompt_id.into(),
             }),
         }
+        drop(state);
+        if waiting {
+            self.shared.events.progress(SessionProgress {
+                session_id: session_id.into(),
+                state: SessionStatus::AwaitingModel,
+                step_index: 1,
+                step_count: 1,
+                message: "Waiting for the summary model download…".into(),
+            });
+        }
         self.shared.changed.notify_all();
         Ok(())
     }
@@ -143,7 +188,9 @@ impl JobQueue {
     /// Starts loading the summary model in the background, so a recording's
     /// summary doesn't wait for it after the transcript is done (M5b).
     pub fn preload(&self) {
-        self.shared.lock().preload = true;
+        if self.shared.loader.ready() {
+            self.shared.lock().preload = true;
+        }
         self.shared.changed.notify_all();
     }
 
@@ -159,13 +206,18 @@ impl JobQueue {
             .position(|j| j.session_id == session_id)
         {
             state.pending.remove(i);
-            self.shared.changed.notify_all();
-            drop(state);
             self.cancel_finalizing(session_id);
+            drop(state);
+            self.shared.changed.notify_all();
             return true;
         }
-        match &state.running {
+        match &mut state.running {
             Some(r) if r.session_id == session_id => {
+                if let Err(e) = self.shared.store.cancel_running_summary(session_id) {
+                    eprintln!("cancel {session_id}: persisting cancellation failed: {e}");
+                    return false;
+                }
+                r.cancelled_by_user = true;
                 r.cancel.store(true, Ordering::Relaxed);
                 true
             }
@@ -175,12 +227,15 @@ impl JobQueue {
 
     fn cancel_finalizing(&self, session_id: &str) {
         let store = &self.shared.store;
-        match store.get_session(session_id) {
-            Ok(Some(s)) if s.status == SessionStatus::Finalizing => {}
-            _ => return,
-        }
-        if let Err(e) = store.set_status(session_id, SessionStatus::Cancelled, None) {
-            eprintln!("cancel {session_id}: saving Cancelled failed: {e}");
+        let status = match store.cancel_queued_summary(session_id) {
+            Ok(Some(status)) => status,
+            Ok(None) => return,
+            Err(e) => {
+                eprintln!("cancel {session_id}: removing queued summary failed: {e}");
+                return;
+            }
+        };
+        if status != SessionStatus::Cancelled {
             return;
         }
         self.shared.events.progress(SessionProgress {
@@ -196,14 +251,14 @@ impl JobQueue {
     /// Returns whether the queue went idle.
     pub fn wait_idle(&self, timeout: Duration) -> bool {
         let state = self.shared.lock();
-        let (_state, result) = self
+        let (state, _) = self
             .shared
             .changed
             .wait_timeout_while(state, timeout, |s| {
                 !s.pending.is_empty() || s.running.is_some()
             })
             .unwrap_or_else(|p| p.into_inner());
-        !result.timed_out()
+        state.pending.is_empty() && state.running.is_none()
     }
 }
 
@@ -229,16 +284,18 @@ fn work(shared: &Shared) {
     loop {
         let (job, cancel) = {
             let state = shared.lock();
-            let mut state = shared
+            let (mut state, _) = shared
                 .changed
-                .wait_while(state, |s| s.pending.is_empty() && !s.preload && !s.shutdown)
+                .wait_timeout_while(state, Duration::from_millis(200), |s| {
+                    (s.pending.is_empty() || !shared.loader.ready()) && !s.preload && !s.shutdown
+                })
                 .unwrap_or_else(|p| p.into_inner());
             if state.shutdown {
                 return;
             }
             if std::mem::take(&mut state.preload) {
                 drop(state);
-                if llm.is_none() {
+                if llm.is_none() && shared.loader.ready() {
                     match catch_unwind(AssertUnwindSafe(|| shared.loader.load())) {
                         Ok(Ok(model)) => llm = Some(model),
                         // The job loads it again and reports the error.
@@ -248,11 +305,18 @@ fn work(shared: &Shared) {
                 }
                 continue;
             }
+            if !shared.loader.ready() {
+                continue;
+            }
+            if state.pending.is_empty() {
+                continue;
+            }
             let job = state.pending.pop_front().expect("pending is non-empty");
             let cancel = Arc::new(AtomicBool::new(false));
             state.running = Some(Running {
                 session_id: job.session_id.clone(),
                 cancel: Arc::clone(&cancel),
+                cancelled_by_user: false,
             });
             (job, cancel)
         };
@@ -264,7 +328,38 @@ fn work(shared: &Shared) {
             llm = None;
             summarize::fail_after_panic(shared, &job);
         }
-        shared.lock().running = None;
+        let mut state = shared.lock();
+        let requeued = state.pending.iter().any(|j| j.session_id == job.session_id);
+        let interrupted_by_shutdown = !requeued
+            && state.shutdown
+            && state.running.as_ref().is_some_and(|r| !r.cancelled_by_user)
+            && shared
+                .store
+                .get_session(&job.session_id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| s.status == SessionStatus::Cancelled);
+        if interrupted_by_shutdown {
+            if let Err(e) =
+                shared
+                    .store
+                    .set_status(&job.session_id, SessionStatus::Summarizing, None)
+            {
+                eprintln!(
+                    "queue {}: preserving interrupted job failed: {e}",
+                    job.session_id
+                );
+            }
+        } else if !requeued {
+            if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
+                eprintln!(
+                    "queue {}: removing persisted job failed: {e}",
+                    job.session_id
+                );
+            }
+        }
+        state.running = None;
+        drop(state);
         shared.changed.notify_all();
     }
 }

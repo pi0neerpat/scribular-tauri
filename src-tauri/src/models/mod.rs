@@ -84,8 +84,8 @@ pub struct ModelManager {
     dir: PathBuf,
     specs: Vec<ModelSpec>,
     client: reqwest::Client,
-    /// Set while `ensure_all` runs, so a second call doesn't race it.
-    running: AtomicBool,
+    /// One guard per model: retries can proceed while a later model downloads.
+    running: Vec<AtomicBool>,
     pub readiness: Readiness,
 }
 
@@ -93,9 +93,9 @@ impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
         Self {
             dir,
+            running: specs.iter().map(|_| AtomicBool::new(false)).collect(),
             specs,
             client: reqwest::Client::new(),
-            running: AtomicBool::new(false),
             readiness: Readiness::default(),
         }
     }
@@ -145,21 +145,21 @@ impl ModelManager {
             .collect()
     }
 
-    /// Ensures every model in manifest order, one at a time. A failure is
-    /// reported and the next model still downloads. Returns at once if
-    /// another call is already running.
+    /// Ensures models in manifest order. A failed speech download can be
+    /// retried during the LLM download, with at most one download per model.
+    /// Stops at an active model so concurrent calls cannot skip ahead.
     pub async fn ensure_all(&self, on_progress: &(dyn Fn(ModelProgress) + Send + Sync)) {
-        if self.running.swap(true, Ordering::AcqRel) {
-            return;
-        }
         struct Done<'a>(&'a AtomicBool);
         impl Drop for Done<'_> {
             fn drop(&mut self) {
                 self.0.store(false, Ordering::Release);
             }
         }
-        let _done = Done(&self.running);
-        for spec in &self.specs {
+        for (spec, running) in self.specs.iter().zip(&self.running) {
+            if running.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            let _done = Done(running);
             if self.readiness.get(&spec.id) == ModelState::Ready {
                 continue;
             }
