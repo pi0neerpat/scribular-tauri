@@ -305,6 +305,14 @@ fn verified_model_is_ready_without_a_request() {
         let states: Vec<_> = events.lock().unwrap().iter().map(|p| p.state).collect();
         assert_eq!(states, [ModelState::Ready]);
     }
+
+    // Already Ready from the startup scan: still reported, so the UI learns it.
+    let manager = ModelManager::new(dir.0.clone(), vec![spec.clone()]);
+    manager.scan();
+    let (events, on_progress) = recorder();
+    run(manager.ensure_all(&on_progress));
+    let states: Vec<_> = events.lock().unwrap().iter().map(|p| p.state).collect();
+    assert_eq!(states, [ModelState::Ready]);
     assert_eq!(server.seen().len(), 1);
 }
 
