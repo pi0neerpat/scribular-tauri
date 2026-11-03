@@ -1,6 +1,22 @@
-# AudioCapCLI produces no PCM when launched with null stdin
+---
+title: AudioCapCLI produces no PCM when launched with null stdin
+date: 2026-11-02
+category: runtime-errors
+module: src-tauri audio capture (src-tauri/src/audio/system.rs, AudioCapCli)
+problem_type: runtime_error
+component: audio
+symptoms:
+  - "App-audio recordings save no chunks and end with `no audio was recorded`"
+  - "Microphone recordings work, and the same helper captures fine from Electron"
+root_cause: incorrect_process_io
+resolution_type: code_fix
+severity: high
+related_components:
+  - tooling
+tags: [audiocapcli, stdin, stdio, child-process, pcm, system-audio, macos]
+---
 
-Date: 2026-11-02
+# AudioCapCLI produces no PCM when launched with null stdin
 
 ## Symptom
 

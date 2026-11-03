@@ -2,12 +2,13 @@
   // The transcript so far, from `session://segments` while the session
   // records and drains. Segments from before a window reload are not shown.
   import { onSessionSegments } from '../api';
-  import { liveTranscript, type SourceSegments } from '../transcript';
+  import { liveTranscript, wordCount, type SourceSegments } from '../transcript';
 
   let { sessionId, labeled }: { sessionId: string; labeled: boolean } = $props();
 
   let segments = $state<SourceSegments>({ mic: [], system: [] });
   let text = $derived(liveTranscript(segments, labeled));
+  let words = $derived(wordCount(text, labeled));
 
   $effect(() => {
     const id = sessionId;
@@ -22,6 +23,7 @@
 </script>
 
 {#if text}
+  <p>{words} {words === 1 ? 'word' : 'words'}</p>
   <pre>{text}</pre>
 {/if}
 

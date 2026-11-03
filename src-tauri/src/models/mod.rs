@@ -160,7 +160,15 @@ impl ModelManager {
                 return;
             }
             let _done = Done(running);
+            // Report it anyway: a scan may have set Ready after the UI's status snapshot.
             if self.readiness.get(&spec.id) == ModelState::Ready {
+                on_progress(ModelProgress {
+                    model_id: spec.id.clone(),
+                    state: ModelState::Ready,
+                    downloaded_bytes: spec.size,
+                    total_bytes: spec.size,
+                    error: None,
+                });
                 continue;
             }
             let report = |p: ModelProgress| {

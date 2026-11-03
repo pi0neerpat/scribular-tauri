@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { downloadModels, modelsStatus, onModelsProgress, openPrivacySettings } from '../api';
+  import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
   import SpeechModelStatus from './SpeechModelStatus.svelte';
 
@@ -15,9 +16,13 @@
   }
 
   onMount(() => {
-    modelsStatus().then(update);
+    // Listen before the snapshot and download, so no progress event is missed;
+    // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
-    downloadModels();
+    unlisten
+      .then(() => modelsStatus())
+      .then((s) => update(mergeSnapshot(s, models)))
+      .finally(downloadModels);
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>
