@@ -15,9 +15,12 @@
   }
 
   onMount(() => {
-    modelsStatus().then(update);
+    // Listen before the snapshot and download, so no progress event is missed.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
-    downloadModels();
+    unlisten.then(() => modelsStatus()).then((s) => {
+      update(s);
+      downloadModels();
+    });
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>

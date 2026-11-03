@@ -8,10 +8,11 @@
   let summary = $derived(models.find((m) => m.modelId === SUMMARY_MODEL));
 
   onMount(() => {
-    modelsStatus().then((value) => (models = value));
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
     });
+    // Snapshot after the listener is live, so no progress event is missed.
+    unlisten.then(() => modelsStatus()).then((value) => (models = value));
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>

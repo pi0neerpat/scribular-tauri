@@ -68,7 +68,8 @@
       progress = p;
       status = p.state;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
-        remember(null);
+        // Keep the id while awaitingModel, so a reload still finds the session.
+        if (finished.includes(p.state)) remember(null);
         getSession(p.sessionId).then((s) => (result = s));
       }
     });
