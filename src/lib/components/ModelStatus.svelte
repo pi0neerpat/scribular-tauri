@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { downloadModels, modelsStatus, onModelsProgress } from '../api';
+  import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
 
   const SUMMARY_MODEL = 'gemma-2-2b-it-q4km';
@@ -15,7 +16,7 @@
     // entries already updated by an event are newer than the snapshot.
     unlisten
       .then(() => modelsStatus())
-      .then((value) => (models = [...value.filter((v) => !models.some((m) => m.modelId === v.modelId)), ...models]));
+      .then((value) => (models = mergeSnapshot(value, models)));
     return () => { unlisten.then((fn) => fn()); };
   });
 </script>
