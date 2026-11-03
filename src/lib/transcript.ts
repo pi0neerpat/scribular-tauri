@@ -35,3 +35,13 @@ export function liveTranscript(segments: SourceSegments, labeled: boolean): stri
   }
   return lines.map((l) => `${l.name}: ${l.texts.join(' ')}`).join('\n');
 }
+
+// Words in liveTranscript's output; labeled lines drop their `Name: ` prefix.
+export function wordCount(text: string, labeled: boolean): number {
+  return text
+    .split('\n')
+    .map((line) => (labeled ? line.replace(/^[^:]*: /, '') : line))
+    .join(' ')
+    .split(/\s+/)
+    .filter(Boolean).length;
+}

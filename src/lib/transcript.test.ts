@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { liveTranscript } from './transcript';
+import { liveTranscript, wordCount } from './transcript';
 
 const seg = (startMs: number, text: string) => ({ startMs, endMs: startMs + 500, text });
 
@@ -25,5 +25,25 @@ describe('liveTranscript', () => {
       true,
     );
     expect(text).toBe('You: Hi.\nClient: Hello  back.\nYou: Same time. Bye.');
+  });
+});
+
+describe('wordCount', () => {
+  it('counts words with punctuation', () => {
+    expect(wordCount('Hello there.', false)).toBe(2);
+  });
+
+  it('skips speaker labels', () => {
+    expect(wordCount('Client: Hello there.\nYou: Yes.', true)).toBe(3);
+  });
+
+  it('is zero for empty or whitespace text', () => {
+    expect(wordCount('', false)).toBe(0);
+    expect(wordCount('  \n ', true)).toBe(0);
+  });
+
+  it('counts the output of liveTranscript', () => {
+    const text = liveTranscript({ mic: [seg(0, 'Hi [music] there')], system: [seg(500, '[BLANK_AUDIO]')] }, true);
+    expect(wordCount(text, true)).toBe(2);
   });
 });
