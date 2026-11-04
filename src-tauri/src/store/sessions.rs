@@ -397,12 +397,10 @@ impl Store {
     /// Newest first.
     pub fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
         self.with(|c| {
-            let mut stmt = c.prepare(
-                &format!(
-                    "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO} FROM sessions
+            let mut stmt = c.prepare(&format!(
+                "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO} FROM sessions
                      ORDER BY created_at DESC, rowid DESC"
-                ),
-            )?;
+            ))?;
             let rows = stmt.query_map([], |r| {
                 Ok(SessionListItem {
                     id: r.get(0)?,

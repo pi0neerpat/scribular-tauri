@@ -65,13 +65,15 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::current_recording,
-            commands::open_privacy_settings
+            commands::open_privacy_settings,
+            commands::request_session_audio
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let store = Arc::new(Store::open(&data_dir.join("scribular.db"))?);
             app.manage(Arc::clone(&store));
+            jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
 
             let models = Arc::new(ModelManager::new(
                 data_dir.join("models"),

@@ -8,4 +8,8 @@ export type RecordingSettings = { inputMode: InputMode,
 /**
  * The app whose audio `System` and `MicAndSystem` capture.
  */
-targetApp: string | null, promptId: string | null, };
+targetApp: string | null, promptId: string | null, 
+/**
+ * Keep the audio (encrypted, 7 days) after the transcript is saved.
+ */
+keepAudio: boolean, };

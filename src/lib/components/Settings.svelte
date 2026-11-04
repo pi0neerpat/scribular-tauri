@@ -104,6 +104,28 @@
       <p>Only apps playing audio right now are listed.</p>
     {/if}
 
+    <fieldset>
+      <legend>Audio recording</legend>
+      <p>
+        Save session audio. Recordings are stored encrypted on this Mac and deleted automatically
+        7 days after the session. Off by default. Turn on only if you need to check a transcript
+        against the recording.
+      </p>
+      <label>
+        <input type="radio" bind:group={settings.keepAudio} value={false} onchange={save} />
+        Off
+      </label>
+      <label>
+        <input type="radio" bind:group={settings.keepAudio} value={true} onchange={save} />
+        On
+      </label>
+      {#if settings.keepAudio}
+        <p>Recordings are removed with the session if you delete it.</p>
+      {:else}
+        <p>Existing recordings are deleted on their own schedule.</p>
+      {/if}
+    </fieldset>
+
     <label>
       Summary prompt
       <select bind:value={settings.promptId} onchange={save}>

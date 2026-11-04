@@ -5,8 +5,14 @@ const listen = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
-const { appVersion, deniedPrivacy, onHeartbeat, onSessionSegments, startRecording } =
-  await import('./api');
+const {
+  appVersion,
+  deniedPrivacy,
+  onHeartbeat,
+  onSessionSegments,
+  requestSessionAudio,
+  startRecording,
+} = await import('./api');
 
 describe('api', () => {
   beforeEach(() => {
@@ -38,6 +44,15 @@ describe('api', () => {
     expect(name).toBe('session://segments');
     cb({ payload: { sessionId: 's1', source: 'mic', segments: [] } });
     expect(seen).toEqual(['mic']);
+  });
+
+  it('requestSessionAudio returns the raw bytes and passes typed errors through', async () => {
+    const wav = new ArrayBuffer(44);
+    invoke.mockResolvedValue(wav);
+    await expect(requestSessionAudio('s1')).resolves.toBe(wav);
+    expect(invoke).toHaveBeenCalledWith('request_session_audio', { id: 's1' });
+    invoke.mockRejectedValue('expired');
+    await expect(requestSessionAudio('s1')).rejects.toBe('expired');
   });
 
   it('startRecording sends camelCase arguments', async () => {

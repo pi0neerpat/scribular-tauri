@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Session } from '../types/Session';
+  import SessionAudio from './SessionAudio.svelte';
 
   let { session }: { session: Session } = $props();
 </script>
@@ -17,6 +18,7 @@
     <h4>Summary</h4>
     <pre>{session.summary}</pre>
   {/if}
+  <SessionAudio {session} />
   {#if session.transcript}
     <h4>Transcript</h4>
     <pre>{session.transcript}</pre>

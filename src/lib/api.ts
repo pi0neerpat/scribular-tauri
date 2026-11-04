@@ -40,6 +40,14 @@ export function updateSession(id: string, patch: SessionPatch): Promise<Session>
   return invoke<Session>('update_session', { id, patch });
 }
 
+/**
+ * A session's kept audio as WAV bytes. Rejects with a `PlaybackError`
+ * (`'notFound' | 'expired' | 'tooLarge' | 'failed'`).
+ */
+export function requestSessionAudio(id: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('request_session_audio', { id });
+}
+
 /** Resolves to whether the session existed. */
 export function deleteSession(id: string): Promise<boolean> {
   return invoke<boolean>('delete_session', { id });

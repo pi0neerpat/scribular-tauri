@@ -342,6 +342,36 @@ fn as15_playing_expired_audio_reports_expired_and_deletes_it() {
 }
 
 #[test]
+fn as15_the_hourly_tick_expires_audio_without_a_restart() {
+    use std::sync::{atomic::AtomicI64, Arc};
+    let db = TempDb::new();
+    let store = Arc::new(db.open());
+    keep_audio(&store, true);
+    let id = session_with_audio(&store, "ticking");
+    store.save_transcript(&id, "text", 1).unwrap();
+    store.set_status(&id, SessionStatus::Done, None).unwrap();
+    let created = store.get_session(&id).unwrap().unwrap().created_at;
+    let now = Arc::new(AtomicI64::new(created));
+    let clock = Arc::clone(&now);
+    let tick = scribular_lib::jobs::spawn_retention(
+        &store,
+        std::time::Duration::from_millis(5),
+        move || clock.load(Ordering::Relaxed),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 2, "not yet due");
+
+    now.store(created + AUDIO_RETENTION_MS + 1, Ordering::Relaxed);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while store.audio_chunk_count(&id).unwrap() > 0 {
+        assert!(std::time::Instant::now() < deadline, "tick never swept");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    drop(store);
+    tick.join().unwrap();
+}
+
+#[test]
 fn as16_hostile_ids_are_inert_and_delete_removes_kept_audio() {
     let db = TempDb::new();
     let store = db.open();

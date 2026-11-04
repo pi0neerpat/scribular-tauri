@@ -17,7 +17,8 @@ use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::{
-    InputMode, Prompt, RecordingSettings, Session, SessionListItem, SessionPatch, Store,
+    now_ms, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
+    SessionPatch, Store,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -78,6 +79,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     AudioApp::export_all(cfg)?;
     RecordingSettings::export_all(cfg)?;
     Privacy::export_all(cfg)?;
+    PlaybackError::export_all(cfg)?;
     Ok(())
 }
 
@@ -176,6 +178,45 @@ pub fn set_recording_settings(
     store
         .set_recording_settings(&settings)
         .map_err(|e| e.to_string())
+}
+
+/// Why kept audio can't be played (parity spec 01 R20/R22/R24). The webview
+/// picks its message from the variant; details stay in the log.
+#[derive(Debug, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaybackError {
+    NotFound,
+    Expired,
+    TooLarge,
+    Failed,
+}
+
+/// A session's kept audio as WAV bytes (raw IPC body, not a JSON array),
+/// built in memory. Off the main thread: a long session is hundreds of MB.
+#[tauri::command]
+pub async fn request_session_audio(
+    store: State<'_, Arc<Store>>,
+    id: String,
+) -> Result<tauri::ipc::Response, PlaybackError> {
+    let store = Arc::clone(&store);
+    let audio = tauri::async_runtime::spawn_blocking(move || store.kept_audio(&id, now_ms()))
+        .await
+        .map_err(|e| {
+            eprintln!("request_session_audio: {e}");
+            PlaybackError::Failed
+        })?
+        .map_err(|e| {
+            eprintln!("request_session_audio: {e}");
+            PlaybackError::Failed
+        })?;
+    match audio {
+        KeptAudio::NotFound => Err(PlaybackError::NotFound),
+        KeptAudio::Expired => Err(PlaybackError::Expired),
+        KeptAudio::TooLarge => Err(PlaybackError::TooLarge),
+        KeptAudio::Streams { mic, system } => Ok(tauri::ipc::Response::new(
+            crate::audio::wav::mixed_wav(&mic, &system),
+        )),
+    }
 }
 
 /// Apps playing audio now. Runs AudioCapCLI, so off the main thread.
