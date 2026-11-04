@@ -7,8 +7,8 @@ use std::{
 };
 
 use scribular_lib::store::{
-    AudioSource, InputMode, NewSession, RecordingSettings, SessionPatch, SessionStatus, Store,
-    Timings, ACTIVE_PROMPT_ID,
+    AudioSource, InputMode, KeptAudio, NewSession, RecordingSettings, SessionPatch, SessionStatus,
+    Store, Timings, ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
 };
 use scribular_lib::text::Segment;
 
@@ -219,6 +219,146 @@ fn saving_the_transcript_deletes_audio() {
     assert!(store.save_transcript("missing", "x", 1).is_err());
 }
 
+const HOUR_MS: i64 = 60 * 60 * 1000;
+
+/// A finished session with one mic and one system chunk.
+fn session_with_audio(store: &Store, title: &str) -> String {
+    let s = store.create_session(&new_session(title)).unwrap();
+    store
+        .append_audio_chunk(&s.id, AudioSource::Mic, 0, &[1, 2, 3])
+        .unwrap();
+    store
+        .append_audio_chunk(&s.id, AudioSource::System, 0, &[10, 20])
+        .unwrap();
+    s.id
+}
+
+fn keep_audio(store: &Store, on: bool) {
+    let mut settings = store.recording_settings().unwrap();
+    settings.keep_audio = on;
+    store.set_recording_settings(&settings).unwrap();
+}
+
+#[test]
+fn as12_audio_is_deleted_when_not_kept() {
+    let db = TempDb::new();
+    let store = db.open();
+    let id = session_with_audio(&store, "off");
+    store.save_transcript(&id, "text", 1).unwrap();
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 0);
+    let s = store.get_session(&id).unwrap().unwrap();
+    assert!(!s.has_audio);
+    assert_eq!(s.audio_expires_at, None);
+    assert!(matches!(
+        store.kept_audio(&id, s.created_at).unwrap(),
+        KeptAudio::NotFound
+    ));
+}
+
+#[test]
+fn as13_kept_audio_survives_the_transcript_and_expires_in_7_days() {
+    let db = TempDb::new();
+    let store = db.open();
+    keep_audio(&store, true);
+    let id = session_with_audio(&store, "on");
+    store.save_transcript(&id, "text", 1).unwrap();
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 2);
+    let s = store.get_session(&id).unwrap().unwrap();
+    assert!(s.has_audio);
+    assert_eq!(s.audio_expires_at, Some(s.created_at + AUDIO_RETENTION_MS));
+    let listed = store.list_sessions().unwrap();
+    assert!(listed.iter().find(|l| l.id == id).unwrap().has_audio);
+    match store.kept_audio(&id, s.created_at).unwrap() {
+        KeptAudio::Streams { mic, system } => {
+            assert_eq!(mic, [1, 2, 3]);
+            assert_eq!(system, [10, 20]);
+        }
+        _ => panic!("expected streams"),
+    }
+
+    // R13a: the setting as it is when the transcript is saved wins.
+    let flipped = session_with_audio(&store, "flipped");
+    keep_audio(&store, false);
+    store.save_transcript(&flipped, "text", 1).unwrap();
+    assert_eq!(store.audio_chunk_count(&flipped).unwrap(), 0);
+}
+
+#[test]
+fn as14_sweep_deletes_only_expired_audio_and_keeps_text() {
+    let db = TempDb::new();
+    let store = db.open();
+    keep_audio(&store, true);
+    let kept = session_with_audio(&store, "kept");
+    store.save_transcript(&kept, "kept text", 1).unwrap();
+    store
+        .add_segment(&kept, AudioSource::Mic, &segment(0, "hi"))
+        .unwrap();
+    store.set_status(&kept, SessionStatus::Done, None).unwrap();
+    let crashed = session_with_audio(&store, "crashed");
+    store
+        .set_status(&crashed, SessionStatus::Failed, Some("interrupted"))
+        .unwrap();
+    let live = session_with_audio(&store, "live");
+    let created = store.get_session(&kept).unwrap().unwrap().created_at;
+
+    // 6d23h old: nothing is due.
+    let at = created + AUDIO_RETENTION_MS - HOUR_MS;
+    assert_eq!(store.sweep_expired_audio(at).unwrap(), 0);
+    assert_eq!(store.audio_chunk_count(&kept).unwrap(), 2);
+
+    // 7d1h old (and older): kept and crashed audio go, the live capture stays.
+    let at = created + AUDIO_RETENTION_MS + HOUR_MS;
+    assert_eq!(store.sweep_expired_audio(at).unwrap(), 4);
+    assert_eq!(store.audio_chunk_count(&kept).unwrap(), 0);
+    assert_eq!(store.audio_chunk_count(&crashed).unwrap(), 0);
+    assert_eq!(store.audio_chunk_count(&live).unwrap(), 2);
+    let s = store.get_session(&kept).unwrap().unwrap();
+    assert_eq!(s.transcript, "kept text");
+    assert!(!s.has_audio);
+    assert_eq!(store.segments(&kept, AudioSource::Mic).unwrap().len(), 1);
+
+    assert_eq!(store.sweep_expired_audio(at).unwrap(), 0, "idempotent");
+}
+
+#[test]
+fn as15_playing_expired_audio_reports_expired_and_deletes_it() {
+    let db = TempDb::new();
+    let store = db.open();
+    keep_audio(&store, true);
+    let id = session_with_audio(&store, "old");
+    store.save_transcript(&id, "text", 1).unwrap();
+    store.set_status(&id, SessionStatus::Done, None).unwrap();
+    let created = store.get_session(&id).unwrap().unwrap().created_at;
+    let late = created + AUDIO_RETENTION_MS + 1;
+    assert!(matches!(
+        store.kept_audio(&id, late).unwrap(),
+        KeptAudio::Expired
+    ));
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 0);
+    assert!(matches!(
+        store.kept_audio(&id, late).unwrap(),
+        KeptAudio::NotFound
+    ));
+}
+
+#[test]
+fn as16_hostile_ids_are_inert_and_delete_removes_kept_audio() {
+    let db = TempDb::new();
+    let store = db.open();
+    keep_audio(&store, true);
+    let id = session_with_audio(&store, "victim");
+    store.save_transcript(&id, "text", 1).unwrap();
+    for hostile in ["../../etc/passwd", "' OR 1=1 --", ""] {
+        assert!(matches!(
+            store.kept_audio(hostile, 0).unwrap(),
+            KeptAudio::NotFound
+        ));
+    }
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 2);
+    assert!(store.delete_session(&id).unwrap());
+    assert_eq!(store.audio_chunk_count(&id).unwrap(), 0);
+}
+
 #[test]
 fn segments_come_back_in_time_order() {
     let db = TempDb::new();
@@ -306,11 +446,13 @@ fn recording_settings_round_trip_and_clear() {
     assert_eq!(seeded.input_mode, InputMode::Mic);
     assert_eq!(seeded.target_app, None);
     assert!(seeded.prompt_id.is_some());
+    assert!(!seeded.keep_audio, "audio is off by default (R13)");
 
     let chosen = RecordingSettings {
         input_mode: InputMode::System,
         target_app: Some("Zoom".into()),
         prompt_id: Some("default-therapy-dora".into()),
+        keep_audio: true,
     };
     store.set_recording_settings(&chosen).unwrap();
     drop(store);
@@ -321,6 +463,7 @@ fn recording_settings_round_trip_and_clear() {
         input_mode: InputMode::MicAndSystem,
         target_app: None,
         prompt_id: None,
+        keep_audio: false,
     };
     store.set_recording_settings(&cleared).unwrap();
     assert_eq!(store.recording_settings().unwrap(), cleared);
@@ -335,11 +478,13 @@ fn recording_settings_are_read_whole_while_saving() {
         input_mode: InputMode::Mic,
         target_app: None,
         prompt_id: Some("default-therapy-dora".into()),
+        keep_audio: false,
     };
     let b = RecordingSettings {
         input_mode: InputMode::System,
         target_app: Some("Zoom".into()),
         prompt_id: None,
+        keep_audio: true,
     };
     store.set_recording_settings(&a).unwrap();
     let saving = AtomicBool::new(true);

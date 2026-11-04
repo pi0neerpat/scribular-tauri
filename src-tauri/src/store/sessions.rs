@@ -1,9 +1,9 @@
-//! Sessions, their transcript segments, and the raw audio kept until the
-//! transcript is saved (KTD2).
+//! Sessions, their transcript segments, and their raw audio: kept until the
+//! transcript is saved, or for 7 days when the user keeps audio (parity spec 01).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -115,6 +115,7 @@ pub struct SessionListItem {
     pub created_at: i64,
     pub status: SessionStatus,
     pub duration_ms: Option<u32>,
+    pub has_audio: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -134,6 +135,11 @@ pub struct Session {
     pub summary: String,
     pub duration_ms: Option<u32>,
     pub timings: Option<Timings>,
+    /// Kept audio exists and can be played.
+    pub has_audio: bool,
+    /// When the sweep deletes the kept audio, in ms since the Unix epoch.
+    #[ts(type = "number | null")]
+    pub audio_expires_at: Option<i64>,
 }
 
 /// User edits from the session view. Absent fields are left unchanged.
@@ -163,8 +169,28 @@ pub struct NewSession {
 const IN_FLIGHT: [SessionStatus; 2] = [SessionStatus::Recording, SessionStatus::Finalizing];
 pub const INTERRUPTED: &str = "interrupted";
 
+/// Parity spec 01 R15: kept audio lives this long after the session started.
+pub const AUDIO_RETENTION_DAYS: i64 = 7;
+pub const AUDIO_RETENTION_MS: i64 = AUDIO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+/// About 4 hours of one 16 kHz i16 stream (R24); longer is not played in-app.
+pub const MAX_PLAYBACK_BYTES: i64 = 4 * 60 * 60 * 16_000 * 2;
+
+/// R13b: `audio_kept` is the source of truth, and rows must still exist.
+const HAS_AUDIO: &str = "(audio_kept = 1 AND EXISTS \
+                         (SELECT 1 FROM audio_chunks a WHERE a.session_id = sessions.id))";
+
 const COLUMNS: &str = "id, title, created_at, input_mode, status, error, prompt_id, model_id, \
                        transcript, summary, duration_ms, timings";
+
+/// What [`Store::kept_audio`] found for a session.
+#[derive(Debug, PartialEq)]
+pub enum KeptAudio {
+    NotFound,
+    Expired,
+    TooLarge,
+    Streams { mic: Vec<i16>, system: Vec<i16> },
+}
 
 fn bad_column(idx: usize, value: String) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
@@ -182,10 +208,12 @@ fn status_at(row: &Row, idx: usize) -> rusqlite::Result<SessionStatus> {
 fn from_row(row: &Row) -> rusqlite::Result<Session> {
     let mode: String = row.get(3)?;
     let timings: Option<String> = row.get(11)?;
+    let created_at: i64 = row.get(2)?;
+    let has_audio: bool = row.get(12)?;
     Ok(Session {
         id: row.get(0)?,
         title: row.get(1)?,
-        created_at: row.get(2)?,
+        created_at,
         input_mode: InputMode::parse(&mode).ok_or_else(|| bad_column(3, mode))?,
         status: status_at(row, 4)?,
         error: row.get(5)?,
@@ -200,13 +228,55 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
             .map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(11, rusqlite::types::Type::Text, e.into())
             })?,
+        has_audio,
+        audio_expires_at: has_audio.then_some(created_at + AUDIO_RETENTION_MS),
     })
 }
 
-fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
+}
+
+fn samples(c: &Connection, id: &str, source: AudioSource) -> Result<Vec<i16>> {
+    let mut stmt = c.prepare(
+        "SELECT pcm FROM audio_chunks WHERE session_id = ?1 AND source = ?2 ORDER BY seq",
+    )?;
+    let mut rows = stmt.query(params![id, source.as_str()])?;
+    let mut samples = Vec::new();
+    while let Some(row) = rows.next()? {
+        let bytes = row.get_ref(0)?.as_blob().map_err(rusqlite::Error::from)?;
+        samples.extend(
+            bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes(*b)),
+        );
+    }
+    Ok(samples)
+}
+
+fn sweep(c: &mut Connection, now_ms: i64) -> Result<usize> {
+    let cutoff = now_ms - AUDIO_RETENTION_MS;
+    let tx = c.transaction()?;
+    let deleted = tx.execute(
+        "DELETE FROM audio_chunks WHERE session_id IN (SELECT id FROM sessions
+         WHERE created_at < ?1 AND status NOT IN ('recording', 'finalizing'))",
+        [cutoff],
+    )?;
+    tx.execute(
+        "UPDATE sessions SET audio_kept = 0 WHERE audio_kept = 1 AND created_at < ?1
+         AND status NOT IN ('recording', 'finalizing')",
+        [cutoff],
+    )?;
+    tx.commit()?;
+    if deleted > 0 {
+        // Freed pages leave the WAL file too (R17).
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    }
+    Ok(deleted)
 }
 
 fn session_not_found(id: &str) -> StoreError {
@@ -328,8 +398,10 @@ impl Store {
     pub fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
         self.with(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, title, created_at, status, duration_ms FROM sessions
-                 ORDER BY created_at DESC, rowid DESC",
+                &format!(
+                    "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO} FROM sessions
+                     ORDER BY created_at DESC, rowid DESC"
+                ),
             )?;
             let rows = stmt.query_map([], |r| {
                 Ok(SessionListItem {
@@ -338,6 +410,7 @@ impl Store {
                     created_at: r.get(2)?,
                     status: status_at(r, 3)?,
                     duration_ms: r.get(4)?,
+                    has_audio: r.get(5)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -347,7 +420,7 @@ impl Store {
     pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
         self.with(|c| {
             Ok(c.query_row(
-                &format!("SELECT {COLUMNS} FROM sessions WHERE id = ?1"),
+                &format!("SELECT {COLUMNS}, {HAS_AUDIO} FROM sessions WHERE id = ?1"),
                 [id],
                 from_row,
             )
@@ -448,9 +521,10 @@ impl Store {
         Ok(())
     }
 
-    /// Saves the final transcript and deletes the session's audio in the
-    /// same transaction (KTD2), so audio never outlives a saved transcript
-    /// and is never lost without one.
+    /// Saves the final transcript and, in the same transaction, keeps or
+    /// deletes the session's audio by the "Save session audio" setting as it
+    /// is now (parity spec 01 R13a/b), so unkept audio never outlives a saved
+    /// transcript and is never lost without one.
     pub fn save_transcript(&self, id: &str, transcript: &str, duration_ms: u32) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
@@ -461,9 +535,59 @@ impl Store {
             if changed == 0 {
                 return Err(session_not_found(id));
             }
-            tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
+            if super::settings::select(&tx, super::settings::KEEP_AUDIO)?.as_deref() == Some("1") {
+                tx.execute("UPDATE sessions SET audio_kept = 1 WHERE id = ?1", [id])?;
+            } else {
+                tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
+            }
             tx.commit()?;
             Ok(())
+        })
+    }
+
+    /// R16/R17: deletes the audio of every session that started more than
+    /// [`AUDIO_RETENTION_DAYS`] before `now_ms`, kept or left by a crash, and
+    /// clears `audio_kept`. Text is untouched. Recording/Finalizing rows are
+    /// skipped: after `open` they can only be the live capture. Returns the
+    /// number of chunk rows deleted.
+    pub fn sweep_expired_audio(&self, now_ms: i64) -> Result<usize> {
+        self.with(|c| sweep(c, now_ms))
+    }
+
+    /// R20: a session's kept audio for playback, sweeping first if it has
+    /// expired. Rows of a session that never chose to keep audio are not
+    /// playable.
+    pub fn kept_audio(&self, id: &str, now_ms: i64) -> Result<KeptAudio> {
+        self.with(|c| {
+            let kept: Option<(bool, i64)> = c
+                .query_row(
+                    "SELECT audio_kept = 1, created_at FROM sessions WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((true, created_at)) = kept else {
+                return Ok(KeptAudio::NotFound);
+            };
+            if created_at < now_ms - AUDIO_RETENTION_MS {
+                sweep(c, now_ms)?;
+                return Ok(KeptAudio::Expired);
+            }
+            let longest: Option<i64> = c.query_row(
+                "SELECT MAX(n) FROM (SELECT SUM(length(pcm)) AS n FROM audio_chunks
+                 WHERE session_id = ?1 GROUP BY source)",
+                [id],
+                |r| r.get(0),
+            )?;
+            match longest {
+                None => return Ok(KeptAudio::NotFound),
+                Some(n) if n > MAX_PLAYBACK_BYTES => return Ok(KeptAudio::TooLarge),
+                Some(_) => {}
+            }
+            Ok(KeptAudio::Streams {
+                mic: samples(c, id, AudioSource::Mic)?,
+                system: samples(c, id, AudioSource::System)?,
+            })
         })
     }
 
@@ -534,24 +658,7 @@ impl Store {
 
     /// All of one source's stored audio, in chunk order.
     pub fn audio_samples(&self, id: &str, source: AudioSource) -> Result<Vec<i16>> {
-        self.with(|c| {
-            let mut stmt = c.prepare(
-                "SELECT pcm FROM audio_chunks WHERE session_id = ?1 AND source = ?2 ORDER BY seq",
-            )?;
-            let mut rows = stmt.query(params![id, source.as_str()])?;
-            let mut samples = Vec::new();
-            while let Some(row) = rows.next()? {
-                let bytes = row.get_ref(0)?.as_blob().map_err(rusqlite::Error::from)?;
-                samples.extend(
-                    bytes
-                        .as_chunks::<2>()
-                        .0
-                        .iter()
-                        .map(|b| i16::from_le_bytes(*b)),
-                );
-            }
-            Ok(samples)
-        })
+        self.with(|c| samples(c, id, source))
     }
 
     pub fn audio_chunk_count(&self, id: &str) -> Result<u32> {

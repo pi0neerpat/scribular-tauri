@@ -8,7 +8,12 @@ use super::{prompts, settings, Result, StoreError};
 type Migration = fn(&Transaction) -> Result<()>;
 
 /// Append only. Never edit a migration that has shipped.
-const MIGRATIONS: &[Migration] = &[v1_initial, v2_summary_queue, v3_queue_restore_status];
+const MIGRATIONS: &[Migration] = &[
+    v1_initial,
+    v2_summary_queue,
+    v3_queue_restore_status,
+    v4_audio_kept,
+];
 
 fn v2_summary_queue(tx: &Transaction) -> Result<()> {
     tx.execute_batch("CREATE TABLE summary_queue (position INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE, prompt_id TEXT NOT NULL);")?;
@@ -18,6 +23,15 @@ fn v2_summary_queue(tx: &Transaction) -> Result<()> {
 fn v3_queue_restore_status(tx: &Transaction) -> Result<()> {
     tx.execute_batch(
         "ALTER TABLE summary_queue ADD COLUMN restore_status TEXT NOT NULL DEFAULT 'finalizing';",
+    )?;
+    Ok(())
+}
+
+/// Parity spec 01 R13b: whether the session's audio was kept on purpose.
+fn v4_audio_kept(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE sessions ADD COLUMN audio_kept INTEGER NOT NULL DEFAULT 0;
+         CREATE INDEX sessions_audio_kept ON sessions(audio_kept, created_at) WHERE audio_kept = 1;",
     )?;
     Ok(())
 }
