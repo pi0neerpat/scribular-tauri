@@ -330,7 +330,10 @@ fn as10_crash_before_scrub_removes_the_old_plaintext() {
 fn as10_plaintext_copy_that_cannot_be_removed_keeps_the_store_locked() {
     let dir = TempDir::new();
     plaintext_fixture(&dir);
-    drop(Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).unwrap());
+    let store = Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).unwrap();
+    // Stand-in for a first run whose scrub failed: its notice was never set.
+    assert!(store.take_encryption_notice().unwrap());
+    drop(store);
     // A non-empty directory can't be unlinked, so the scrub fails.
     let old = dir.sibling(".plaintext-old");
     std::fs::create_dir(&old).unwrap();
@@ -341,8 +344,13 @@ fn as10_plaintext_copy_that_cannot_be_removed_keeps_the_store_locked() {
         locked(Store::open(&dir.db(), &keys)),
         LockReason::MigrationFailed
     );
+    // The retry: the leftover goes and the one-time notice still shows.
     std::fs::remove_dir_all(&old).unwrap();
-    drop(Store::open(&dir.db(), &keys).unwrap());
+    std::fs::write(&old, CANARY).unwrap();
+    let store = Store::open(&dir.db(), &keys).unwrap();
+    assert!(!old.exists());
+    assert!(store.take_encryption_notice().unwrap());
+    assert!(!store.take_encryption_notice().unwrap());
 }
 
 #[test]

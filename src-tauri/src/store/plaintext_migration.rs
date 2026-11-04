@@ -19,7 +19,9 @@ pub(super) fn sibling(path: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Undo or finish a migration a crash interrupted (R8, last paragraph).
-pub(super) fn recover(path: &Path) -> Result<(), String> {
+/// Returns true when it finished a migration a crash or failed scrub cut short,
+/// so the caller still shows the one-time notice.
+pub(super) fn recover(path: &Path) -> Result<bool, String> {
     let old = sibling(path, ".plaintext-old");
     // Crash between the two renames: put the plaintext DB back and redo.
     if !path.exists() && old.exists() {
@@ -40,8 +42,9 @@ pub(super) fn recover(path: &Path) -> Result<(), String> {
     // Crash after the swap: the encrypted DB is live, the old copy goes.
     if old.exists() && DbState::of(path).map_err(|e| e.to_string())? == DbState::Encrypted {
         scrub(&old)?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Export the plaintext DB at `path` into an encrypted copy, verify it, swap it

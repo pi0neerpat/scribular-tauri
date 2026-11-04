@@ -92,7 +92,8 @@ impl Store {
                 StoreError::Locked(reason)
             }
         };
-        plaintext_migration::recover(path).map_err(locked(LockReason::MigrationFailed))?;
+        let finished_migration =
+            plaintext_migration::recover(path).map_err(locked(LockReason::MigrationFailed))?;
         let stored = keys.get().map_err(locked(LockReason::KeychainDenied))?;
         let state = DbState::of(path)?;
         if state == DbState::Plaintext {
@@ -109,8 +110,7 @@ impl Store {
                 stored.expect("plan needs a stored key")
             }
         };
-        let migrated = state == DbState::Plaintext;
-        if migrated {
+        if state == DbState::Plaintext {
             plaintext_migration::migrate(path, &key, migrations::known())
                 .map_err(locked(LockReason::MigrationFailed))?;
         }
@@ -119,7 +119,7 @@ impl Store {
         let store = Self {
             conn: Mutex::new(conn?),
         };
-        if migrated {
+        if finished_migration || state == DbState::Plaintext {
             store.set_setting(ENCRYPTION_NOTICE, "1")?;
         }
         store.recover_interrupted()?;

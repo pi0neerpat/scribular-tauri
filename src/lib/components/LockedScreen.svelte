@@ -1,6 +1,7 @@
 <script lang="ts">
   // Shown instead of the app when the encrypted store can't be opened (spec 01 R7).
   // Nothing else mounts, so no command that needs the store is ever called.
+  import { tick } from 'svelte';
   import { quitApp, startFresh } from '../api';
   import type { LockReason } from '../types/LockReason';
   import { confirmsStartFresh, lockedCopy, START_FRESH_PHRASE } from './locked';
@@ -11,9 +12,14 @@
   let typed = $state('');
   let error = $state<string | null>(null);
 
-  function cancel() {
+  let opener = $state<HTMLButtonElement | null>(null);
+
+  // The opener only renders again once the dialog is gone, so focus it after the update.
+  async function cancel() {
     confirming = false;
     typed = '';
+    await tick();
+    opener?.focus();
   }
 
   // Focus the phrase field when the dialog opens (the button that opened it is gone).
@@ -56,7 +62,7 @@
   {:else}
     <button onclick={() => quitApp()}>Quit</button>
     {#if copy.canStartFresh}
-      <button onclick={() => (confirming = true)}>Start fresh…</button>
+      <button bind:this={opener} onclick={() => (confirming = true)}>Start fresh…</button>
     {/if}
   {/if}
   {#if error}<p role="alert">{error}</p>{/if}
