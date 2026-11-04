@@ -22,7 +22,7 @@
   import PermissionNotice from './PermissionNotice.svelte';
   import { isWorking } from './record-status';
 
-  let { speechReady = false }: { speechReady: boolean } = $props();
+  let { speechReady = false, active = true }: { speechReady: boolean; active?: boolean } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -169,7 +169,7 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel {session} />
+    <SummaryPanel {session} {active} />
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>

@@ -10,6 +10,7 @@ use scribular_lib::llm::llama::{LlamaLoader, LlamaSummarizer};
 use scribular_lib::llm::prompt::{chunk_budget, chunk_prompt};
 use scribular_lib::llm::Summarizer;
 use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_2_2B};
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{InputMode, NewSession, SessionStatus, Store};
 use scribular_lib::text::{chunk_by_tokens, clean_transcript, merge_diarized_segments, Segment};
 
@@ -68,6 +69,7 @@ fn fifty_minute_benchmark_splits_into_at_most_three_chunks() {
     let llm = LlamaSummarizer::load(&models.path(GEMMA_2_2B).unwrap()).unwrap();
     let store = Store::open(
         &std::env::temp_dir().join(format!("scribular-llama-chunks-{}.db", std::process::id())),
+        &MemoryKeyStore::with_key([7; 32]),
     )
     .unwrap();
     let base = store.get_prompt(DORA).unwrap().unwrap().text;
@@ -102,7 +104,7 @@ fn every_prompt_summarizes_thirty_seconds() {
     let models = models();
     let db =
         std::env::temp_dir().join(format!("scribular-llama-prompts-{}.db", std::process::id()));
-    let store = Arc::new(Store::open(&db).unwrap());
+    let store = Arc::new(Store::open(&db, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let queue = JobQueue::new(
         Arc::clone(&store),
         Arc::new(LlamaLoader::new(models)),

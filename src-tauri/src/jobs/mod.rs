@@ -2,6 +2,7 @@
 //! session state machine, and the progress events the UI listens to.
 
 mod queue;
+mod retention;
 mod session;
 pub mod state;
 mod summarize;
@@ -13,6 +14,7 @@ use crate::store::{AudioSource, SessionStatus};
 use crate::stt::TranscriptSegment;
 
 pub use queue::{JobError, JobQueue};
+pub use retention::{spawn_retention, SWEEP_EVERY};
 pub use session::{RecordError, Recorder};
 
 /// Payload of `session://progress`. The session's status row already says

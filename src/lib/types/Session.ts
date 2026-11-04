@@ -7,4 +7,12 @@ export type Session = { id: string, title: string,
 /**
  * Milliseconds since the Unix epoch.
  */
-createdAt: number, inputMode: InputMode, status: SessionStatus, error: string | null, promptId: string | null, modelId: string | null, transcript: string, summary: string, durationMs: number | null, timings: Timings | null, };
+createdAt: number, inputMode: InputMode, status: SessionStatus, error: string | null, promptId: string | null, modelId: string | null, transcript: string, summary: string, durationMs: number | null, timings: Timings | null, 
+/**
+ * Kept audio exists and can be played.
+ */
+hasAudio: boolean, 
+/**
+ * When the sweep deletes the kept audio, in ms since the Unix epoch.
+ */
+audioExpiresAt: number | null, };
