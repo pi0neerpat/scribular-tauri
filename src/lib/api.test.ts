@@ -47,10 +47,11 @@ describe('api', () => {
     expect(seen).toEqual(['mic']);
   });
 
-  it('requestSessionAudio returns the raw bytes and passes typed errors through', async () => {
-    const wav = new ArrayBuffer(44);
-    invoke.mockResolvedValue(wav);
-    await expect(requestSessionAudio('s1')).resolves.toBe(wav);
+  it('requestSessionAudio returns bytes from an ArrayBuffer or a number[] and passes typed errors through', async () => {
+    invoke.mockResolvedValue(new Uint8Array([82, 73, 70, 70]).buffer);
+    await expect(requestSessionAudio('s1')).resolves.toEqual(new Uint8Array([82, 73, 70, 70]));
+    invoke.mockResolvedValue([82, 73, 70, 70]); // what the release webview actually delivered
+    await expect(requestSessionAudio('s1')).resolves.toEqual(new Uint8Array([82, 73, 70, 70]));
     expect(invoke).toHaveBeenCalledWith('request_session_audio', { id: 's1' });
     invoke.mockRejectedValue('expired');
     await expect(requestSessionAudio('s1')).rejects.toBe('expired');

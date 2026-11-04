@@ -8,7 +8,7 @@ describe('session audio (AS19)', () => {
   afterEach(() => requestSessionAudio.mockReset());
 
   it('wraps the bytes in a revocable blob URL', async () => {
-    requestSessionAudio.mockResolvedValue(new ArrayBuffer(44));
+    requestSessionAudio.mockResolvedValue(new Uint8Array(44));
     const view = await openAudio('s1');
     expect(requestSessionAudio).toHaveBeenCalledWith('s1');
     if (view.kind !== 'player') throw new Error(`got ${view.kind}`);

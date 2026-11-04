@@ -45,8 +45,10 @@ export function updateSession(id: string, patch: SessionPatch): Promise<Session>
  * A session's kept audio as WAV bytes. Rejects with a `PlaybackError`
  * (`'notFound' | 'expired' | 'tooLarge' | 'failed'`).
  */
-export function requestSessionAudio(id: string): Promise<ArrayBuffer> {
-  return invoke<ArrayBuffer>('request_session_audio', { id });
+export async function requestSessionAudio(id: string): Promise<Uint8Array<ArrayBuffer>> {
+  // The macOS webview can deliver a raw IPC Response as a plain number[] (seen in the
+  // release app); `new Blob([number[]])` would turn it into text, so normalise to bytes.
+  return new Uint8Array(await invoke<ArrayBuffer | number[]>('request_session_audio', { id }));
 }
 
 /** Why the store couldn't be opened, or null when it did. Ask this first. */
