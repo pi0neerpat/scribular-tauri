@@ -128,22 +128,45 @@ impl Store {
 
     /// R7 "Start fresh": renames the unreadable DB (and its -wal/-shm) to
     /// `scribular.db.unreadable-<ms>`, then creates a new DB with a new key.
-    /// Nothing is deleted.
+    /// Nothing is deleted. On failure the renames are undone, so the locked
+    /// screen still describes the files on disk.
     pub fn start_fresh(path: &Path, keys: &dyn KeyStore) -> Result<Self> {
         let tag = format!(".unreadable-{}", now_ms());
-        for suffix in ["", "-wal", "-shm"] {
-            let from = plaintext_migration::sibling(path, suffix);
-            if from.exists() {
-                let to = plaintext_migration::sibling(path, &format!("{tag}{suffix}"));
-                std::fs::rename(from, to)?;
+        let mut moved = Vec::new();
+        let result = (|| {
+            for suffix in ["", "-wal", "-shm"] {
+                let from = plaintext_migration::sibling(path, suffix);
+                if from.exists() {
+                    let to = plaintext_migration::sibling(path, &format!("{tag}{suffix}"));
+                    std::fs::rename(&from, &to)?;
+                    moved.push((from, to));
+                }
+            }
+            let mut key = store_new_key(keys)?;
+            let conn = open_keyed(path, &key);
+            key.fill(0);
+            conn
+        })();
+        match result {
+            Ok(conn) => Ok(Self {
+                conn: Mutex::new(conn),
+            }),
+            Err(e) => {
+                // A half-created new DB would block the rename back.
+                for suffix in ["", "-wal", "-shm"] {
+                    let new = plaintext_migration::sibling(path, suffix);
+                    if moved.iter().any(|(from, _)| *from == new) {
+                        let _ = std::fs::remove_file(&new);
+                    }
+                }
+                for (from, to) in moved.iter().rev() {
+                    if let Err(re) = std::fs::rename(to, from) {
+                        eprintln!("start fresh: undo rename failed: {re}");
+                    }
+                }
+                Err(e)
             }
         }
-        let mut key = store_new_key(keys)?;
-        let conn = open_keyed(path, &key);
-        key.fill(0);
-        Ok(Self {
-            conn: Mutex::new(conn?),
-        })
     }
 
     /// True once after a prototype DB was encrypted (R9's one-time notice).
@@ -188,16 +211,17 @@ fn store_new_key(keys: &dyn KeyStore) -> Result<Key> {
     }
 }
 
-/// The R12 pragma order: key, verify, SQLCipher check, then the usual setup.
+/// The R12 pragma order: key, SQLCipher check, verify, then the usual setup.
 fn open_keyed(path: &Path, key: &Key) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
     apply_key(&conn, key)?;
+    // Before any read: plain SQLite would ignore the key and read plaintext.
+    check_sqlcipher(&conn)?;
     // The first read decrypts page 1; a wrong key fails here, before any write.
     if let Err(e) = conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(())) {
         eprintln!("store locked (WrongKey): {e}");
         return Err(StoreError::Locked(LockReason::WrongKey));
     }
-    check_sqlcipher(&conn)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     // Deleted audio pages are zeroed instead of only being marked free.

@@ -8,7 +8,10 @@ use std::{
 };
 
 use scribular_lib::store::key::{Key, KeyStore, LockReason, MemoryKeyStore};
-use scribular_lib::store::{InputMode, NewSession, Store, StoreError};
+use scribular_lib::store::{
+    AudioSource, InputMode, NewSession, SessionStatus, Store, StoreError, Timings,
+};
+use scribular_lib::text::Segment;
 
 const CANARY: &str = "ZEBRA-CANARY-7731";
 const MAGIC: &[u8] = b"SQLite format 3\0";
@@ -104,19 +107,50 @@ fn locked(r: Result<Store, StoreError>) -> LockReason {
     }
 }
 
-/// A plaintext database at the current schema with one canary session, as the
-/// prototype left it: built encrypted, then exported with an empty key.
+/// A prototype plaintext database at schema v3 (before `audio_kept`): a canary
+/// session with a segment, an interrupted capture that still has its audio
+/// (R10) and a setting. Built encrypted, taken back to v3, then exported with
+/// an empty key. Returns the canary session's id.
 fn plaintext_fixture(dir: &TempDir) -> String {
     let enc = dir.sibling(".fixture");
     let id = {
         let store = Store::open(&enc, &MemoryKeyStore::with_key(KEY)).unwrap();
-        add_canary_session(&store)
+        let id = add_canary_session(&store);
+        let segment = Segment {
+            start_ms: 0,
+            end_ms: 900,
+            text: Some(format!("{CANARY} segment")),
+        };
+        store.add_segment(&id, AudioSource::Mic, &segment).unwrap();
+        let failed = store
+            .create_session(&NewSession {
+                title: "interrupted".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store
+            .append_audio_chunk(&failed.id, AudioSource::Mic, 0, &[1; 1600])
+            .unwrap();
+        store
+            .set_status(&failed.id, SessionStatus::Failed, Some("interrupted"))
+            .unwrap();
+        store.set_setting("fixture_setting", "kept").unwrap();
+        id
     };
     let conn = rusqlite::Connection::open(&enc).unwrap();
     conn.execute_batch(&format!(
         "PRAGMA key = \"x'{}'\";",
         KEY.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ))
+    .unwrap();
+    // v4 only adds `audio_kept` and its index; undo both to get the v3 schema.
+    conn.execute_batch(
+        "DROP INDEX sessions_audio_kept;
+         ALTER TABLE sessions DROP COLUMN audio_kept;
+         PRAGMA user_version = 3;",
+    )
     .unwrap();
     let version: u32 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -217,6 +251,17 @@ fn as9_migrates_a_plaintext_database_once() {
     assert_eq!(keys.sets.load(Ordering::Relaxed), 1);
     let s = store.get_session(&id).unwrap().unwrap();
     assert!(s.transcript.contains(CANARY));
+    assert_eq!(store.schema_version().unwrap(), 4, "v3 → latest");
+    assert_eq!(store.segments(&id, AudioSource::Mic).unwrap().len(), 1);
+    let items = store.list_sessions().unwrap();
+    assert_eq!(items.len(), 2);
+    let failed = items.iter().find(|i| i.title == "interrupted").unwrap();
+    assert_eq!(failed.status, SessionStatus::Failed);
+    assert_eq!(store.audio_chunk_count(&failed.id).unwrap(), 1, "R10");
+    assert_eq!(
+        store.get_setting("fixture_setting").unwrap().as_deref(),
+        Some("kept")
+    );
     assert!(store.take_encryption_notice().unwrap());
     assert!(
         !store.take_encryption_notice().unwrap(),
@@ -282,6 +327,25 @@ fn as10_crash_before_scrub_removes_the_old_plaintext() {
 }
 
 #[test]
+fn as10_plaintext_copy_that_cannot_be_removed_keeps_the_store_locked() {
+    let dir = TempDir::new();
+    plaintext_fixture(&dir);
+    drop(Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).unwrap());
+    // A non-empty directory can't be unlinked, so the scrub fails.
+    let old = dir.sibling(".plaintext-old");
+    std::fs::create_dir(&old).unwrap();
+    std::fs::write(old.join("x"), CANARY).unwrap();
+
+    let keys = MemoryKeyStore::with_key(KEY);
+    assert_eq!(
+        locked(Store::open(&dir.db(), &keys)),
+        LockReason::MigrationFailed
+    );
+    std::fs::remove_dir_all(&old).unwrap();
+    drop(Store::open(&dir.db(), &keys).unwrap());
+}
+
+#[test]
 fn as10_unreadable_plaintext_fails_and_is_left_untouched() {
     let dir = TempDir::new();
     let mut bytes = MAGIC.to_vec();
@@ -312,6 +376,31 @@ fn as11_migration_logs_no_session_content() {
         std::fs::remove_file(dir.sibling(".plaintext-old")).unwrap();
         std::fs::rename(dir.sibling(".restore"), dir.db()).unwrap();
         let store = Store::open(&dir.db(), &MemoryKeyStore::default()).unwrap();
+        // Store-level paths that carry session text: create, transcript,
+        // segment, summary, regenerate, delete.
+        let s = store
+            .create_session(&NewSession {
+                title: format!("{CANARY} title"),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store.save_transcript(&s.id, CANARY, 1000).unwrap();
+        store
+            .add_segment(
+                &s.id,
+                AudioSource::Mic,
+                &Segment { start_ms: 0, end_ms: 1000, text: Some(CANARY.into()) },
+            )
+            .unwrap();
+        store
+            .set_summary(&s.id, &format!("{CANARY} summary"), &Timings::default())
+            .unwrap();
+        store
+            .set_summary(&s.id, &format!("{CANARY} regenerated"), &Timings::default())
+            .unwrap();
+        store.delete_session(&s.id).unwrap();
         eprintln!("child finished {}", store.schema_version().unwrap());
         return;
     }
@@ -359,4 +448,23 @@ fn start_fresh_sets_the_old_file_aside_under_a_new_key() {
     assert!(!aside.is_empty(), "{:?}", dir.names());
     assert!(aside.iter().any(|n| hash(&dir.0.join(n)) == old));
     assert!(Store::open(&dir.db(), &keys).is_ok());
+}
+
+#[test]
+fn start_fresh_that_fails_puts_the_old_file_back() {
+    let dir = TempDir::new();
+    {
+        let store = Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).unwrap();
+        add_canary_session(&store);
+    }
+    let old = hash(&dir.db());
+    let mut keys = MemoryKeyStore::with_key([9; 32]);
+    keys.fail_set = true;
+    assert_eq!(
+        locked(Store::start_fresh(&dir.db(), &keys)),
+        LockReason::KeychainWriteFailed
+    );
+    assert_eq!(hash(&dir.db()), old);
+    assert!(dir.names().iter().all(|n| !n.contains("unreadable")), "{:?}", dir.names());
+    assert!(Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).is_ok());
 }

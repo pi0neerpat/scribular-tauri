@@ -11,6 +11,16 @@
   let typed = $state('');
   let error = $state<string | null>(null);
 
+  function cancel() {
+    confirming = false;
+    typed = '';
+  }
+
+  // Focus the phrase field when the dialog opens (the button that opened it is gone).
+  function focusOnMount(el: HTMLInputElement) {
+    el.focus();
+  }
+
   async function confirm() {
     error = null;
     try {
@@ -25,18 +35,23 @@
   <h1>{copy.title}</h1>
   <p>{copy.body}</p>
   {#if confirming}
-    <div role="dialog" aria-labelledby="fresh-title">
+    <div
+      role="dialog"
+      aria-labelledby="fresh-title"
+      tabindex="-1"
+      onkeydown={(e) => e.key === 'Escape' && cancel()}
+    >
       <h2 id="fresh-title">Start fresh?</h2>
       <p>
-        Your earlier sessions can't be recovered. The unreadable file is set aside, not shared, and
-        Scribular starts with an empty history.
+        Your earlier sessions can't be recovered. The unreadable file is kept on this Mac, not
+        deleted, and Scribular starts with an empty history.
       </p>
       <label>
         Type “{START_FRESH_PHRASE}” to confirm
-        <input bind:value={typed} autocomplete="off" />
+        <input bind:value={typed} autocomplete="off" use:focusOnMount />
       </label>
       <button onclick={confirm} disabled={!confirmsStartFresh(typed)}>Start fresh</button>
-      <button onclick={() => ((confirming = false), (typed = ''))}>Cancel</button>
+      <button onclick={cancel}>Cancel</button>
     </div>
   {:else}
     <button onclick={() => quitApp()}>Quit</button>

@@ -23,7 +23,9 @@
     lockedState()
       .then((reason) => {
         gate = reason ? { locked: reason } : 'open';
-        if (!reason) takeEncryptionNotice().then((n) => (notice = n));
+        if (!reason) takeEncryptionNotice()
+            .then((n) => (notice = n))
+            .catch((e) => (error = String(e)));
       })
       .catch((e) => (error = String(e)));
     appVersion()
@@ -61,7 +63,7 @@
     <button onclick={() => (view = 'settings')} aria-pressed={view === 'settings'}>Settings</button>
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
-  <div hidden={view !== 'record'}><RecordView {speechReady} /></div>
+  <div hidden={view !== 'record'}><RecordView {speechReady} active={view === 'record'} /></div>
   {#if view === 'settings'}
     <Settings />
   {/if}

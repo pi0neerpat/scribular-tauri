@@ -45,7 +45,7 @@ export function lockedCopy(reason: LockReason): LockedCopy {
     case "keychainWriteFailed":
       return {
         title: "Scribular couldn't save its key to your Keychain",
-        body: "Nothing was created. Unlock your Keychain, then reopen Scribular.",
+        body: "No sessions were changed. Unlock your Keychain, then reopen Scribular.",
         canStartFresh: false,
       };
   }

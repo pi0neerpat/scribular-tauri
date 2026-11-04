@@ -39,13 +39,15 @@ pub(super) fn recover(path: &Path) -> Result<(), String> {
     }
     // Crash after the swap: the encrypted DB is live, the old copy goes.
     if old.exists() && DbState::of(path).map_err(|e| e.to_string())? == DbState::Encrypted {
-        scrub(&old);
+        scrub(&old)?;
     }
     Ok(())
 }
 
 /// Export the plaintext DB at `path` into an encrypted copy, verify it, swap it
-/// in and scrub the plaintext. On error the plaintext file is untouched.
+/// in and scrub the plaintext. An error before the swap leaves the plaintext
+/// file untouched; a failed scrub after it errors too, so the store stays
+/// locked and the next [`recover`] retries the scrub.
 pub(super) fn migrate(path: &Path, key: &Key, known: u32) -> Result<(), String> {
     let tmp = sibling(path, ".migrating");
     let result = export_and_verify(path, &tmp, key, known);
@@ -54,14 +56,13 @@ pub(super) fn migrate(path: &Path, key: &Key, known: u32) -> Result<(), String> 
         return Err(e);
     }
     // The plaintext -wal/-shm would otherwise attach to the new file's name.
-    scrub(&sibling(path, "-wal"));
-    scrub(&sibling(path, "-shm"));
+    scrub(&sibling(path, "-wal"))?;
+    scrub(&sibling(path, "-shm"))?;
     let old = sibling(path, ".plaintext-old");
     fs::rename(path, &old).map_err(|e| format!("rename plaintext DB: {e}"))?;
     fs::rename(&tmp, path).map_err(|e| format!("rename encrypted DB: {e}"))?;
     sync_dir(path);
-    scrub(&old);
-    Ok(())
+    scrub(&old)
 }
 
 fn export_and_verify(path: &Path, tmp: &Path, key: &Key, known: u32) -> Result<(), String> {
@@ -137,8 +138,11 @@ fn row_counts(c: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
 
 /// R9: overwrite with zeros, fsync, unlink. Best effort: on APFS/SSD the old
 /// blocks may survive; FileVault is what protects them. Logs no content.
-pub(super) fn scrub(path: &Path) {
-    let Ok(meta) = fs::metadata(path) else { return };
+/// Only a failed unlink is an error: the whole plaintext file would remain.
+pub(super) fn scrub(path: &Path) -> Result<(), String> {
+    let Ok(meta) = fs::metadata(path) else {
+        return Ok(());
+    };
     let overwrite = || -> std::io::Result<()> {
         let mut f = OpenOptions::new().write(true).open(path)?;
         f.rewind()?;
@@ -159,6 +163,7 @@ pub(super) fn scrub(path: &Path) {
         if overwritten.is_ok() { "ok" } else { "failed" },
         if removed.is_ok() { "ok" } else { "failed" },
     );
+    removed.map_err(|e| format!("remove plaintext copy: {e}"))
 }
 
 fn sync_dir(path: &Path) {
