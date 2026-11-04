@@ -7,6 +7,7 @@ pub mod mic;
 pub mod resample;
 pub mod ring;
 pub mod system;
+pub mod wav;
 
 use std::fmt;
 

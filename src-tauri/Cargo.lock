@@ -3138,6 +3138,7 @@ dependencies = [
  "llama-cpp-sys-2",
  "reqwest",
  "rusqlite",
+ "security-framework",
  "serde",
  "serde_json",
  "sha2",

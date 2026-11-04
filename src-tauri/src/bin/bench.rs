@@ -173,7 +173,10 @@ mod real {
         }
 
         let db = std::env::temp_dir().join(format!("scribular-bench-{}.db", std::process::id()));
-        let store = Arc::new(Store::open(&db)?);
+        let store = Arc::new(Store::open(
+            &db,
+            &scribular_lib::store::key::MemoryKeyStore::default(),
+        )?);
         if store.get_prompt(&args.prompt_id)?.is_none() {
             return Err(format!("unknown prompt {}", args.prompt_id).into());
         }

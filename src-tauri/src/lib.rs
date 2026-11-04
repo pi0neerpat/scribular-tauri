@@ -13,12 +13,27 @@ use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Manager};
 
 use audio::{AudioCapCli, CpalMicrophone};
-use commands::{Heartbeat, TauriJobEvents, HEARTBEAT_EVENT};
+use commands::{Heartbeat, LockedState, TauriJobEvents, HEARTBEAT_EVENT};
 use jobs::{JobQueue, Recorder};
 use llm::SummarizerLoader;
 use models::ModelManager;
-use store::Store;
+use store::{key::KeyStore, Store, StoreError};
 use stt::TranscriberLoader;
+
+/// Keychain account holding the database key; the service is the bundle id.
+const DB_KEY_ACCOUNT: &str = "database-key";
+
+#[cfg(target_os = "macos")]
+fn key_store(service: &str) -> Arc<dyn KeyStore> {
+    Arc::new(store::key::KeychainKeyStore::new(service, DB_KEY_ACCOUNT))
+}
+
+// shortcut: no persistent key store off macOS (the app is macOS-only); a
+// relaunch there shows the locked screen. Add one if another OS ships.
+#[cfg(not(target_os = "macos"))]
+fn key_store(_service: &str) -> Arc<dyn KeyStore> {
+    Arc::new(store::key::MemoryKeyStore::default())
+}
 
 #[cfg(feature = "fake-engines")]
 fn summarizer_loader(_models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
@@ -65,13 +80,36 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::current_recording,
-            commands::open_privacy_settings
+            commands::open_privacy_settings,
+            commands::request_session_audio,
+            commands::locked_state,
+            commands::start_fresh,
+            commands::quit_app,
+            commands::take_encryption_notice
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let store = Arc::new(Store::open(&data_dir.join("scribular.db"))?);
+            let db_path = data_dir.join("scribular.db");
+            let keys = key_store(&app.config().identifier);
+            let opened = Store::open(&db_path, keys.as_ref());
+            let reason = match &opened {
+                Err(StoreError::Locked(reason)) => Some(*reason),
+                _ => None,
+            };
+            app.manage(LockedState {
+                reason,
+                db_path,
+                keys,
+            });
+            if reason.is_some() {
+                // R7: no Store, queues or recorder; the webview shows only the
+                // locked screen and its commands.
+                return Ok(());
+            }
+            let store = Arc::new(opened?);
             app.manage(Arc::clone(&store));
+            jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
 
             let models = Arc::new(ModelManager::new(
                 data_dir.join("models"),

@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { Session } from '../types/Session';
+  import SessionAudio from './SessionAudio.svelte';
 
-  let { session }: { session: Session } = $props();
+  // `active` is false while the record view is hidden behind Settings.
+  let { session, active = true }: { session: Session; active?: boolean } = $props();
 </script>
 
 <article>
@@ -17,6 +19,7 @@
     <h4>Summary</h4>
     <pre>{session.summary}</pre>
   {/if}
+  <SessionAudio {session} {active} />
   {#if session.transcript}
     <h4>Transcript</h4>
     <pre>{session.transcript}</pre>

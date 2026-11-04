@@ -11,6 +11,8 @@ use super::{InputMode, Result, Store};
 pub const ACTIVE_PROMPT_ID: &str = "active_prompt_id";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
+/// Parity spec 01 R13: "Save session audio", off unless set to "1".
+pub(super) const KEEP_AUDIO: &str = "keep_audio";
 
 /// What the next recording captures and which prompt summarizes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -20,6 +22,8 @@ pub struct RecordingSettings {
     /// The app whose audio `System` and `MicAndSystem` capture.
     pub target_app: Option<String>,
     pub prompt_id: Option<String>,
+    /// Keep the audio (encrypted, 7 days) after the transcript is saved.
+    pub keep_audio: bool,
 }
 
 pub(super) fn insert(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -31,7 +35,7 @@ pub(super) fn insert(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
+pub(super) fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
         .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
             r.get(0)
@@ -48,7 +52,7 @@ impl Store {
         self.with(|c| insert(c, key, value))
     }
 
-    /// Reads all three under one lock, so a concurrent save is seen whole.
+    /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {
             Ok(RecordingSettings {
@@ -57,15 +61,17 @@ impl Store {
                     .unwrap_or(InputMode::Mic),
                 target_app: select(c, TARGET_APP)?,
                 prompt_id: select(c, ACTIVE_PROMPT_ID)?,
+                keep_audio: select(c, KEEP_AUDIO)?.as_deref() == Some("1"),
             })
         })
     }
 
-    /// Saves all three at once; an absent app or prompt clears it.
+    /// Saves them all at once; an absent app or prompt clears it.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
             insert(&tx, INPUT_MODE, settings.input_mode.as_str())?;
+            insert(&tx, KEEP_AUDIO, if settings.keep_audio { "1" } else { "0" })?;
             for (key, value) in [
                 (TARGET_APP, &settings.target_app),
                 (ACTIVE_PROMPT_ID, &settings.prompt_id),

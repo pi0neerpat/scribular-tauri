@@ -5,8 +5,15 @@ const listen = vi.fn();
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
-const { appVersion, deniedPrivacy, onHeartbeat, onSessionSegments, startRecording } =
-  await import('./api');
+const {
+  appVersion,
+  deniedPrivacy,
+  onHeartbeat,
+  onSessionSegments,
+  requestSessionAudio,
+  startFresh,
+  startRecording,
+} = await import('./api');
 
 describe('api', () => {
   beforeEach(() => {
@@ -38,6 +45,22 @@ describe('api', () => {
     expect(name).toBe('session://segments');
     cb({ payload: { sessionId: 's1', source: 'mic', segments: [] } });
     expect(seen).toEqual(['mic']);
+  });
+
+  it('requestSessionAudio returns bytes from an ArrayBuffer or a number[] and passes typed errors through', async () => {
+    invoke.mockResolvedValue(new Uint8Array([82, 73, 70, 70]).buffer);
+    await expect(requestSessionAudio('s1')).resolves.toEqual(new Uint8Array([82, 73, 70, 70]));
+    invoke.mockResolvedValue([82, 73, 70, 70]); // what the release webview actually delivered
+    await expect(requestSessionAudio('s1')).resolves.toEqual(new Uint8Array([82, 73, 70, 70]));
+    expect(invoke).toHaveBeenCalledWith('request_session_audio', { id: 's1' });
+    invoke.mockRejectedValue('expired');
+    await expect(requestSessionAudio('s1')).rejects.toBe('expired');
+  });
+
+  it('startFresh passes the typed confirmation', async () => {
+    invoke.mockResolvedValue(undefined);
+    await startFresh('start fresh');
+    expect(invoke).toHaveBeenCalledWith('start_fresh', { confirmation: 'start fresh' });
   });
 
   it('startRecording sends camelCase arguments', async () => {
