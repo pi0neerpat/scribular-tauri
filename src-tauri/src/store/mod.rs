@@ -3,6 +3,7 @@
 //! and the recording-time chunk writers (U8). A second `Store::open` would run
 //! launch recovery and mark the live recording interrupted.
 
+pub mod key;
 mod migrations;
 mod prompts;
 mod sessions;
