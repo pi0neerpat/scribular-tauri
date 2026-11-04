@@ -1,7 +1,7 @@
 # Dependency review: encryption at rest (parity spec 01)
 
 **Date:** 2026-11-04
-**Status:** Awaiting Patrick's approval. No `Cargo.toml` edit lands before it.
+**Status:** Approved by Patrick 2026-11-04: both changes, and option A (legacy login keychain) for the key.
 **Spec:** `plans/parity/01-encryption-audio-retention.md` ("New dependencies").
 **Policy:** `../notes-assistant-electron/CLAUDE.md` § Dependency Policy (review, audit,
 exact pin, in-house check).

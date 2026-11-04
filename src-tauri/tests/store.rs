@@ -6,6 +6,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{
     AudioSource, InputMode, KeptAudio, NewSession, RecordingSettings, SessionPatch, SessionStatus,
     Store, Timings, ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
@@ -29,7 +30,7 @@ impl TempDb {
     }
 
     fn open(&self) -> Store {
-        Store::open(&self.0).unwrap()
+        Store::open(&self.0, &MemoryKeyStore::with_key([7; 32])).unwrap()
     }
 
     fn remove(&self) {

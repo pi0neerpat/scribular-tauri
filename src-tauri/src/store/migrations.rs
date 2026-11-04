@@ -36,8 +36,12 @@ fn v4_audio_kept(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn known() -> u32 {
+    MIGRATIONS.len() as u32
+}
+
 pub(super) fn migrate(conn: &mut Connection) -> Result<()> {
-    let known = MIGRATIONS.len() as u32;
+    let known = known();
     let found: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if found > known {
         return Err(StoreError::SchemaTooNew { found, known });

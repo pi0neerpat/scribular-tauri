@@ -5,7 +5,7 @@
 //! those generated files are committed.
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{atomic::AtomicBool, Arc},
 };
 
@@ -16,6 +16,7 @@ use ts_rs::TS;
 use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
+use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
     now_ms, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
     SessionPatch, Store,
@@ -80,6 +81,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     RecordingSettings::export_all(cfg)?;
     Privacy::export_all(cfg)?;
     PlaybackError::export_all(cfg)?;
+    LockReason::export_all(cfg)?;
     Ok(())
 }
 
@@ -217,6 +219,58 @@ pub async fn request_session_audio(
             crate::audio::wav::mixed_wav(&mic, &system),
         )),
     }
+}
+
+/// Managed always. When `reason` is set, no `Store` is managed and the webview
+/// shows only the locked screen (spec 01 R7).
+pub struct LockedState {
+    pub reason: Option<LockReason>,
+    pub db_path: PathBuf,
+    pub keys: Arc<dyn KeyStore>,
+}
+
+/// What the webview asks first: `null` when the store opened.
+#[tauri::command]
+pub fn locked_state(locked: State<'_, LockedState>) -> Option<LockReason> {
+    locked.reason
+}
+
+/// The phrase the user types to confirm "Start fresh".
+pub const START_FRESH_CONFIRMATION: &str = "start fresh";
+
+/// R7: set the unreadable DB aside (renamed, not deleted), create a new one
+/// with a new key, then restart so setup runs unlocked.
+#[tauri::command]
+pub fn start_fresh(
+    app: AppHandle,
+    locked: State<'_, LockedState>,
+    confirmation: String,
+) -> Result<(), String> {
+    if !matches!(
+        locked.reason,
+        Some(LockReason::KeyMissing | LockReason::WrongKey)
+    ) {
+        return Err("Start fresh is only offered when the key is missing or wrong".into());
+    }
+    if !confirmation
+        .trim()
+        .eq_ignore_ascii_case(START_FRESH_CONFIRMATION)
+    {
+        return Err(format!("Type \"{START_FRESH_CONFIRMATION}\" to confirm"));
+    }
+    drop(Store::start_fresh(&locked.db_path, locked.keys.as_ref()).map_err(|e| e.to_string())?);
+    app.restart()
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+/// True once, after a prototype DB was encrypted (R9 notice).
+#[tauri::command]
+pub fn take_encryption_notice(store: State<'_, Arc<Store>>) -> Result<bool, String> {
+    store.take_encryption_notice().map_err(|e| e.to_string())
 }
 
 /// Apps playing audio now. Runs AudioCapCLI, so off the main thread.

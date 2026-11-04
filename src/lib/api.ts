@@ -7,6 +7,7 @@ import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { Heartbeat } from './types/Heartbeat';
 import type { InputMode } from './types/InputMode';
+import type { LockReason } from './types/LockReason';
 import type { ModelProgress } from './types/ModelProgress';
 import type { ModelSpec } from './types/ModelSpec';
 import type { Privacy } from './types/Privacy';
@@ -46,6 +47,25 @@ export function updateSession(id: string, patch: SessionPatch): Promise<Session>
  */
 export function requestSessionAudio(id: string): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>('request_session_audio', { id });
+}
+
+/** Why the store couldn't be opened, or null when it did. Ask this first. */
+export function lockedState(): Promise<LockReason | null> {
+  return invoke<LockReason | null>('locked_state');
+}
+
+/** Sets the unreadable database aside and restarts with an empty one. */
+export function startFresh(confirmation: string): Promise<void> {
+  return invoke<void>('start_fresh', { confirmation });
+}
+
+export function quitApp(): Promise<void> {
+  return invoke<void>('quit_app');
+}
+
+/** True once, after the prototype database was encrypted. */
+export function takeEncryptionNotice(): Promise<boolean> {
+  return invoke<boolean>('take_encryption_notice');
 }
 
 /** Resolves to whether the session existed. */

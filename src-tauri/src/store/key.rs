@@ -112,15 +112,95 @@ pub fn plan_open(db: DbState, key_present: bool) -> Plan {
     }
 }
 
-/// The `PRAGMA key` value for a raw key: `"x'<64 hex>'"` (R2).
-pub fn pragma_key(key: &Key) -> String {
-    let mut s = String::with_capacity(KEY_LEN * 2 + 5);
-    s.push_str("\"x'");
+/// The raw-key form SQLCipher recognises: `x'<64 hex>'` (R2). Callers wrap it
+/// in [`Scrubbed`] so the buffer is overwritten when they are done.
+pub fn raw_key(key: &Key) -> Scrubbed {
+    let mut s = String::with_capacity(KEY_LEN * 2 + 3);
+    s.push_str("x'");
     for b in key {
         write!(s, "{b:02x}").unwrap();
     }
-    s.push_str("'\"");
-    s
+    s.push('\'');
+    Scrubbed(s)
+}
+
+/// `PRAGMA key`, which must be the first statement on the connection.
+pub fn apply_key(conn: &rusqlite::Connection, key: &Key) -> rusqlite::Result<()> {
+    let raw = raw_key(key);
+    let stmt = Scrubbed(format!("PRAGMA key = \"{}\";", raw.0));
+    conn.execute_batch(&stmt.0)
+}
+
+/// An ASCII secret overwritten on drop. Best effort only: earlier
+/// reallocations or copies made by SQLite are not reached.
+pub struct Scrubbed(pub String);
+
+impl Drop for Scrubbed {
+    fn drop(&mut self) {
+        // SAFETY: '0' is ASCII, so the string stays valid UTF-8.
+        unsafe { self.0.as_bytes_mut() }.fill(b'0');
+    }
+}
+
+/// 32 bytes from the OS CSPRNG.
+pub fn new_key() -> Result<Key, String> {
+    let mut key = [0u8; KEY_LEN];
+    #[cfg(target_os = "macos")]
+    security_framework::random::SecRandom::default()
+        .copy_bytes(&mut key)
+        .map_err(|e| format!("SecRandomCopyBytes: {e}"))?;
+    #[cfg(not(target_os = "macos"))]
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut key))
+        .map_err(|e| format!("/dev/urandom: {e}"))?;
+    Ok(key)
+}
+
+/// The key as a generic password in the login Keychain (R3, option A in
+/// plans/DEPENDENCY_REVIEW_ENCRYPTION.md). Spec 04 reuses it for the licence.
+#[cfg(target_os = "macos")]
+pub struct KeychainKeyStore {
+    service: String,
+    account: String,
+}
+
+#[cfg(target_os = "macos")]
+impl KeychainKeyStore {
+    pub fn new(service: &str, account: &str) -> Self {
+        Self {
+            service: service.into(),
+            account: account.into(),
+        }
+    }
+
+    fn options(&self) -> security_framework::passwords::PasswordOptions {
+        security_framework::passwords::PasswordOptions::new_generic_password(
+            &self.service,
+            &self.account,
+        )
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl KeyStore for KeychainKeyStore {
+    fn get(&self) -> Result<Option<Key>, String> {
+        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+        match security_framework::passwords::generic_password(self.options()) {
+            Ok(mut bytes) => {
+                let key = Key::try_from(bytes.as_slice())
+                    .map_err(|_| format!("stored key has {} bytes", bytes.len()));
+                bytes.fill(0);
+                key.map(Some)
+            }
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+            Err(e) => Err(format!("Keychain read failed ({})", e.code())),
+        }
+    }
+
+    fn set(&self, key: &Key) -> Result<(), String> {
+        security_framework::passwords::set_generic_password_options(key, self.options())
+            .map_err(|e| format!("Keychain write failed ({})", e.code()))
+    }
 }
 
 #[cfg(test)]
@@ -161,14 +241,19 @@ mod tests {
     }
 
     #[test]
-    fn pragma_key_is_raw_hex() {
+    fn raw_key_is_hex() {
         let mut key = [0u8; KEY_LEN];
         key[0] = 0xab;
         key[31] = 0x01;
-        let p = pragma_key(&key);
-        assert_eq!(p.len(), 64 + 5);
-        assert!(p.starts_with("\"x'ab00"));
-        assert!(p.ends_with("01'\""));
+        let p = raw_key(&key);
+        assert_eq!(p.0.len(), 64 + 3);
+        assert!(p.0.starts_with("x'ab00"));
+        assert!(p.0.ends_with("01'"));
+    }
+
+    #[test]
+    fn new_keys_differ() {
+        assert_ne!(new_key().unwrap(), new_key().unwrap());
     }
 
     #[test]

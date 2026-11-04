@@ -9,6 +9,7 @@ use std::{
 };
 
 use scribular_lib::audio::{chunk_writer, resample::to_i16, Format};
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{AudioSource, InputMode, NewSession, Store};
 
 struct TempDb(PathBuf);
@@ -61,7 +62,7 @@ fn session(store: &Store) -> String {
 #[test]
 fn a_writer_that_falls_behind_pads_the_dropped_audio_with_silence() {
     let db = TempDb::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let id = session(&store);
     let (mut sink, consumer) = chunk_writer::channel_with_capacity(1024);
     assert!(sink.try_push(&[0.5; 1000]));
@@ -88,7 +89,7 @@ fn a_writer_that_falls_behind_pads_the_dropped_audio_with_silence() {
 #[test]
 fn a_writer_that_keeps_up_loses_nothing() {
     let db = TempDb::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let id = session(&store);
     let (mut sink, consumer) = chunk_writer::channel_with_capacity(1024);
     let (live, _audio) = mpsc::channel();

@@ -16,6 +16,7 @@ use scribular_lib::engines::fake::{FakeLoader, FakeSummarizer, TEMPLATE_TOKENS};
 use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
 use scribular_lib::llm::prompt::{chunk_prompt, combine_prompt, CHUNK_NOTE_TOKENS};
 use scribular_lib::llm::{Generation, LlmError};
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{InputMode, NewSession, Session, SessionStatus, Store, Timings};
 
 const PROMPT_ID: &str = "default-therapy-dora";
@@ -147,7 +148,7 @@ impl Harness {
         configure_loader: impl FnOnce(&mut FakeLoader),
     ) -> Self {
         let db = TempDb::new();
-        let store = Arc::new(Store::open(&db.0).unwrap());
+        let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
         let base = store.get_prompt(PROMPT_ID).unwrap().unwrap().text;
         let empty_prompt = chunk_prompt(&base, "").split_whitespace().count() + TEMPLATE_TOKENS;
         // `chunk_budget` also reserves 16 tokens of boundary slack.

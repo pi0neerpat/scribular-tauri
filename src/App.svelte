@@ -1,11 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appVersion, onHeartbeat } from './lib/api';
+  import { appVersion, lockedState, onHeartbeat, takeEncryptionNotice } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
   import ModelStatus from './lib/components/ModelStatus.svelte';
+  import LockedScreen from './lib/components/LockedScreen.svelte';
   import type { AppVersion } from './lib/types/AppVersion';
+  import type { LockReason } from './lib/types/LockReason';
+
+  // Asked before anything that needs the store mounts.
+  let gate = $state<'loading' | 'open' | { locked: LockReason }>('loading');
+  let notice = $state(false);
 
   let version = $state<AppVersion | null>(null);
   let error = $state<string | null>(null);
@@ -14,6 +20,12 @@
   let speechReady = $state(false);
 
   onMount(() => {
+    lockedState()
+      .then((reason) => {
+        gate = reason ? { locked: reason } : 'open';
+        if (!reason) takeEncryptionNotice().then((n) => (notice = n));
+      })
+      .catch((e) => (error = String(e)));
     appVersion()
       .then((v) => (version = v))
       .catch((e) => (error = String(e)));
@@ -24,7 +36,17 @@
   });
 </script>
 
+{#if typeof gate === 'object'}
+  <LockedScreen reason={gate.locked} />
+{:else if gate === 'open'}
 <main>
+  {#if notice}
+    <p role="status">
+      Your earlier test sessions were encrypted. Turn on FileVault to protect copies of the old file
+      that macOS may still hold.
+      <button onclick={() => (notice = false)}>Dismiss</button>
+    </p>
+  {/if}
   <FirstRun bind:speechReady />
   <ModelStatus />
   {#if version}
@@ -45,3 +67,6 @@
   {/if}
   <p>Heartbeat: {beats}</p>
 </main>
+{:else if error}
+  <p role="alert">{error}</p>
+{/if}

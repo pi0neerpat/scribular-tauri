@@ -11,6 +11,7 @@ const {
   onHeartbeat,
   onSessionSegments,
   requestSessionAudio,
+  startFresh,
   startRecording,
 } = await import('./api');
 
@@ -53,6 +54,12 @@ describe('api', () => {
     expect(invoke).toHaveBeenCalledWith('request_session_audio', { id: 's1' });
     invoke.mockRejectedValue('expired');
     await expect(requestSessionAudio('s1')).rejects.toBe('expired');
+  });
+
+  it('startFresh passes the typed confirmation', async () => {
+    invoke.mockResolvedValue(undefined);
+    await startFresh('start fresh');
+    expect(invoke).toHaveBeenCalledWith('start_fresh', { confirmation: 'start fresh' });
   });
 
   it('startRecording sends camelCase arguments', async () => {

@@ -47,6 +47,8 @@ jobs:
           for f in "$APP"/Contents/MacOS/* "$APP"/Contents/Frameworks/*; do
             BAD=$(otool -L "$f" | awk '/^\t/{print $1}' | grep -v -E '^(@rpath/|@executable_path/|@loader_path/|/usr/lib/|/System/)' || true)
             [ -z "$BAD" ] || { echo "::error::$f links outside the bundle: $BAD"; exit 1; }
+            # SQLCipher must use CommonCrypto (spec 01); macOS aborts any app that loads /usr/lib/libcrypto.
+            ! otool -L "$f" | grep -E 'lib(crypto|ssl)' || { echo "::error::$f links OpenSSL"; exit 1; }
           done
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --verify --strict --verbose=2 "$APP/Contents/MacOS/AudioCapCLI"

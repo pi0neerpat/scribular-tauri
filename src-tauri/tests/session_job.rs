@@ -22,6 +22,7 @@ use scribular_lib::jobs::{
     JobEvents, JobQueue, RecordError, Recorder, SessionProgress, SessionSegments, SummaryDelta,
 };
 use scribular_lib::llm::LlmError;
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{AudioSource, InputMode, Session, SessionStatus, Store};
 use scribular_lib::stt::TranscriptSegment;
 
@@ -183,7 +184,7 @@ impl Harness {
         configure_llm: impl FnOnce(&mut FakeLoader),
     ) -> Self {
         let db = TempDb::new();
-        let store = Arc::new(Store::open(&db.0).unwrap());
+        let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
         let events = Arc::new(Events {
             store: store.clone(),
             progress: Mutex::default(),
@@ -372,7 +373,7 @@ fn quitting_mid_recording_leaves_an_interrupted_session_with_its_audio() {
     drop(events);
     drop(store);
 
-    let store = Store::open(&db.0).unwrap();
+    let store = Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap();
     let s = store.get_session(&id).unwrap().unwrap();
     assert_eq!(s.status, SessionStatus::Failed);
     assert_eq!(s.error.as_deref(), Some("interrupted"));

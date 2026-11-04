@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::{
     engines::fake::{FakeLoader, FakeSummarizer},
     jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta},
@@ -139,7 +140,7 @@ fn session(store: &Store) -> String {
 #[test]
 fn transcript_waits_at_download_progress_and_summarizes_when_ready() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst); // deterministic stand-in for a partial (60%) download
     let events = Arc::new(Events::default());
@@ -170,7 +171,7 @@ fn transcript_waits_at_download_progress_and_summarizes_when_ready() {
 #[test]
 fn multiple_waiting_sessions_summarize_in_stop_order() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
@@ -187,7 +188,7 @@ fn multiple_waiting_sessions_summarize_in_stop_order() {
 #[test]
 fn waiting_sessions_resume_from_persistent_queue_after_relaunch() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
@@ -199,7 +200,7 @@ fn waiting_sessions_resume_from_persistent_queue_after_relaunch() {
         queue.regenerate(&second, PROMPT).unwrap();
     }
     drop(events);
-    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let reopened = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     loader.ready.store(true, Ordering::SeqCst);
     let events = Arc::new(Events::default());
     let queue = JobQueue::new(reopened.clone(), loader, events.clone());
@@ -218,7 +219,7 @@ fn waiting_sessions_resume_from_persistent_queue_after_relaunch() {
 #[test]
 fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let first = session(&store);
     let second = session(&store);
     store
@@ -241,7 +242,7 @@ fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
         .unwrap();
     drop(store);
 
-    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let reopened = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     assert_eq!(
         reopened.get_session(&first).unwrap().unwrap().status,
         SessionStatus::AwaitingModel
@@ -260,7 +261,7 @@ fn restart_recovers_a_queued_summarizing_session_and_keeps_fifo_order() {
 #[test]
 fn cancelling_a_waiting_session_removes_its_persisted_job() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
@@ -279,7 +280,7 @@ fn cancelling_a_waiting_session_removes_its_persisted_job() {
 #[test]
 fn cancelling_a_queued_resummary_keeps_the_completed_session_and_drops_the_row() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
@@ -299,7 +300,7 @@ fn cancelling_a_queued_resummary_keeps_the_completed_session_and_drops_the_row()
 #[test]
 fn updating_a_waiting_job_keeps_its_original_restore_status() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let events = Arc::new(Events::default());
@@ -321,7 +322,7 @@ fn updating_a_waiting_job_keeps_its_original_restore_status() {
 #[test]
 fn requeue_during_completion_keeps_the_new_durable_row() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     let events = Arc::new(Events::paused());
     let id = session(&store);
@@ -351,7 +352,7 @@ fn requeue_during_completion_keeps_the_new_durable_row() {
 #[test]
 fn dropping_during_a_summary_keeps_the_job_for_relaunch() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     let events = Arc::new(Events::paused_at(SessionStatus::Summarizing));
     let id = session(&store);
@@ -366,7 +367,7 @@ fn dropping_during_a_summary_keeps_the_job_for_relaunch() {
     });
     assert_eq!(store.queued_summaries().unwrap().len(), 1);
     drop(store);
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
 
     let resumed_events = Arc::new(Events::default());
     let queue = JobQueue::new(store.clone(), loader, resumed_events.clone());
@@ -381,7 +382,7 @@ fn dropping_during_a_summary_keeps_the_job_for_relaunch() {
 #[test]
 fn cancelling_a_requeue_during_completion_restores_the_new_done_status() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     let events = Arc::new(Events::paused());
     let id = session(&store);
@@ -396,7 +397,7 @@ fn cancelling_a_requeue_during_completion_restores_the_new_done_status() {
     assert!(queue.wait_idle(WAIT));
     drop(queue);
     drop(store);
-    let reopened = Store::open(&db.0).unwrap();
+    let reopened = Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap();
     let saved = reopened.get_session(&id).unwrap().unwrap();
     assert!(cancelled);
     assert_eq!(saved.status, SessionStatus::Done);
@@ -407,7 +408,7 @@ fn cancelling_a_requeue_during_completion_restores_the_new_done_status() {
 #[test]
 fn requeue_during_completion_moves_to_the_tail_across_restart() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     let events = Arc::new(Events::paused());
     let first = session(&store);
@@ -421,7 +422,7 @@ fn requeue_during_completion_moves_to_the_tail_across_restart() {
     events.release_done_callback();
     drop(queue);
     drop(store);
-    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let reopened = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     loader.ready.store(true, Ordering::SeqCst);
     let events = Arc::new(Events::default());
     let queue = JobQueue::new(reopened, loader, events.clone());
@@ -432,7 +433,7 @@ fn requeue_during_completion_moves_to_the_tail_across_restart() {
 #[test]
 fn explicit_cancel_then_quit_does_not_resume_on_reopen() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let mut model = FakeSummarizer::new(8192);
     model.token_delay = Duration::from_millis(100);
     let loader = Arc::new(FakeLoader::new(model));
@@ -460,7 +461,7 @@ fn explicit_cancel_then_quit_does_not_resume_on_reopen() {
         events.release_done_callback();
     });
     drop(store);
-    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let reopened = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let events = Arc::new(Events::default());
     let queue = JobQueue::new(reopened.clone(), loader, events.clone());
     assert!(queue.wait_idle(WAIT));
@@ -479,7 +480,7 @@ fn explicit_cancel_then_quit_does_not_resume_on_reopen() {
 #[test]
 fn updating_the_same_pending_job_preserves_fifo_across_restart() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     loader.ready.store(false, Ordering::SeqCst);
     let first = session(&store);
@@ -497,7 +498,7 @@ fn updating_the_same_pending_job_preserves_fifo_across_restart() {
     queue.regenerate(&first, &prompt).unwrap();
     drop(queue);
     drop(store);
-    let reopened = Arc::new(Store::open(&db.0).unwrap());
+    let reopened = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     assert_eq!(
         reopened.queued_summaries().unwrap(),
         [
@@ -519,7 +520,7 @@ fn updating_the_same_pending_job_preserves_fifo_across_restart() {
 #[test]
 fn explicit_cancel_is_durable_before_the_worker_can_finish() {
     let db = Db::new();
-    let store = Arc::new(Store::open(&db.0).unwrap());
+    let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
     let loader = Arc::new(FakeLoader::new(FakeSummarizer::new(8192)));
     let events = Arc::new(Events::paused_at(SessionStatus::Summarizing));
     let id = session(&store);
@@ -529,7 +530,7 @@ fn explicit_cancel_is_durable_before_the_worker_can_finish() {
     let cancelled = queue.cancel(&id);
     let requeue = queue.regenerate(&id, PROMPT);
     // A process exit may skip Drop and worker cleanup entirely.
-    let reopened = Store::open(&db.0).unwrap();
+    let reopened = Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap();
     let status = reopened.get_session(&id).unwrap().unwrap().status;
     let pending = reopened.queued_summaries().unwrap();
     events.release_done_callback();
@@ -554,14 +555,14 @@ fn durable_running_cancellation_covers_the_gap_before_summarizing() {
         (SessionStatus::Cancelled, SessionStatus::Cancelled),
     ] {
         let db = Db::new();
-        let store = Store::open(&db.0).unwrap();
+        let store = Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap();
         let id = session(&store);
         store
             .queue_status(&id, PROMPT, before, SessionStatus::Finalizing, false)
             .unwrap();
         store.cancel_running_summary(&id).unwrap();
         drop(store);
-        let reopened = Store::open(&db.0).unwrap();
+        let reopened = Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap();
         assert_eq!(
             reopened.get_session(&id).unwrap().unwrap().status,
             after,
