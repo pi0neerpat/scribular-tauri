@@ -23,8 +23,9 @@ pub struct HttpReply {
 }
 
 pub trait LicenseApi: Send + Sync {
-    /// `Err` is a transport failure (no connection, timeout). A redirect to
-    /// another host is not followed; it comes back as its 3xx reply.
+    /// `Err` is a transport failure (no connection, timeout, truncated body).
+    /// A redirect to another origin (scheme, host or port) is not followed; it
+    /// comes back as its 3xx reply.
     fn post_validate(&self, key: &str, device_id: &str) -> Result<HttpReply, String>;
 }
 
@@ -77,6 +78,74 @@ impl LicenseApi for HttpLicenseApi {
             let body = resp.text().await.map_err(|e| e.without_url().to_string())?;
             Ok(HttpReply { status, body })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Serves each connection the canned `response` after reading the request.
+    /// Returns the root URL and a count of requests served.
+    fn serve(response: String) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let root = format!("http://{}", listener.local_addr().unwrap());
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut len = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0; len];
+                let _ = reader.read_exact(&mut body);
+                counter.fetch_add(1, Ordering::SeqCst);
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (root, hits)
+    }
+
+    #[test]
+    fn cross_origin_redirect_is_not_followed() {
+        let (other, other_hits) =
+            serve("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".into());
+        // Same host, different port: a different origin.
+        let (root, _) = serve(format!(
+            "HTTP/1.1 302 Found\r\nLocation: {other}/api/validate\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ));
+        let reply = HttpLicenseApi::new(&root)
+            .unwrap()
+            .post_validate("k", "d")
+            .unwrap();
+        assert_eq!(reply.status, 302);
+        assert_eq!(
+            other_hits.load(Ordering::SeqCst),
+            0,
+            "redirect target never contacted"
+        );
+    }
+
+    #[test]
+    fn truncated_body_is_a_transport_error() {
+        let (root, _) = serve(
+            "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"valid\":".into(),
+        );
+        let api = HttpLicenseApi::new(&root).unwrap();
+        assert!(api.post_validate("k", "d").is_err());
     }
 }
 

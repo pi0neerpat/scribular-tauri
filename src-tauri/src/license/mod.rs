@@ -487,7 +487,7 @@ impl Licensing {
         }
     }
 
-    /// Raises the clock high-water mark (R2). On launch and hourly.
+    /// Raises the clock high-water mark (R2). On launch and every licence-check tick (5 min).
     pub fn touch(&self) {
         let seen = self.record().last_seen_at.max(self.clock.now_ms());
         self.set(LAST_SEEN, &seen.to_string());

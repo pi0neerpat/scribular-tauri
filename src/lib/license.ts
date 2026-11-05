@@ -19,12 +19,17 @@ export function followAccessState(): () => void {
     heard = true;
     accessState.set(s);
   });
+  // A failed registration still gets the snapshot, just no live updates.
   unlisten
+    .catch(() => {})
     .then(() => getAccessState())
     .then((s) => heard || accessState.set(s))
     .catch(() => {}); // locked store: no licensing state, nothing to show
   return () => {
-    unlisten.then((fn) => fn());
+    unlisten.then(
+      (fn) => fn(),
+      () => {},
+    );
   };
 }
 
