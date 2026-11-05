@@ -70,7 +70,7 @@ it('restores the backend selection after a download fails', async () => {
   use.click();
   flushSync();
   use.click();
-  await vi.waitFor(() => expect(radios[1].checked).toBe(true));
+  await vi.waitFor(() => expect(use.disabled).toBe(true));
   reportProgress!({ modelId: 'big', state: 'failed', downloadedBytes: 0, totalBytes: 2_500_000_000, error: 'network failed' });
   modelChanged!('small');
   await vi.waitFor(() => expect(radios[0].checked).toBe(true));
@@ -100,7 +100,7 @@ it('shows the selected model immediately after a successful switch', async () =>
   [...target.querySelectorAll('button')].at(-1)!.click();
   flushSync();
   [...target.querySelectorAll('button')].at(-1)!.click();
-  await vi.waitFor(() => expect(radios[1].checked).toBe(true));
+  await vi.waitFor(() => expect([...target.querySelectorAll('button')].at(-1)!.disabled).toBe(true));
   expect(setSummaryModel).toHaveBeenCalledWith('big');
   unmount(app);
   target.remove();

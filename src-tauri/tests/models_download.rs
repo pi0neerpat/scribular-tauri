@@ -465,6 +465,75 @@ fn manager_prefers_the_default_llm_over_an_earlier_manifest_entry() {
     assert_eq!(manager.selected_llm(), DEFAULT_LLM);
 }
 
+#[test]
+fn concurrent_ensure_one_waits_for_the_download_owner_to_finish() {
+    let expected = body(MB + 123, 7);
+    let corrupted = body(MB + 123, 8);
+    let server = Server::start(
+        HashMap::from([("shared.bin".into(), corrupted)]),
+        HashMap::from([("shared.bin".into(), (MB + 1) as usize)]),
+    );
+    let dir = TempDir::new();
+    let small = body(10, 9);
+    let manager = Arc::new(ModelManager::new(
+        dir.0.clone(),
+        vec![
+            spec(&server, "small", ModelKind::Llm, &small),
+            spec(&server, "shared", ModelKind::Llm, &expected),
+        ],
+    ));
+    manager.select_llm("small").unwrap();
+    manager.readiness.set("small", ModelState::Ready);
+    let store = store_in(&dir);
+    let previous = switch_summary_model(&store, &manager, false, "shared").unwrap();
+    assert_eq!(previous, "small");
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let timeout = std::time::Duration::from_secs(5);
+
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            run(manager.ensure_one("shared", &|progress| {
+                if progress.state == ModelState::Downloading && progress.downloaded_bytes == 0 {
+                    started_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv_timeout(timeout).unwrap();
+                }
+            }))
+        });
+        started_rx.recv_timeout(timeout).unwrap();
+
+        let second_manager = Arc::clone(&manager);
+        let second = scope.spawn(move || {
+            let result = run(second_manager.ensure_one("shared", &|_| {}));
+            finished_tx.send(result).unwrap();
+        });
+        let finished_while_owned = finished_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_ok();
+        release_tx.send(()).unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(finished_rx.recv_timeout(timeout).unwrap().is_err());
+        second.join().unwrap();
+        assert!(
+            !finished_while_owned,
+            "the second call must await its owner"
+        );
+    });
+    assert_eq!(
+        server.seen().len(),
+        2,
+        "the waiter retries after the owner's failed download"
+    );
+    assert!(revert_summary_model(&store, &manager, "shared", &previous));
+    assert_eq!(manager.selected_llm(), "small");
+    assert_eq!(
+        store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
+        Some("small")
+    );
+}
+
 /// Parity spec 03 AS18: the first run fetches speech plus the selected LLM.
 #[test]
 fn as18_first_run_downloads_only_the_selected_llm() {

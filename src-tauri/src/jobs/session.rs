@@ -257,10 +257,10 @@ impl Recorder {
     }
 
     /// Runs `operation` while preventing a recording from starting.
-    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ()> {
+    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Result<T, RecordError> {
         let recording = lock(&self.inner.recording);
         if recording.is_some() {
-            return Err(());
+            return Err(RecordError::AlreadyRecording);
         }
         Ok(operation())
     }

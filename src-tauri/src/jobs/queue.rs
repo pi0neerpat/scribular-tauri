@@ -190,13 +190,15 @@ impl JobQueue {
         self.shared.lock().running.is_some()
     }
 
-    /// Serializes model changes with summary admission and start.
-    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ()> {
+    /// Serializes model changes with summary admission and start. Returns
+    /// `None` while a summary is running. The closure runs under the queue
+    /// lock and must not call back into this queue.
+    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let state = self.shared.lock();
         if state.running.is_some() {
-            return Err(());
+            return None;
         }
-        Ok(operation())
+        Some(operation())
     }
 
     /// Starts loading the summary model in the background, so a recording's

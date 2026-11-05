@@ -20,11 +20,11 @@
   let beats = $state(0);
   let view = $state<'record' | 'settings'>('record');
   let speechReady = $state(false);
-  let settings = $state<{ requestLeave: (action: () => void) => void } | undefined>();
+  let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
 
-  function navigate(next: typeof view) {
+  function navigate(next: typeof view, opener?: HTMLElement) {
     const action = () => (view = next);
-    if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action);
+    if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action, opener);
     else action();
   }
 
@@ -70,8 +70,8 @@
     <p>Loading…</p>
   {/if}
   <nav>
-    <button onclick={() => navigate('record')} aria-pressed={view === 'record'}>Record</button>
-    <button onclick={() => navigate('settings')} aria-pressed={view === 'settings'}>Settings</button>
+    <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
+    <button onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
     <TrialBadge onclick={() => navigate('settings')} />
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->

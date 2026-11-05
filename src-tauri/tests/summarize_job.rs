@@ -373,15 +373,15 @@ fn under_ten_words_fails_without_touching_the_model() {
 
 #[test]
 fn a_second_regenerate_waits_for_the_first() {
-    let h = Harness::with_budget(100, |f| f.token_delay = Duration::from_millis(2));
+    let h = Harness::with_budget(100, |f| f.token_delay = Duration::from_millis(20));
     let a = h.session(&words(250), "");
     let b = h.session(&words(250), "");
 
-    assert_eq!(h.queue.while_idle(|| 7), Ok(7));
+    assert_eq!(h.queue.while_idle(|| 7), Some(7));
     h.queue.regenerate(&a, PROMPT_ID).unwrap();
     h.events
         .wait_for(|p| p.session_id == a && p.state == SessionStatus::Summarizing);
-    assert!(h.queue.while_idle(|| ()).is_err());
+    assert!(h.queue.while_idle(|| ()).is_none());
     h.queue.regenerate(&b, PROMPT_ID).unwrap();
     h.wait_idle();
 
@@ -533,6 +533,10 @@ fn as15_switching_the_model_reloads_once_and_records_the_new_id() {
     h.wait_idle();
 
     assert_eq!(h.loader.loads.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *h.loader.loaded_model_ids.lock().unwrap(),
+        ["fake-llm", "other-llm"]
+    );
     let s = h.get(&id);
     assert_eq!(s.status, SessionStatus::Done);
     assert_eq!(s.model_id.as_deref(), Some("other-llm"));

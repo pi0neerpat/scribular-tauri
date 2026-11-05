@@ -140,7 +140,7 @@ Anti-goals
 ### Model choice
 - AS14 (automated). Given the manifest, Then LLM ids are unique, every LLM entry passes the existing pin checks (`manifest.rs:80-91`), and exactly one entry is the default.
 - AS15 (automated, fake-engines). Given a fake loader and `set_summary_model` to a Ready model, When the next job runs, Then the loader is asked for the new model id, the cached model is dropped once, and the session's `model_id` is the new id.
-- AS16 (automated, fake-engines). Given `set_summary_model` to a model that is not downloaded, Then the job waits in `AwaitingModel`. When the fake download fails, Then the selection reverts to the last Ready model and an error is surfaced.
+- AS16 (automated, fake-engines). Given `set_summary_model` to a model that is not downloaded, Then the job waits in `AwaitingModel`. When the fake download fails, Then the selection reverts to the previously selected model if it was Ready, and an error is surfaced.
 - AS17 (automated). Given a summary job is `Summarizing`, When `set_summary_model` is called, Then it returns a typed "busy" error and the key is unchanged.
 - AS18 (automated). First run downloads speech plus the selected LLM only; the second LLM's file is not requested.
 - AS19 (automated, vitest). The model list renders size, caution, licence link, and the Installed badge from `ModelState`; "Use this model" is disabled when the selected model equals the saved one.

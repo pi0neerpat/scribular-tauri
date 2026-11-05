@@ -120,6 +120,7 @@ impl Summarizer for FakeSummarizer {
 pub struct FakeLoader {
     pub summarizer: Arc<FakeSummarizer>,
     pub loads: AtomicUsize,
+    pub loaded_model_ids: Mutex<Vec<String>>,
     pub ready: AtomicBool,
     /// When set, `load` fails with this error instead.
     pub fail: Option<LlmError>,
@@ -132,6 +133,7 @@ impl FakeLoader {
         Self {
             summarizer: Arc::new(summarizer),
             loads: AtomicUsize::new(0),
+            loaded_model_ids: Mutex::default(),
             ready: AtomicBool::new(true),
             fail: None,
             model: Mutex::new("fake-llm".into()),
@@ -148,8 +150,9 @@ impl SummarizerLoader for FakeLoader {
         self.ready.load(Ordering::SeqCst)
     }
 
-    fn load(&self, _model_id: &str) -> Result<Arc<dyn Summarizer>> {
+    fn load(&self, model_id: &str) -> Result<Arc<dyn Summarizer>> {
         self.loads.fetch_add(1, Ordering::SeqCst);
+        self.loaded_model_ids.lock().unwrap().push(model_id.into());
         match &self.fail {
             Some(e) => Err(e.clone()),
             None => Ok(self.summarizer.clone()),

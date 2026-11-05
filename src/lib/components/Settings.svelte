@@ -34,10 +34,10 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let speakerModel = $state<ModelProgress | null>(null);
-  let noteStyles: { requestLeave: (action: () => void) => void } | undefined;
+  let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
-  export function requestLeave(action: () => void) {
-    if (noteStyles) noteStyles.requestLeave(action);
+  export function requestLeave(action: () => void, opener?: HTMLElement) {
+    if (noteStyles) noteStyles.requestLeave(action, opener);
     else action();
   }
 

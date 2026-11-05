@@ -8,25 +8,32 @@
   let summaryId = $state<string | null>(null);
   let models = $state<ModelProgress[]>([]);
   let summary = $derived(models.find((m) => m.modelId === summaryId));
+  let selectionVersion = 0;
 
   onMount(() => {
-    const selected = () =>
-      listSummaryModels().then((list) => {
-        summaryId = list.find((m) => m.selected)?.spec.id ?? null;
+    const selected = () => {
+      const version = selectionVersion;
+      return listSummaryModels().then((list) => {
+        if (version === selectionVersion) summaryId = list.find((m) => m.selected)?.spec.id ?? null;
       });
+    };
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
     });
-    const changed = onSummaryModelChanged((id) => (summaryId = id));
-    void selected();
+    const changed = onSummaryModelChanged((id) => {
+      selectionVersion++;
+      summaryId = id;
+    });
+    void changed.then(selected, selected).catch(() => {});
     // Snapshot after the listener is live, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
-    unlisten
-      .then(() => modelsStatus())
-      .then((value) => (models = mergeSnapshot(value, models)));
+    void unlisten
+      .then(() => modelsStatus(), () => modelsStatus())
+      .then((value) => (models = mergeSnapshot(value, models)))
+      .catch(() => {});
     return () => {
-      unlisten.then((fn) => fn());
-      changed.then((fn) => fn());
+      unlisten.then((fn) => fn(), () => {});
+      changed.then((fn) => fn(), () => {});
     };
   });
 </script>

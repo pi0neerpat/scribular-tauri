@@ -5,7 +5,9 @@ import { flushSync, mount, unmount } from 'svelte';
 
 const prompt = (id: string, name: string, isDefault = false) =>
   ({ id, name, description: '', text: `${name} text`, isDefault, starred: true });
-const list = { prompts: [prompt('a', 'Alpha'), prompt('b', 'Beta')], activeId: 'a', createdId: null };
+const list: { prompts: ReturnType<typeof prompt>[]; activeId: string; createdId: string | null } = {
+  prompts: [prompt('a', 'Alpha'), prompt('b', 'Beta')], activeId: 'a', createdId: null,
+};
 
 const getPromptList = vi.fn();
 const updatePrompt = vi.fn();
@@ -109,6 +111,43 @@ it('focuses the discard dialog and lets Escape cancel it', async () => {
   expect(input().value).toBe('Alpha 2');
 });
 
+it('focuses Cancel in the delete dialog', async () => {
+  const opener = button('Alpha');
+  button('Delete').click();
+  flushSync();
+  await vi.waitFor(() => expect(dialog()?.contains(document.activeElement)).toBe(true));
+  expect(document.activeElement?.textContent).toBe('Cancel');
+  button('Cancel').click();
+  expect(opener.isConnected).toBe(true);
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener), { timeout: 3000 });
+});
+
+it('traps focus in the discard dialog and restores its opener on close', async () => {
+  typeName('Alpha 2');
+  const opener = button('Beta');
+  opener.click();
+  flushSync();
+  await vi.waitFor(() => expect(dialog()?.contains(document.activeElement)).toBe(true));
+
+  const buttons = dialog()!.querySelectorAll<HTMLButtonElement>('button');
+  buttons[2].focus();
+  const tabAllowed = buttons[2].dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Tab', bubbles: true, cancelable: true,
+  }));
+  expect(tabAllowed).toBe(false);
+  expect(document.activeElement).toBe(buttons[0]);
+
+  buttons[0].focus();
+  buttons[0].dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Tab', shiftKey: true, bubbles: true, cancelable: true,
+  }));
+  expect(document.activeElement).toBe(buttons[2]);
+
+  dialog()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  flushSync();
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+});
+
 it('asks before closing the window with a dirty style', async () => {
   typeName('Alpha 2');
   await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
@@ -145,9 +184,24 @@ it('keeps the window open when saving before close fails', async () => {
   flushSync();
   dialog()!.querySelector<HTMLButtonElement>('button')!.click();
   await vi.waitFor(() => expect(target.textContent).toContain('save failed'));
-  expect(dialog()).toBeNull();
+  expect(dialog()).not.toBeNull();
   expect(input().value).toBe('Alpha 2');
   expect(destroyWindow).not.toHaveBeenCalled();
+});
+
+it('keeps pending navigation while a save is already in progress', async () => {
+  let finish!: (value: typeof list) => void;
+  updatePrompt.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  typeName('Alpha 2');
+  button('Save').click();
+  await vi.waitFor(() => expect(updatePrompt).toHaveBeenCalledOnce());
+  button('Beta').click();
+  flushSync();
+  expect(dialog()).not.toBeNull();
+  dialog()!.querySelector<HTMLButtonElement>('button')!.click();
+  finish({ ...list, prompts: [{ ...list.prompts[0], name: 'Alpha 2' }, list.prompts[1]] });
+  await vi.waitFor(() => expect(input().value).toBe('Beta'));
+  expect(updatePrompt).toHaveBeenCalledOnce();
 });
 
 it('guards leaving Settings while a style is dirty', () => {
@@ -172,14 +226,19 @@ it('sends only one create request when Save is clicked twice', async () => {
   createPrompt.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   button('New style').click();
   flushSync();
-  const prompt = target.querySelector('textarea')!;
-  prompt.value = 'New text';
-  prompt.dispatchEvent(new Event('input'));
+  const textarea = target.querySelector('textarea')!;
+  textarea.value = 'New text';
+  textarea.dispatchEvent(new Event('input'));
   flushSync();
   const save = button('Save');
   save.click();
   save.click();
   expect(createPrompt).toHaveBeenCalledOnce();
-  finish(list);
-  await vi.waitFor(() => expect(createPrompt).toHaveBeenCalledOnce());
+  finish({
+    ...list,
+    createdId: 'created',
+    prompts: [...list.prompts, prompt('created', 'Created')],
+  });
+  await vi.waitFor(() => expect(input().value).toBe('Created'));
+  expect(createPrompt).toHaveBeenCalledOnce();
 });

@@ -30,6 +30,7 @@
   let error = $state<string | null>(null);
   let saving = $state(false);
   let dialogElement = $state<HTMLDivElement | undefined>();
+  let dialogOpener = $state<HTMLElement | null>(null);
 
   let open = $derived(list?.prompts.find((p) => p.id === openId) ?? null);
   let dirty = $derived(
@@ -47,6 +48,7 @@
     void getCurrentWindow().onCloseRequested((event) => {
       if (!dirty) return;
       event.preventDefault();
+      dialogOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       pending = () => { void getCurrentWindow().destroy(); };
     }).then((removeListener) => {
       if (disposed) removeListener();
@@ -56,7 +58,13 @@
   });
 
   $effect(() => {
-    if (pending || deleting) void tick().then(() => dialogElement?.querySelector('button')?.focus());
+    if (pending || deleting) {
+      void tick().then(() => dialogElement?.querySelector<HTMLElement>('[data-dialog-initial-focus]')?.focus());
+    } else if (dialogOpener) {
+      const opener = dialogOpener;
+      dialogOpener = null;
+      void tick().then(() => { if (opener.isConnected) opener.focus(); });
+    }
   });
 
   async function call(fn: () => Promise<PromptList>): Promise<boolean> {
@@ -77,31 +85,40 @@
     text = p?.text ?? '';
   }
 
-  function guard(action: () => void) {
-    if (dirty) pending = action;
+  function guard(action: () => void, opener = document.activeElement) {
+    if (dirty) {
+      dialogOpener = opener instanceof HTMLElement ? opener : null;
+      pending = action;
+    }
     else action();
   }
 
-  export function requestLeave(action: () => void) {
-    guard(action);
+  export function requestLeave(action: () => void, opener?: HTMLElement) {
+    guard(action, opener);
   }
 
-  async function save(): Promise<boolean> {
-    if (saving) return false;
+  let savePromise: Promise<boolean> | null = null;
+
+  function save(): Promise<boolean> {
+    if (savePromise) return savePromise;
     saving = true;
-    try {
-      if (openId === DRAFT) {
-        if (!(await call(() => createPrompt(name, text)))) return false;
-        edit(list!.createdId);
+    savePromise = (async () => {
+      try {
+        if (openId === DRAFT) {
+          if (!(await call(() => createPrompt(name, text)))) return false;
+          edit(list!.createdId);
+          return true;
+        }
+        const id = openId!;
+        if (!(await call(() => updatePrompt(id, name, text)))) return false;
+        edit(id);
         return true;
+      } finally {
+        saving = false;
+        savePromise = null;
       }
-      const id = openId!;
-      if (!(await call(() => updatePrompt(id, name, text)))) return false;
-      edit(id);
-      return true;
-    } finally {
-      saving = false;
-    }
+    })();
+    return savePromise;
   }
 
   async function duplicate(id: string) {
@@ -115,9 +132,28 @@
 
   async function resolve(choice: 'save' | 'discard' | 'cancel') {
     const action = pending;
+    if (choice === 'cancel') { pending = null; return; }
+    if (choice === 'save' && !(await save())) return;
     pending = null;
-    if (choice === 'cancel' || (choice === 'save' && !(await save()))) return;
     action?.();
+  }
+
+  function dialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      if (pending) void resolve('cancel');
+      else deleting = null;
+    } else if (event.key === 'Tab') {
+      const buttons = [...(dialogElement?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+      const first = buttons[0];
+      const last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
   }
 </script>
 
@@ -130,7 +166,7 @@
       selectedId={list.activeId}
       onSelect={(id) => call(() => setActivePrompt(id))}
     />
-    <button onclick={() => guard(() => edit(DRAFT))}>New style</button>
+    <button onclick={(event) => guard(() => edit(DRAFT), event.currentTarget)}>New style</button>
     {#if openId === DRAFT}
       <NoteStyleEditor bind:name bind:text readonly={false} {dirty} {saving} onSave={save} />
     {/if}
@@ -144,7 +180,7 @@
                 aria-label={`Toggle favourite for ${p.name}`}
                 aria-pressed={p.starred}
                 onclick={() => call(() => setPromptStarred(p.id, !p.starred))}>{p.starred ? '★' : '☆'}</button>
-              <button aria-expanded={openId === p.id} onclick={() => guard(() => edit(openId === p.id ? null : p.id))}>
+              <button aria-expanded={openId === p.id} onclick={(event) => guard(() => edit(openId === p.id ? null : p.id), event.currentTarget)}>
                 {p.name}
               </button>
               {#if p.isDefault}<span>Built-in</span>{/if}
@@ -162,8 +198,12 @@
                   {dirty}
                   {saving}
                   onSave={save}
-                  onDuplicate={() => guard(() => duplicate(p.id))}
-                  onDelete={() => guard(() => { edit(null); deleting = p; })}
+                  onDuplicate={(opener) => guard(() => duplicate(p.id), opener)}
+                  onDelete={(opener) => guard(() => {
+                    dialogOpener = opener.closest('li')?.querySelector<HTMLElement>('button[aria-expanded]') ?? opener;
+                    edit(null);
+                    deleting = p;
+                  }, opener)}
                 />
               {/if}
             </li>
@@ -174,19 +214,19 @@
   {/if}
 
   {#if pending}
-    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Discard changes?" tabindex="-1" onkeydown={(event) => event.key === 'Escape' && resolve('cancel')}>
+    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Discard changes?" tabindex="-1" onkeydown={dialogKeydown}>
       <p>Discard changes?</p>
       <button onclick={() => resolve('save')}>Save</button>
-      <button onclick={() => resolve('discard')}>Discard</button>
-      <button onclick={() => resolve('cancel')}>Cancel</button>
+      <button onclick={() => resolve('discard')} disabled={saving}>Discard</button>
+      <button onclick={() => resolve('cancel')} disabled={saving} data-dialog-initial-focus>Cancel</button>
     </div>
   {/if}
   {#if deleting}
     {@const target = deleting}
-    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Delete style" tabindex="-1" onkeydown={(event) => event.key === 'Escape' && (deleting = null)}>
+    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Delete style" tabindex="-1" onkeydown={dialogKeydown}>
       <p>Delete “{target.name}”? This cannot be undone.</p>
       <button onclick={() => confirmDelete(target.id)}>Delete</button>
-      <button onclick={() => (deleting = null)}>Cancel</button>
+      <button onclick={() => (deleting = null)} data-dialog-initial-focus>Cancel</button>
     </div>
   {/if}
   {#if error}<p role="alert">{error}</p>{/if}

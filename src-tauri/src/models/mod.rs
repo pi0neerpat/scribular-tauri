@@ -16,6 +16,7 @@ use std::{
 };
 
 use serde::Serialize;
+use tauri::async_runtime::Mutex as AsyncMutex;
 use ts_rs::TS;
 
 pub use download::{ensure, model_path, verify_existing, DownloadError};
@@ -88,6 +89,8 @@ pub struct ModelManager {
     client: reqwest::Client,
     /// One guard per model: retries can proceed while a later model downloads.
     running: Vec<AtomicBool>,
+    /// Serializes requests so concurrent callers see an owner's result before retrying.
+    download_locks: Vec<AsyncMutex<()>>,
     pub readiness: Readiness,
     /// The summary model (spec 03 R18); only it downloads with the rest.
     selected_llm: Mutex<String>,
@@ -112,6 +115,7 @@ impl ModelManager {
         Self {
             dir,
             running: specs.iter().map(|_| AtomicBool::new(false)).collect(),
+            download_locks: specs.iter().map(|_| AsyncMutex::new(())).collect(),
             specs,
             client: reqwest::Client::new(),
             readiness: Readiness::default(),
@@ -233,6 +237,7 @@ impl ModelManager {
         i: usize,
         on_progress: &(dyn Fn(ModelProgress) + Send + Sync),
     ) -> Option<bool> {
+        let _download = self.download_locks[i].lock().await;
         let spec = &self.specs[i];
         let running = &self.running[i];
         if running.swap(true, Ordering::AcqRel) {
