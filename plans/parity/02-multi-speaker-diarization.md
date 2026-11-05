@@ -132,7 +132,7 @@ Live diarization (`plans/DIARIZATION_STREAMING.md`); TinyDiarize; tray submenu U
 ## Depends on / interacts with
 - **01-encryption-audio-retention**: 01 encrypts the whole DB (SQLCipher), so new columns are covered automatically; no per-column work. Diarization reads audio through `Store::audio_samples` and must finish before `save_transcript` applies the `keep_audio` deletion (01 R13a).
 - **03-note-styles-model-choice**: regenerate-on-confirm uses the session's prompt and chosen model.
-- **08-app-shell-tray-notifications**: tray "How many speakers?" uses R6's argument; avoid a double "summary complete" notification (initial summary + regenerate).
+- **08-app-shell-tray-notifications**: tray "How many speakers?" uses R6's argument; notifications are deduplicated per session, so a regenerate after an already-notified `Done` does not post a second banner. If the initial completion was suppressed because the window was focused, a later regenerate may notify once.
 - **09-session-management-recovery**: a session killed mid-diarization falls back to `none`; copy and regenerate use the labelled transcript when confirmed, plain otherwise.
 - **06-diagnostics-telemetry**: log speaker count only, never text.
 
