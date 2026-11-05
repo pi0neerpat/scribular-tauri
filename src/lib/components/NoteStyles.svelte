@@ -135,6 +135,9 @@
     if (choice === 'cancel') { pending = null; return; }
     if (choice === 'save' && !(await save())) return;
     pending = null;
+    const opener = dialogOpener;
+    dialogOpener = null;
+    if (opener?.isConnected) opener.focus();
     action?.();
   }
 

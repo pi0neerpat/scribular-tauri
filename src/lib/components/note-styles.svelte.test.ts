@@ -148,6 +148,21 @@ it('traps focus in the discard dialog and restores its opener on close', async (
   await vi.waitFor(() => expect(document.activeElement).toBe(opener));
 });
 
+it('restores focus before leaving Settings unmounts the editor', async () => {
+  typeName('Alpha 2');
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  (app as unknown as { requestLeave: (action: () => void, opener: HTMLElement) => void })
+    .requestLeave(() => {
+      unmount(app);
+      app = mount(NoteStyles, { target });
+    }, opener);
+  flushSync();
+  button('Discard').click();
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+  opener.remove();
+});
+
 it('asks before closing the window with a dirty style', async () => {
   typeName('Alpha 2');
   await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
