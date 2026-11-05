@@ -34,6 +34,12 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let speakerModel = $state<ModelProgress | null>(null);
+  let noteStyles: { requestLeave: (action: () => void) => void } | undefined;
+
+  export function requestLeave(action: () => void) {
+    if (noteStyles) noteStyles.requestLeave(action);
+    else action();
+  }
 
   // The saved app stays selectable while it isn't playing.
   let appNames = $derived.by(() => {
@@ -169,7 +175,7 @@
     </fieldset>
   {/if}
 
-  <NoteStyles />
+  <NoteStyles bind:this={noteStyles} />
   <SummaryModel />
 
   <LicenseSettings />

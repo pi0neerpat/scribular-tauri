@@ -150,6 +150,23 @@ it('keeps the window open when saving before close fails', async () => {
   expect(destroyWindow).not.toHaveBeenCalled();
 });
 
+it('guards leaving Settings while a style is dirty', () => {
+  typeName('Alpha 2');
+  const leave = vi.fn();
+  (app as unknown as { requestLeave: (action: () => void) => void }).requestLeave(leave);
+  flushSync();
+  expect(dialog()?.textContent).toContain('Discard changes?');
+  expect(leave).not.toHaveBeenCalled();
+  button('Cancel').click();
+  flushSync();
+  expect(leave).not.toHaveBeenCalled();
+
+  (app as unknown as { requestLeave: (action: () => void) => void }).requestLeave(leave);
+  flushSync();
+  button('Discard').click();
+  expect(leave).toHaveBeenCalledOnce();
+});
+
 it('sends only one create request when Save is clicked twice', async () => {
   let finish!: (value: typeof list) => void;
   createPrompt.mockReturnValue(new Promise((resolve) => { finish = resolve; }));

@@ -82,6 +82,10 @@
     else action();
   }
 
+  export function requestLeave(action: () => void) {
+    guard(action);
+  }
+
   async function save(): Promise<boolean> {
     if (saving) return false;
     saving = true;
