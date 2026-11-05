@@ -143,9 +143,10 @@ it('keeps the window open when saving before close fails', async () => {
   await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
   closeHandler!({ preventDefault: vi.fn() });
   flushSync();
-  button('Save').click();
+  dialog()!.querySelector<HTMLButtonElement>('button')!.click();
   await vi.waitFor(() => expect(target.textContent).toContain('save failed'));
-  expect(dialog()).not.toBeNull();
+  expect(dialog()).toBeNull();
+  expect(input().value).toBe('Alpha 2');
   expect(destroyWindow).not.toHaveBeenCalled();
 });
 
