@@ -11,9 +11,15 @@ const getPromptList = vi.fn();
 const updatePrompt = vi.fn();
 const createPrompt = vi.fn();
 const deletePrompt = vi.fn();
+const onCloseRequested = vi.fn();
+const destroyWindow = vi.fn();
+let closeHandler: ((event: { preventDefault: () => void }) => void) | undefined;
 vi.mock('../api', () => ({
   getPromptList, updatePrompt, createPrompt, deletePrompt, duplicatePrompt: vi.fn(),
   setActivePrompt: vi.fn(), setPromptStarred: vi.fn(),
+}));
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({ onCloseRequested, destroy: destroyWindow }),
 }));
 const { default: NoteStyles } = await import('./NoteStyles.svelte');
 
@@ -26,6 +32,7 @@ const input = () => target.querySelector<HTMLInputElement>('li input')!;
 const dialog = () => target.querySelector('[role="dialog"]');
 
 beforeEach(async () => {
+  onCloseRequested.mockImplementation((handler) => { closeHandler = handler; return Promise.resolve(vi.fn()); });
   getPromptList.mockResolvedValue(list);
   target = document.createElement('div');
   document.body.append(target);
@@ -100,6 +107,46 @@ it('focuses the discard dialog and lets Escape cancel it', async () => {
   flushSync();
   expect(dialog()).toBeNull();
   expect(input().value).toBe('Alpha 2');
+});
+
+it('asks before closing the window with a dirty style', async () => {
+  typeName('Alpha 2');
+  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
+  const event = { preventDefault: vi.fn() };
+  closeHandler!(event);
+  flushSync();
+  expect(event.preventDefault).toHaveBeenCalledOnce();
+  expect(dialog()?.textContent).toContain('Discard changes?');
+  button('Cancel').click();
+  flushSync();
+  expect(destroyWindow).not.toHaveBeenCalled();
+  closeHandler!(event);
+  flushSync();
+  button('Discard').click();
+  expect(destroyWindow).toHaveBeenCalledOnce();
+});
+
+it('saves a dirty style before closing the window', async () => {
+  updatePrompt.mockResolvedValue(list);
+  typeName('Alpha 2');
+  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
+  closeHandler!({ preventDefault: vi.fn() });
+  flushSync();
+  dialog()!.querySelector<HTMLButtonElement>('button')!.click();
+  await vi.waitFor(() => expect(destroyWindow).toHaveBeenCalledOnce());
+  expect(updatePrompt).toHaveBeenCalledWith('a', 'Alpha 2', 'Alpha text');
+});
+
+it('keeps the window open when saving before close fails', async () => {
+  updatePrompt.mockRejectedValue(new Error('save failed'));
+  typeName('Alpha 2');
+  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
+  closeHandler!({ preventDefault: vi.fn() });
+  flushSync();
+  button('Save').click();
+  await vi.waitFor(() => expect(target.textContent).toContain('save failed'));
+  expect(dialog()).not.toBeNull();
+  expect(destroyWindow).not.toHaveBeenCalled();
 });
 
 it('sends only one create request when Save is clicked twice', async () => {
