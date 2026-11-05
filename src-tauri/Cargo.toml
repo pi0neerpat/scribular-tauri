@@ -39,6 +39,8 @@ whisper-rs = { version = "=0.16.0", features = ["metal"] }
 whisper-rs-sys = "=0.15.0"
 # plans/DEPENDENCY_REVIEW_M5A.md: microphone capture only.
 cpal = "=0.18.2"
+sherpa-onnx = { version = "=1.13.8", default-features = false, features = ["shared"] }
+sherpa-onnx-sys = { version = "=1.13.8", default-features = false, features = ["shared"] }
 
 # plans/DEPENDENCY_REVIEW_ENCRYPTION.md: Keychain storage for the database key.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -14,6 +14,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub use chunk_writer::CHUNK_SAMPLES;
 pub use mic::{CpalMicrophone, Microphone};
 pub use system::{AudioApp, AudioCapCli, SystemAudio};
 

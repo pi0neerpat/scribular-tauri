@@ -9,4 +9,4 @@ fileName: string, url: string, size: number,
 /**
  * Lowercase hex.
  */
-sha256: string, license: string, licenseUrl: string, };
+sha256: string, license: string, licenseUrl: string, optional: boolean, };

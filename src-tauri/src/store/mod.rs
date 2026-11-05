@@ -18,8 +18,9 @@ use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Pla
 
 pub use prompts::Prompt;
 pub use sessions::{
-    now_ms, AudioSource, InputMode, KeptAudio, NewSession, Session, SessionListItem, SessionPatch,
-    SessionStatus, Timings, AUDIO_RETENTION_DAYS, AUDIO_RETENTION_MS,
+    now_ms, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, Session,
+    SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
+    AUDIO_RETENTION_MS,
 };
 pub use settings::{RecordingSettings, ACTIVE_PROMPT_ID};
 

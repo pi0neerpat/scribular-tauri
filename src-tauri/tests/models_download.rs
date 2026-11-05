@@ -141,6 +141,7 @@ fn spec(server: &Server, id: &str, kind: ModelKind, data: &[u8]) -> ModelSpec {
         sha256: sha256_hex(data),
         license: "test".into(),
         license_url: "https://example.invalid".into(),
+        optional: false,
     }
 }
 

@@ -32,7 +32,9 @@
         "target/release/libggml.0.dylib",
         "target/release/libggml-base.0.dylib",
         "target/release/libggml-cpu.0.dylib",
-        "target/release/libggml-metal.0.dylib"
+        "target/release/libggml-metal.0.dylib",
+        "target/release/libsherpa-onnx-c-api.dylib",
+        "target/release/libonnxruntime.dylib"
       ]
     },
     "active": true,

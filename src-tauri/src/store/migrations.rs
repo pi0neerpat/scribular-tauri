@@ -13,6 +13,7 @@ const MIGRATIONS: &[Migration] = &[
     v2_summary_queue,
     v3_queue_restore_status,
     v4_audio_kept,
+    v5_diarization,
 ];
 
 fn v2_summary_queue(tx: &Transaction) -> Result<()> {
@@ -32,6 +33,16 @@ fn v4_audio_kept(tx: &Transaction) -> Result<()> {
     tx.execute_batch(
         "ALTER TABLE sessions ADD COLUMN audio_kept INTEGER NOT NULL DEFAULT 0;
          CREATE INDEX sessions_audio_kept ON sessions(audio_kept, created_at) WHERE audio_kept = 1;",
+    )?;
+    Ok(())
+}
+
+fn v5_diarization(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE sessions ADD COLUMN plain_transcript TEXT;
+         ALTER TABLE sessions ADD COLUMN raw_transcript TEXT;
+         ALTER TABLE sessions ADD COLUMN speaker_map TEXT;
+         ALTER TABLE sessions ADD COLUMN diarization_state TEXT NOT NULL DEFAULT 'none';",
     )?;
     Ok(())
 }
