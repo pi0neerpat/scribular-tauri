@@ -8,8 +8,8 @@ use std::{
 
 use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{
-    AudioSource, InputMode, KeptAudio, NewSession, RecordingSettings, SessionPatch, SessionStatus,
-    Store, Timings, ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
+    AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, RecordingSettings,
+    SessionPatch, SessionStatus, Store, Timings, ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
 };
 use scribular_lib::text::Segment;
 
@@ -84,7 +84,56 @@ fn sessions_persist_across_reopen() {
     assert_eq!(s.status, SessionStatus::Done);
     assert_eq!(s.input_mode, InputMode::MicAndSystem);
     assert_eq!(s.prompt_id.as_deref(), Some("default-therapy-dora"));
+    assert_eq!(s.diarization_state, DiarizationState::None);
     assert_eq!(store.list_sessions().unwrap().len(), 1);
+}
+
+#[test]
+fn diarization_confirm_skip_rename_and_summary_substitution_persist() {
+    let db = TempDb::new();
+    let store = db.open();
+    let session = store.create_session(&new_session("Speaker test")).unwrap();
+    let defaults = std::collections::BTreeMap::from([
+        ("SPEAKER_0".to_string(), "Speaker 1".to_string()),
+        ("SPEAKER_1".to_string(), "Speaker 2".to_string()),
+    ]);
+    store
+        .save_diarization(
+            &session.id,
+            "plain",
+            "SPEAKER_0: hello\nSPEAKER_1: hi",
+            &defaults,
+            1000,
+        )
+        .unwrap();
+    let skipped = store.skip_diarization(&session.id).unwrap();
+    assert_eq!(skipped, "plain");
+    let mut names = defaults.clone();
+    names.insert("SPEAKER_0".into(), "Mom".into());
+    names.insert("SPEAKER_1".into(), "Maria".into());
+    let labeled = store.confirm_speaker_labels(&session.id, &names).unwrap();
+    assert_eq!(labeled, "Mom: hello\nMaria: hi");
+    store
+        .update_session(
+            &session.id,
+            &SessionPatch {
+                summary: Some("Mom spoke a Moment ago".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut renamed = names.clone();
+    renamed.insert("SPEAKER_0".into(), "Therapist".into());
+    let labeled = store.update_speaker_map(&session.id, &renamed).unwrap();
+    assert_eq!(labeled, "Therapist: hello\nMaria: hi");
+    let session = store.get_session(&session.id).unwrap().unwrap();
+    assert_eq!(session.diarization_state, DiarizationState::Confirmed);
+    assert_eq!(session.summary, "Therapist spoke a Moment ago");
+    assert_eq!(session.plain_transcript.as_deref(), Some("plain"));
+    assert_eq!(
+        session.raw_transcript.as_deref(),
+        Some("SPEAKER_0: hello\nSPEAKER_1: hi")
+    );
 }
 
 #[test]
@@ -478,12 +527,14 @@ fn recording_settings_round_trip_and_clear() {
     assert_eq!(seeded.target_app, None);
     assert!(seeded.prompt_id.is_some());
     assert!(!seeded.keep_audio, "audio is off by default (R13)");
+    assert!(!seeded.multi_speaker);
 
     let chosen = RecordingSettings {
         input_mode: InputMode::System,
         target_app: Some("Zoom".into()),
         prompt_id: Some("default-therapy-dora".into()),
         keep_audio: true,
+        multi_speaker: true,
     };
     store.set_recording_settings(&chosen).unwrap();
     drop(store);
@@ -495,6 +546,7 @@ fn recording_settings_round_trip_and_clear() {
         target_app: None,
         prompt_id: None,
         keep_audio: false,
+        multi_speaker: false,
     };
     store.set_recording_settings(&cleared).unwrap();
     assert_eq!(store.recording_settings().unwrap(), cleared);
@@ -510,12 +562,14 @@ fn recording_settings_are_read_whole_while_saving() {
         target_app: None,
         prompt_id: Some("default-therapy-dora".into()),
         keep_audio: false,
+        multi_speaker: false,
     };
     let b = RecordingSettings {
         input_mode: InputMode::System,
         target_app: Some("Zoom".into()),
         prompt_id: None,
         keep_audio: true,
+        multi_speaker: true,
     };
     store.set_recording_settings(&a).unwrap();
     let saving = AtomicBool::new(true);

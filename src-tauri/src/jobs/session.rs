@@ -18,6 +18,7 @@ use std::{
 use super::summarize::ms;
 use super::{JobEvents, JobQueue, SessionProgress, SessionSegments};
 use crate::audio::{chunk_writer, AudioError, Capture, Microphone, SystemAudio};
+use crate::diarize::SpeakerEmbedderLoader;
 use crate::store::{
     self, AudioSource, InputMode, NewSession, Session, SessionStatus, Store, StoreError, Timings,
     ACTIVE_PROMPT_ID,
@@ -110,6 +111,7 @@ impl Source {
 
 struct Recording {
     session_id: String,
+    multi_speaker: bool,
     sources: Vec<Source>,
     /// Stops the streamers of a recording that is abandoned or, once
     /// stopped, cancelled.
@@ -158,6 +160,7 @@ struct Inner {
     store: Arc<Store>,
     jobs: Arc<JobQueue>,
     stt: Arc<dyn TranscriberLoader>,
+    speakers: Arc<dyn SpeakerEmbedderLoader>,
     events: Arc<dyn JobEvents>,
     mic: Arc<dyn Microphone>,
     system: Arc<dyn SystemAudio>,
@@ -169,6 +172,14 @@ struct Inner {
     model: Mutex<Option<Arc<dyn Transcriber>>>,
     /// Drop whisper once a transcript is done, before the summary loads.
     unload_whisper: AtomicBool,
+}
+
+struct UnavailableSpeakerLoader;
+
+impl SpeakerEmbedderLoader for UnavailableSpeakerLoader {
+    fn load(&self) -> Result<Box<dyn crate::diarize::SpeakerEmbedder>, String> {
+        Err("speaker model isn't ready".into())
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -189,11 +200,32 @@ impl Recorder {
         mic: Arc<dyn Microphone>,
         system: Arc<dyn SystemAudio>,
     ) -> Self {
+        Self::new_with_speakers(
+            store,
+            jobs,
+            stt,
+            events,
+            mic,
+            system,
+            Arc::new(UnavailableSpeakerLoader),
+        )
+    }
+
+    pub fn new_with_speakers(
+        store: Arc<Store>,
+        jobs: Arc<JobQueue>,
+        stt: Arc<dyn TranscriberLoader>,
+        events: Arc<dyn JobEvents>,
+        mic: Arc<dyn Microphone>,
+        system: Arc<dyn SystemAudio>,
+        speakers: Arc<dyn SpeakerEmbedderLoader>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 store,
                 jobs,
                 stt,
+                speakers,
                 events,
                 mic,
                 system,
@@ -241,6 +273,7 @@ impl Recorder {
             return Err(RecordError::AlreadyRecording);
         }
         let app = app.filter(|a| !a.is_empty());
+        let multi_speaker = inner.store.recording_settings()?.multi_speaker;
         if sources(mode).contains(&AudioSource::System) && app.is_none() {
             return Err(RecordError::NoTargetApp);
         }
@@ -282,6 +315,7 @@ impl Recorder {
         }
         *recording = Some(Recording {
             session_id: session.id.clone(),
+            multi_speaker,
             sources: started,
             cancel,
             _watched: watched,
@@ -293,11 +327,16 @@ impl Recorder {
     /// Stops the recording and transcribes it in the background. Returns
     /// the session id; progress arrives as [`SessionProgress`] events.
     pub fn stop(&self) -> Result<String, RecordError> {
+        self.stop_with_speakers(None)
+    }
+
+    pub fn stop_with_speakers(&self, num_speakers: Option<u8>) -> Result<String, RecordError> {
         let inner = &self.inner;
         let recording = lock(&inner.recording)
             .take()
             .ok_or(RecordError::NotRecording)?;
         let id = recording.session_id;
+        let diarize = recording.multi_speaker;
         let mut samples = 0;
         let mut failure = None;
         let mut streamers = Vec::new();
@@ -338,7 +377,7 @@ impl Recorder {
             std::thread::Builder::new()
                 .name("finalize".into())
                 .spawn(move || {
-                    inner.finalize(&id, duration_ms, streamers, &cancel);
+                    inner.finalize(&id, duration_ms, streamers, &cancel, diarize, num_speakers);
                     lock(&inner.state).finalizing.remove(&id);
                 })
         };
@@ -588,7 +627,15 @@ impl Inner {
         });
     }
 
-    fn finalize(&self, id: &str, duration_ms: u32, streamers: Vec<Streamer>, cancel: &AtomicBool) {
+    fn finalize(
+        &self,
+        id: &str,
+        duration_ms: u32,
+        streamers: Vec<Streamer>,
+        cancel: &AtomicBool,
+        diarize: bool,
+        num_speakers: Option<u8>,
+    ) {
         let started = Instant::now();
         // The summary model loads while the tail transcribes (M5b).
         self.jobs.preload();
@@ -604,7 +651,61 @@ impl Inner {
         if lock(&self.state).shutdown {
             return;
         }
-        if let Err(e) = self.store.save_transcript(id, &transcript, duration_ms) {
+        let session = match self.session(id) {
+            Ok(s) => s,
+            Err(e) => return self.end(id, SessionStatus::Failed, &e),
+        };
+        let diarization = if diarize {
+            self.emit(id, SessionStatus::Finalizing, "Identifying speakers…");
+            let segments = sources(session.input_mode)
+                .iter()
+                .map(|&source| self.store.segments(id, source).map(|s| (source, s)))
+                .collect::<Result<Vec<_>, _>>();
+            let audio = sources(session.input_mode)
+                .iter()
+                .map(|&source| self.store.audio_samples(id, source).map(|s| (source, s)))
+                .collect::<Result<Vec<_>, _>>();
+            match segments.and_then(|segments| audio.map(|audio| (segments, audio))) {
+                Ok((segments, audio)) => match crate::diarize::diarize(
+                    session.input_mode,
+                    &segments,
+                    &audio,
+                    num_speakers,
+                    &*self.speakers,
+                    cancel,
+                ) {
+                    Ok(value) => Some(value),
+                    Err(e) => {
+                        if !cancel.load(Ordering::Relaxed) {
+                            eprintln!("record {id}: diarization unavailable: {e}");
+                            self.emit(
+                                id,
+                                SessionStatus::Finalizing,
+                                "Speaker labels unavailable; continuing with the transcript.",
+                            );
+                        }
+                        None
+                    }
+                },
+                Err(e) => {
+                    eprintln!("record {id}: diarization data unavailable: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if diarize && !partial && cancel.load(Ordering::Relaxed) {
+            return self.end(id, SessionStatus::Cancelled, "");
+        }
+        let saved = match diarization {
+            Some((raw, map)) => {
+                self.store
+                    .save_diarization(id, &transcript, &raw, &map, duration_ms)
+            }
+            None => self.store.save_transcript(id, &transcript, duration_ms),
+        };
+        if let Err(e) = saved {
             return self.end(id, SessionStatus::Failed, &e.to_string());
         }
         let timings = Timings {

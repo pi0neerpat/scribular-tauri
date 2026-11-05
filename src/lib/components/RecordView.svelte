@@ -49,6 +49,7 @@
   // Two sources show speaker labels.
   let labeled = $state(false);
   let now = $state(Date.now());
+  let askSpeakerCount = $state(false);
 
   let recording = $derived(status === 'recording');
   let working = $derived(isWorking(status));
@@ -122,9 +123,23 @@
   }
 
   async function stop() {
+    try {
+      if ((await getRecordingSettings()).multiSpeaker) {
+        askSpeakerCount = true;
+        return;
+      }
+    } catch (e) {
+      error = String(e);
+      return;
+    }
+    await stopWithCount(null);
+  }
+
+  async function stopWithCount(numSpeakers: number | null) {
+    askSpeakerCount = false;
     busy = true;
     try {
-      await stopRecording();
+      await stopRecording(numSpeakers);
       // Its "Transcribing…" event may already have moved it on.
       if (status === 'recording') status = 'finalizing';
     } catch (e) {
@@ -155,6 +170,16 @@
     <button onclick={cancel}>Cancel</button>
   {:else}
     <button onclick={start} disabled={busy || !speechReady}>Start recording</button>
+  {/if}
+
+  {#if askSpeakerCount}
+    <div role="dialog" aria-modal="true" aria-labelledby="speaker-count-title">
+      <h3 id="speaker-count-title">How many people spoke?</h3>
+      <button onclick={() => stopWithCount(2)}>2 people</button>
+      <button onclick={() => stopWithCount(3)}>3 people</button>
+      <button onclick={() => stopWithCount(null)}>4+ (beta)</button>
+      <button onclick={() => (askSpeakerCount = false)}>Keep recording</button>
+    </div>
   {/if}
 
   {#if sessionId && (recording || working || status === 'failed')}

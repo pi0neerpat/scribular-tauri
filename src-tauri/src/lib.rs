@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod commands;
+pub mod diarize;
 pub mod engines;
 pub mod jobs;
 pub mod llm;
@@ -71,11 +72,15 @@ pub fn run() {
             commands::list_models,
             commands::models_status,
             commands::download_models,
+            commands::download_model,
             commands::regenerate_summary,
             commands::cancel_job,
             commands::transcribe_file,
             commands::get_recording_settings,
             commands::set_recording_settings,
+            commands::confirm_speaker_labels,
+            commands::skip_diarization,
+            commands::update_speaker_map,
             commands::list_audio_apps,
             commands::start_recording,
             commands::stop_recording,
@@ -119,6 +124,8 @@ pub fn run() {
             let stt = transcriber_loader(&models);
             app.manage(Arc::clone(&stt));
             let events = Arc::new(TauriJobEvents(app.handle().clone()));
+            let speakers: Arc<dyn diarize::SpeakerEmbedderLoader> =
+                Arc::from(diarize::default_loader(&models));
             let jobs = Arc::new(JobQueue::new(
                 Arc::clone(&store),
                 summarizer_loader(&models),
@@ -127,13 +134,14 @@ pub fn run() {
             app.manage(Arc::clone(&jobs));
             // Audio capture stays real under `fake-engines`; only the models
             // are faked.
-            app.manage(Arc::new(Recorder::new(
+            app.manage(Arc::new(Recorder::new_with_speakers(
                 store,
                 jobs,
                 stt,
                 events,
                 Arc::new(CpalMicrophone),
                 Arc::new(AudioCapCli::bundled()?),
+                speakers,
             )));
             std::thread::spawn(move || models.scan());
 

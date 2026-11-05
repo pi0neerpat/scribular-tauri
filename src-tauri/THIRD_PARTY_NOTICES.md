@@ -32,3 +32,11 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+## sherpa-onnx and ONNX Runtime
+
+The speaker embedding runtime uses `sherpa-onnx` 1.13.8 (Apache-2.0) and ONNX Runtime (MIT), distributed by the upstream sherpa-onnx release. The speaker embedding model is the CAM++ model from 3D-Speaker/ModelScope (Apache License 2.0).
+
+- sherpa-onnx license: https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/LICENSE
+- ONNX Runtime license: https://github.com/microsoft/onnxruntime/blob/v1.28.2/LICENSE
+- CAM++ model card and license: https://www.modelscope.cn/models/iic/speech_campplus_sv_zh-cn_16k-common

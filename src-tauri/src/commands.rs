@@ -15,7 +15,7 @@ use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
-use crate::models::{ModelManager, ModelProgress, ModelSpec};
+use crate::models::{ModelManager, ModelProgress, ModelSpec, ModelState, SPEAKER_CAMPPLUS};
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
     now_ms, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
@@ -149,6 +149,26 @@ pub fn download_models(app: AppHandle, models: State<Arc<ModelManager>>) {
     });
 }
 
+#[tauri::command]
+pub fn download_model(
+    app: AppHandle,
+    models: State<Arc<ModelManager>>,
+    model_id: String,
+) -> Result<(), String> {
+    if models.path(&model_id).is_none() {
+        return Err(format!("unknown model {model_id}"));
+    }
+    let models = Arc::clone(&models);
+    tauri::async_runtime::spawn(async move {
+        models
+            .ensure_one(&model_id, &|p| {
+                let _ = app.emit(MODELS_PROGRESS_EVENT, p);
+            })
+            .await
+    });
+    Ok(())
+}
+
 /// Queues a fresh summary; progress arrives on [`SESSION_PROGRESS_EVENT`].
 #[tauri::command]
 pub fn regenerate_summary(
@@ -175,10 +195,57 @@ pub fn get_recording_settings(store: State<Arc<Store>>) -> Result<RecordingSetti
 #[tauri::command]
 pub fn set_recording_settings(
     store: State<Arc<Store>>,
+    models: State<Arc<ModelManager>>,
     settings: RecordingSettings,
 ) -> Result<(), String> {
+    if settings.multi_speaker && models.readiness.get(SPEAKER_CAMPPLUS) != ModelState::Ready {
+        return Err("download the speaker model before enabling multi-speaker".into());
+    }
     store
         .set_recording_settings(&settings)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn confirm_speaker_labels(
+    store: State<Arc<Store>>,
+    jobs: State<Arc<JobQueue>>,
+    id: String,
+    speaker_map: std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
+    let current = store
+        .get_session(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("session {id} not found"))?;
+    let regenerate = current.speaker_map.as_ref() != Some(&speaker_map);
+    let transcript = store
+        .confirm_speaker_labels(&id, &speaker_map)
+        .map_err(|e| e.to_string())?;
+    if regenerate {
+        let prompt = current
+            .prompt_id
+            .or(store
+                .get_setting(crate::store::ACTIVE_PROMPT_ID)
+                .map_err(|e| e.to_string())?)
+            .ok_or("no summary prompt is selected")?;
+        jobs.regenerate(&id, &prompt).map_err(|e| e.to_string())?;
+    }
+    Ok(transcript)
+}
+
+#[tauri::command]
+pub fn skip_diarization(store: State<Arc<Store>>, id: String) -> Result<String, String> {
+    store.skip_diarization(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_speaker_map(
+    store: State<Arc<Store>>,
+    id: String,
+    speaker_map: std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
+    store
+        .update_speaker_map(&id, &speaker_map)
         .map_err(|e| e.to_string())
 }
 
@@ -309,11 +376,21 @@ pub async fn start_recording(
 
 /// Stops recording and starts transcription; returns the session id.
 #[tauri::command]
-pub async fn stop_recording(recorder: State<'_, Arc<Recorder>>) -> Result<String, String> {
+pub async fn stop_recording(
+    recorder: State<'_, Arc<Recorder>>,
+    num_speakers: Option<u8>,
+) -> Result<String, String> {
+    if !matches!(num_speakers, None | Some(2 | 3)) {
+        return Err("speaker count must be 2, 3, or 4+".into());
+    }
     let recorder = Arc::clone(&recorder);
-    tauri::async_runtime::spawn_blocking(move || recorder.stop().map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        recorder
+            .stop_with_speakers(num_speakers)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Opens the System Settings pane that grants `pane`'s permission.

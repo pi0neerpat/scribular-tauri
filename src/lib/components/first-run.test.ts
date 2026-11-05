@@ -12,6 +12,7 @@ const session = {
   id: 'session-1', title: 'Test', createdAt: 0, inputMode: 'mic' as const,
   status: 'awaitingModel' as const, error: null, promptId: null, modelId: null,
   transcript: 'A saved transcript', summary: '', durationMs: 1000, timings: null,
+  plainTranscript: null, rawTranscript: null, speakerMap: null, diarizationState: 'none' as const,
   hasAudio: false, audioExpiresAt: null,
 };
 

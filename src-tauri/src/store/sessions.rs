@@ -1,7 +1,10 @@
 //! Sessions, their transcript segments, and their raw audio: kept until the
 //! transcript is saved, or for 7 days when the user keeps audio (parity spec 01).
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::BTreeMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -132,6 +135,10 @@ pub struct Session {
     pub prompt_id: Option<String>,
     pub model_id: Option<String>,
     pub transcript: String,
+    pub plain_transcript: Option<String>,
+    pub raw_transcript: Option<String>,
+    pub speaker_map: Option<BTreeMap<String, String>>,
+    pub diarization_state: DiarizationState,
     pub summary: String,
     pub duration_ms: Option<u32>,
     pub timings: Option<Timings>,
@@ -140,6 +147,35 @@ pub struct Session {
     /// When the sweep deletes the kept audio, in ms since the Unix epoch.
     #[ts(type = "number | null")]
     pub audio_expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum DiarizationState {
+    None,
+    Pending,
+    Confirmed,
+    Skipped,
+}
+
+impl DiarizationState {
+    fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "none" => Self::None,
+            "pending" => Self::Pending,
+            "confirmed" => Self::Confirmed,
+            "skipped" => Self::Skipped,
+            _ => return None,
+        })
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Pending => "pending",
+            Self::Confirmed => "confirmed",
+            Self::Skipped => "skipped",
+        }
+    }
 }
 
 /// User edits from the session view. Absent fields are left unchanged.
@@ -181,7 +217,8 @@ const HAS_AUDIO: &str = "(audio_kept = 1 AND EXISTS \
                          (SELECT 1 FROM audio_chunks a WHERE a.session_id = sessions.id))";
 
 const COLUMNS: &str = "id, title, created_at, input_mode, status, error, prompt_id, model_id, \
-                       transcript, summary, duration_ms, timings";
+                       transcript, summary, duration_ms, timings, plain_transcript, raw_transcript, \
+                       speaker_map, diarization_state";
 
 /// What [`Store::kept_audio`] found for a session.
 #[derive(Debug, PartialEq)]
@@ -209,7 +246,9 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
     let mode: String = row.get(3)?;
     let timings: Option<String> = row.get(11)?;
     let created_at: i64 = row.get(2)?;
-    let has_audio: bool = row.get(12)?;
+    let has_audio: bool = row.get(16)?;
+    let speaker_map: Option<String> = row.get(14)?;
+    let diarization_state: String = row.get(15)?;
     Ok(Session {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -220,6 +259,16 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
         prompt_id: row.get(6)?,
         model_id: row.get(7)?,
         transcript: row.get(8)?,
+        plain_transcript: row.get(12)?,
+        raw_transcript: row.get(13)?,
+        speaker_map: speaker_map
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, e.into())
+            })?,
+        diarization_state: DiarizationState::parse(&diarization_state)
+            .ok_or_else(|| bad_column(15, diarization_state))?,
         summary: row.get(9)?,
         duration_ms: row.get(10)?,
         timings: timings
@@ -533,14 +582,97 @@ impl Store {
             if changed == 0 {
                 return Err(session_not_found(id));
             }
-            if super::settings::select(&tx, super::settings::KEEP_AUDIO)?.as_deref() == Some("1") {
-                tx.execute("UPDATE sessions SET audio_kept = 1 WHERE id = ?1", [id])?;
-            } else {
-                tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
-            }
+            retain_or_delete_audio(&tx, id)?;
             tx.commit()?;
             Ok(())
         })
+    }
+
+    pub fn save_diarization(
+        &self,
+        id: &str,
+        plain: &str,
+        raw: &str,
+        map: &BTreeMap<String, String>,
+        duration_ms: u32,
+    ) -> Result<()> {
+        let map = serde_json::to_string(map)?;
+        self.with(|c| {
+            let tx = c.transaction()?;
+            let changed = tx.execute(
+                "UPDATE sessions SET transcript = ?2, plain_transcript = ?2, raw_transcript = ?3, speaker_map = ?4, diarization_state = 'pending', duration_ms = ?5 WHERE id = ?1",
+                params![id, plain, raw, map, duration_ms],
+            )?;
+            if changed == 0 { return Err(session_not_found(id)); }
+            retain_or_delete_audio(&tx, id)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    pub fn update_diarization(
+        &self,
+        id: &str,
+        transcript: &str,
+        map: &BTreeMap<String, String>,
+        state: DiarizationState,
+        summary: Option<&str>,
+    ) -> Result<()> {
+        let map = serde_json::to_string(map)?;
+        let changed = self.with(|c| Ok(c.execute(
+            "UPDATE sessions SET transcript = ?2, speaker_map = ?3, diarization_state = ?4, summary = COALESCE(?5, summary) WHERE id = ?1",
+            params![id, transcript, map, state.as_str(), summary],
+        )?))?;
+        if changed == 0 {
+            return Err(session_not_found(id));
+        }
+        Ok(())
+    }
+
+    pub fn confirm_speaker_labels(
+        &self,
+        id: &str,
+        map: &BTreeMap<String, String>,
+    ) -> Result<String> {
+        let session = self.get_session(id)?.ok_or_else(|| session_not_found(id))?;
+        let raw = session
+            .raw_transcript
+            .as_deref()
+            .ok_or_else(|| session_not_found(id))?;
+        let transcript = crate::text::apply_speaker_map(raw, map);
+        self.update_diarization(id, &transcript, map, DiarizationState::Confirmed, None)?;
+        Ok(transcript)
+    }
+
+    pub fn skip_diarization(&self, id: &str) -> Result<String> {
+        let session = self.get_session(id)?.ok_or_else(|| session_not_found(id))?;
+        let plain = session
+            .plain_transcript
+            .as_deref()
+            .ok_or_else(|| session_not_found(id))?;
+        let transcript = plain.to_string();
+        let map = session.speaker_map.unwrap_or_default();
+        self.update_diarization(id, &transcript, &map, DiarizationState::Skipped, None)?;
+        Ok(transcript)
+    }
+
+    pub fn update_speaker_map(&self, id: &str, map: &BTreeMap<String, String>) -> Result<String> {
+        let session = self.get_session(id)?.ok_or_else(|| session_not_found(id))?;
+        let raw = session
+            .raw_transcript
+            .as_deref()
+            .ok_or_else(|| session_not_found(id))?;
+        let old_map = session.speaker_map.unwrap_or_default();
+        let transcript = crate::text::apply_speaker_map(raw, map);
+        let summary = crate::text::substitute_speaker_names(&session.summary, &old_map, map);
+        self.update_diarization(
+            id,
+            &transcript,
+            map,
+            session.diarization_state,
+            Some(&summary),
+        )?;
+        Ok(transcript)
     }
 
     /// R16/R17: deletes the audio of every session that started more than
@@ -698,4 +830,13 @@ impl Store {
             Ok(resumed + interrupted)
         })
     }
+}
+
+fn retain_or_delete_audio(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
+    if super::settings::select(tx, super::settings::KEEP_AUDIO)?.as_deref() == Some("1") {
+        tx.execute("UPDATE sessions SET audio_kept = 1 WHERE id = ?1", [id])?;
+    } else {
+        tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
+    }
+    Ok(())
 }

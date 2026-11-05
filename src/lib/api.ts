@@ -21,6 +21,8 @@ import type { SessionSegments } from './types/SessionSegments';
 import type { SummaryDelta } from './types/SummaryDelta';
 import type { TranscriptSegment } from './types/TranscriptSegment';
 
+type SpeakerMap = Record<string, string>;
+
 export function appVersion(): Promise<AppVersion> {
   return invoke<AppVersion>('app_version');
 }
@@ -93,6 +95,22 @@ export function downloadModels(): Promise<void> {
   return invoke<void>('download_models');
 }
 
+export function downloadModel(modelId: string): Promise<void> {
+  return invoke<void>('download_model', { modelId });
+}
+
+export function confirmSpeakerLabels(id: string, speakerMap: SpeakerMap): Promise<string> {
+  return invoke<string>('confirm_speaker_labels', { id, speakerMap });
+}
+
+export function skipDiarization(id: string): Promise<string> {
+  return invoke<string>('skip_diarization', { id });
+}
+
+export function updateSpeakerMap(id: string, speakerMap: SpeakerMap): Promise<string> {
+  return invoke<string>('update_speaker_map', { id, speakerMap });
+}
+
 export function onModelsProgress(handler: (progress: ModelProgress) => void): Promise<UnlistenFn> {
   return listen<ModelProgress>('models://progress', (event) => handler(event.payload));
 }
@@ -139,8 +157,8 @@ export function startRecording(
 }
 
 /** Stops recording and starts transcription; resolves to the session id. */
-export function stopRecording(): Promise<string> {
-  return invoke<string>('stop_recording');
+export function stopRecording(numSpeakers: number | null = null): Promise<string> {
+  return invoke<string>('stop_recording', { numSpeakers });
 }
 
 /** The privacy pane a "permission denied" error points to, if it is one. */

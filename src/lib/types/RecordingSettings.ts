@@ -12,4 +12,4 @@ targetApp: string | null, promptId: string | null,
 /**
  * Keep the audio (encrypted, 7 days) after the transcript is saved.
  */
-keepAudio: boolean, };
+keepAudio: boolean, multiSpeaker: boolean, };

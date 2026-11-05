@@ -145,10 +145,14 @@ fn plaintext_fixture(dir: &TempDir) -> String {
         KEY.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ))
     .unwrap();
-    // v4 only adds `audio_kept` and its index; undo both to get the v3 schema.
+    // Undo the v4 and v5 additions to make a genuine v3 plaintext database.
     conn.execute_batch(
         "DROP INDEX sessions_audio_kept;
          ALTER TABLE sessions DROP COLUMN audio_kept;
+         ALTER TABLE sessions DROP COLUMN diarization_state;
+         ALTER TABLE sessions DROP COLUMN speaker_map;
+         ALTER TABLE sessions DROP COLUMN raw_transcript;
+         ALTER TABLE sessions DROP COLUMN plain_transcript;
          PRAGMA user_version = 3;",
     )
     .unwrap();
@@ -251,7 +255,7 @@ fn as9_migrates_a_plaintext_database_once() {
     assert_eq!(keys.sets.load(Ordering::Relaxed), 1);
     let s = store.get_session(&id).unwrap().unwrap();
     assert!(s.transcript.contains(CANARY));
-    assert_eq!(store.schema_version().unwrap(), 4, "v3 → latest");
+    assert_eq!(store.schema_version().unwrap(), 5, "v3 → latest");
     assert_eq!(store.segments(&id, AudioSource::Mic).unwrap().len(), 1);
     let items = store.list_sessions().unwrap();
     assert_eq!(items.len(), 2);
@@ -399,7 +403,11 @@ fn as11_migration_logs_no_session_content() {
             .add_segment(
                 &s.id,
                 AudioSource::Mic,
-                &Segment { start_ms: 0, end_ms: 1000, text: Some(CANARY.into()) },
+                &Segment {
+                    start_ms: 0,
+                    end_ms: 1000,
+                    text: Some(CANARY.into()),
+                },
             )
             .unwrap();
         store
@@ -473,6 +481,10 @@ fn start_fresh_that_fails_puts_the_old_file_back() {
         LockReason::KeychainWriteFailed
     );
     assert_eq!(hash(&dir.db()), old);
-    assert!(dir.names().iter().all(|n| !n.contains("unreadable")), "{:?}", dir.names());
+    assert!(
+        dir.names().iter().all(|n| !n.contains("unreadable")),
+        "{:?}",
+        dir.names()
+    );
     assert!(Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).is_ok());
 }
