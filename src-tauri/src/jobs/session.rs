@@ -661,15 +661,15 @@ impl Inner {
                 .iter()
                 .map(|&source| self.store.segments(id, source).map(|s| (source, s)))
                 .collect::<Result<Vec<_>, _>>();
-            let audio = sources(session.input_mode)
-                .iter()
-                .map(|&source| self.store.audio_samples(id, source).map(|s| (source, s)))
-                .collect::<Result<Vec<_>, _>>();
-            match segments.and_then(|segments| audio.map(|audio| (segments, audio))) {
-                Ok((segments, audio)) => match crate::diarize::diarize(
+            match segments {
+                Ok(segments) => match crate::diarize::diarize(
                     session.input_mode,
                     &segments,
-                    &audio,
+                    &|source, start, end| {
+                        self.store
+                            .audio_samples_range(id, source, start, end)
+                            .map_err(|e| e.to_string())
+                    },
                     num_speakers,
                     &*self.speakers,
                     cancel,
@@ -695,9 +695,6 @@ impl Inner {
         } else {
             None
         };
-        if diarize && !partial && cancel.load(Ordering::Relaxed) {
-            return self.end(id, SessionStatus::Cancelled, "");
-        }
         let saved = match diarization {
             Some((raw, map)) => {
                 self.store

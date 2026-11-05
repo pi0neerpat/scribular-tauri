@@ -91,7 +91,7 @@ fn sessions_persist_across_reopen() {
 #[test]
 fn diarization_confirm_skip_rename_and_summary_substitution_persist() {
     let db = TempDb::new();
-    let store = db.open();
+    let mut store = db.open();
     let session = store.create_session(&new_session("Speaker test")).unwrap();
     let defaults = std::collections::BTreeMap::from([
         ("SPEAKER_0".to_string(), "Speaker 1".to_string()),
@@ -108,6 +108,14 @@ fn diarization_confirm_skip_rename_and_summary_substitution_persist() {
         .unwrap();
     let skipped = store.skip_diarization(&session.id).unwrap();
     assert_eq!(skipped, "plain");
+    assert_eq!(
+        store
+            .get_session(&session.id)
+            .unwrap()
+            .unwrap()
+            .diarization_state,
+        DiarizationState::Skipped
+    );
     let mut names = defaults.clone();
     names.insert("SPEAKER_0".into(), "Mom".into());
     names.insert("SPEAKER_1".into(), "Maria".into());
@@ -133,6 +141,43 @@ fn diarization_confirm_skip_rename_and_summary_substitution_persist() {
     assert_eq!(
         session.raw_transcript.as_deref(),
         Some("SPEAKER_0: hello\nSPEAKER_1: hi")
+    );
+    drop(store);
+    store = db.open();
+    let session = store.get_session(&session.id).unwrap().unwrap();
+    assert_eq!(session.speaker_map.as_ref(), Some(&renamed));
+    assert_eq!(session.diarization_state, DiarizationState::Confirmed);
+    assert_eq!(session.summary, "Therapist spoke a Moment ago");
+}
+
+#[test]
+fn audio_sample_range_reads_only_the_requested_samples_across_chunk_boundaries() {
+    let db = TempDb::new();
+    let store = db.open();
+    let session = store.create_session(&new_session("Audio range")).unwrap();
+    let first = vec![1; 80_000];
+    let second = vec![2; 80_000];
+    let tail = vec![3; 10];
+    store
+        .append_audio_chunk(&session.id, AudioSource::Mic, 0, &first)
+        .unwrap();
+    store
+        .append_audio_chunk(&session.id, AudioSource::Mic, 1, &second)
+        .unwrap();
+    store
+        .append_audio_chunk(&session.id, AudioSource::Mic, 2, &tail)
+        .unwrap();
+    assert_eq!(
+        store
+            .audio_samples_range(&session.id, AudioSource::Mic, 4_999, 5_001)
+            .unwrap(),
+        [1; 16].into_iter().chain([2; 16]).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        store
+            .audio_samples_range(&session.id, AudioSource::Mic, 10_000, 10_001)
+            .unwrap(),
+        tail
     );
 }
 

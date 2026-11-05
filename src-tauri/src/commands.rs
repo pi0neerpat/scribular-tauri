@@ -213,22 +213,52 @@ pub fn confirm_speaker_labels(
     id: String,
     speaker_map: std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
+    confirm_speaker_labels_with_jobs(store.inner(), jobs.inner(), &id, speaker_map)
+}
+
+fn confirm_speaker_labels_with_jobs(
+    store: &Store,
+    jobs: &JobQueue,
+    id: &str,
+    speaker_map: std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
     let current = store
         .get_session(&id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("session {id} not found"))?;
     let regenerate = current.speaker_map.as_ref() != Some(&speaker_map);
+    let original_transcript = current.transcript.clone();
+    let original_map = current.speaker_map.clone().unwrap_or_default();
+    let original_state = current.diarization_state;
+    let prompt = if regenerate {
+        Some(
+            current
+                .prompt_id
+                .clone()
+                .or(store
+                    .get_setting(crate::store::ACTIVE_PROMPT_ID)
+                    .map_err(|e| e.to_string())?)
+                .ok_or("no summary prompt is selected")?,
+        )
+    } else {
+        None
+    };
     let transcript = store
-        .confirm_speaker_labels(&id, &speaker_map)
+        .confirm_speaker_labels(id, &speaker_map)
         .map_err(|e| e.to_string())?;
-    if regenerate {
-        let prompt = current
-            .prompt_id
-            .or(store
-                .get_setting(crate::store::ACTIVE_PROMPT_ID)
-                .map_err(|e| e.to_string())?)
-            .ok_or("no summary prompt is selected")?;
-        jobs.regenerate(&id, &prompt).map_err(|e| e.to_string())?;
+    if let Some(prompt) = prompt {
+        if let Err(error) = jobs.regenerate(id, &prompt) {
+            store
+                .update_diarization(
+                    id,
+                    &original_transcript,
+                    &original_map,
+                    original_state,
+                    None,
+                )
+                .map_err(|e| e.to_string())?;
+            return Err(error.to_string());
+        }
     }
     Ok(transcript)
 }
@@ -507,5 +537,101 @@ mod tests {
         let json = serde_json::to_value(app_version()).unwrap();
         assert!(json.get("version").is_some());
         assert!(json.get("name").is_some());
+    }
+
+    #[cfg(feature = "fake-engines")]
+    #[test]
+    fn label_confirmation_retries_the_same_names_after_a_busy_summary() {
+        use crate::{
+            engines::fake::{FakeLoader, FakeSummarizer},
+            jobs::{JobEvents, SessionProgress, SessionSegments, SummaryDelta},
+            store::{key::MemoryKeyStore, DiarizationState, NewSession, SessionStatus},
+        };
+
+        struct Events;
+        impl JobEvents for Events {
+            fn progress(&self, _: SessionProgress) {}
+            fn summary_delta(&self, _: SummaryDelta) {}
+            fn segments(&self, _: SessionSegments) {}
+        }
+
+        let path =
+            std::env::temp_dir().join(format!("scribular-confirm-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let store = Arc::new(Store::open(&path, &MemoryKeyStore::with_key([8; 32])).unwrap());
+        let mut summarizer = FakeSummarizer::new(8192);
+        summarizer.token_delay = std::time::Duration::from_millis(2);
+        let loader = Arc::new(FakeLoader::new(summarizer));
+        let jobs = JobQueue::new(store.clone(), loader.clone(), Arc::new(Events));
+        let session = store
+            .create_session(&NewSession {
+                title: "retry".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: Some("default-therapy-dora".into()),
+                model_id: None,
+            })
+            .unwrap();
+        let plain = (0..1000)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let defaults =
+            std::collections::BTreeMap::from([("SPEAKER_0".to_string(), "Speaker 1".to_string())]);
+        let raw = format!(
+            "SPEAKER_0: {}",
+            (0..80)
+                .map(|i| format!("hello{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        store
+            .save_diarization(&session.id, &plain, &raw, &defaults, 1000)
+            .unwrap();
+        store
+            .set_status(&session.id, SessionStatus::Done, None)
+            .unwrap();
+        jobs.regenerate(&session.id, "default-therapy-dora")
+            .unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while store.get_session(&session.id).unwrap().unwrap().status != SessionStatus::Summarizing
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "initial summary never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let names =
+            std::collections::BTreeMap::from([("SPEAKER_0".to_string(), "Therapist".to_string())]);
+        assert!(
+            confirm_speaker_labels_with_jobs(&store, &jobs, &session.id, names.clone()).is_err()
+        );
+        let restored = store.get_session(&session.id).unwrap().unwrap();
+        assert_eq!(restored.diarization_state, DiarizationState::Pending);
+        assert_eq!(restored.speaker_map.as_ref(), Some(&defaults));
+        assert_eq!(restored.transcript, plain);
+
+        assert!(jobs.wait_idle(std::time::Duration::from_secs(10)));
+        assert_eq!(
+            confirm_speaker_labels_with_jobs(&store, &jobs, &session.id, names).unwrap(),
+            format!(
+                "Therapist: {}",
+                (0..80)
+                    .map(|i| format!("hello{i}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
+        assert!(jobs.wait_idle(std::time::Duration::from_secs(10)));
+        assert!(loader
+            .summarizer
+            .calls()
+            .iter()
+            .flatten()
+            .any(|generation| generation.prompt.contains("Therapist: hello0")));
+        drop(jobs);
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -162,7 +162,9 @@ impl ModelManager {
                 if self.running[i].load(Ordering::Acquire) {
                     return;
                 }
-                self.ensure_index(i, on_progress).await;
+                if self.ensure_index(i, on_progress).await.is_none() {
+                    return;
+                }
             }
         }
     }
@@ -178,10 +180,10 @@ impl ModelManager {
             .iter()
             .position(|spec| spec.id == model_id)
             .ok_or_else(|| format!("unknown model {model_id}"))?;
-        if self.ensure_index(i, on_progress).await {
-            Ok(())
-        } else {
-            Err(format!("model {model_id} download failed"))
+        match self.ensure_index(i, on_progress).await {
+            Some(true) => Ok(()),
+            Some(false) => Err(format!("model {model_id} download failed")),
+            None => Err(format!("model {model_id} download is already running")),
         }
     }
 
@@ -189,11 +191,11 @@ impl ModelManager {
         &self,
         i: usize,
         on_progress: &(dyn Fn(ModelProgress) + Send + Sync),
-    ) -> bool {
+    ) -> Option<bool> {
         let spec = &self.specs[i];
         let running = &self.running[i];
         if running.swap(true, Ordering::AcqRel) {
-            return false;
+            return None;
         }
         let _guard = DownloadGuard(running);
         if self.readiness.get(&spec.id) == ModelState::Ready {
@@ -204,14 +206,14 @@ impl ModelManager {
                 total_bytes: spec.size,
                 error: None,
             });
-            return true;
+            return Some(true);
         }
         let report = |p: ModelProgress| {
             self.readiness.set(&p.model_id, p.state);
             on_progress(p);
         };
         match ensure(&self.client, &self.dir, spec, &report).await {
-            Ok(_) => true,
+            Ok(_) => Some(true),
             Err(e) => {
                 report(ModelProgress {
                     model_id: spec.id.clone(),
@@ -220,7 +222,7 @@ impl ModelManager {
                     total_bytes: spec.size,
                     error: Some(e.to_string()),
                 });
-                false
+                Some(false)
             }
         }
     }

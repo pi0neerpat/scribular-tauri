@@ -3,7 +3,7 @@
   import type { Session } from '../types/Session';
   type SpeakerMap = Record<string, string>;
 
-  let { session: incoming }: { session: Session } = $props();
+  let { session: incoming, onUpdate }: { session: Session; onUpdate?: (session: Session) => void } = $props();
   let current = $state<Session | null>(null);
   let overrides = $state<SpeakerMap | null>(null);
   let editing = $state(false);
@@ -38,6 +38,7 @@
       current = updated;
       overrides = null;
       addingLater = false;
+      onUpdate?.(updated);
     }
   }
 
@@ -81,7 +82,7 @@
           {/each}
         </div>
       {/each}
-      {#if session.diarizationState === 'pending'}
+      {#if session.diarizationState === 'pending' || addingLater}
         <button onclick={confirm} disabled={busy}>Confirm speakers</button>
         <button onclick={skip} disabled={busy}>Skip</button>
       {:else}

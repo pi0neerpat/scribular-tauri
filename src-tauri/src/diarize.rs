@@ -63,7 +63,7 @@ impl SpeakerEmbedder for FakeEmbedder {
 pub fn diarize(
     mode: InputMode,
     source_segments: &[(AudioSource, Vec<Segment>)],
-    source_audio: &[(AudioSource, Vec<i16>)],
+    audio_samples: &dyn Fn(AudioSource, i64, i64) -> Result<Vec<i16>, String>,
     max_speakers: Option<u8>,
     loader: &dyn SpeakerEmbedderLoader,
     cancel: &AtomicBool,
@@ -72,16 +72,19 @@ pub fn diarize(
     let mut turns = Vec::new();
     let mut offset = 0;
     for (source, segments) in source_segments {
-        let samples = source_audio
-            .iter()
-            .find(|(s, _)| s == source)
-            .map_or(&[][..], |(_, a)| a.as_slice());
         let cap = if mode == InputMode::MicAndSystem {
             max_speakers.map(|n| n.saturating_sub(1)).or(Some(4))
         } else {
             max_speakers
         };
-        let (labeled, count) = label_segments(segments, samples, cap, offset, &*embedder, cancel)?;
+        let (labeled, count) = label_segments(
+            segments,
+            |start, end| audio_samples(*source, start, end),
+            cap,
+            offset,
+            &*embedder,
+            cancel,
+        )?;
         turns.extend(labeled);
         if mode == InputMode::MicAndSystem && *source == AudioSource::System {
             offset = count;
@@ -95,7 +98,7 @@ pub fn diarize(
 
 fn label_segments(
     segments: &[Segment],
-    samples: &[i16],
+    mut audio_samples: impl FnMut(i64, i64) -> Result<Vec<i16>, String>,
     max_speakers: Option<u8>,
     offset: usize,
     embedder: &dyn SpeakerEmbedder,
@@ -111,19 +114,8 @@ fn label_segments(
         let speaker = if segment.end_ms - segment.start_ms < MIN_SEGMENT_MS {
             previous.unwrap_or(offset)
         } else {
-            let start = usize::try_from(segment.start_ms.max(0))
-                .unwrap_or(usize::MAX)
-                .saturating_mul(16);
-            let end = usize::try_from(segment.end_ms.max(0))
-                .unwrap_or(usize::MAX)
-                .saturating_mul(16)
-                .min(samples.len());
-            let audio: Vec<f32> = samples
-                .get(start.min(end)..end)
-                .unwrap_or(&[])
-                .iter()
-                .map(|s| f32::from(*s) / 32768.0)
-                .collect();
+            let samples = audio_samples(segment.start_ms, segment.end_ms)?;
+            let audio: Vec<f32> = samples.iter().map(|s| f32::from(*s) / 32768.0).collect();
             let embedding = embedder.embed(&audio)?;
             let best = speakers
                 .iter()
@@ -221,7 +213,7 @@ mod tests {
         ])));
         let (turns, count) = label_segments(
             &segments,
-            &[1; 38_400],
+            |_, _| Ok(vec![1; 38_400]),
             Some(2),
             0,
             &embedder,
@@ -242,7 +234,7 @@ mod tests {
         let cancel = AtomicBool::new(true);
         assert!(label_segments(
             &[seg(0, 600, "x")],
-            &[0; 9600],
+            |_, _| Ok(vec![0; 9600]),
             None,
             0,
             &Scripted(Mutex::new(VecDeque::new())),
@@ -261,7 +253,7 @@ mod tests {
         let embedder = Scripted(Mutex::new(VecDeque::from([vec![1., 0.]])));
         let (turns, count) = label_segments(
             &segments,
-            &[0; 12_800],
+            |_, _| Ok(vec![0; 12_800]),
             None,
             0,
             &embedder,
@@ -285,7 +277,7 @@ mod tests {
         ])));
         let (_, count) = label_segments(
             &segments,
-            &[0; 38_400],
+            |_, _| Ok(vec![0; 38_400]),
             None,
             0,
             &embedder,
@@ -300,18 +292,18 @@ mod tests {
         let system = vec![seg(500, 1100, "remote")];
         let mic = vec![seg(0, 600, "local")];
         let segments = vec![(AudioSource::System, system), (AudioSource::Mic, mic)];
-        let audio = vec![
-            (AudioSource::System, vec![0; 17_600]),
-            (AudioSource::Mic, vec![0; 9_600]),
-        ];
         let loader = Loader(Mutex::new(Some(VecDeque::from([
             vec![1., 0.],
             vec![0., 1.],
         ]))));
+        let requested = std::sync::Mutex::new(Vec::new());
         let (raw, map) = diarize(
             InputMode::MicAndSystem,
             &segments,
-            &audio,
+            &|source, start, end| {
+                requested.lock().unwrap().push((source, start, end));
+                Ok(vec![0; 17_600])
+            },
             Some(3),
             &loader,
             &AtomicBool::new(false),
@@ -320,5 +312,9 @@ mod tests {
         assert_eq!(raw, "SPEAKER_1: local\nSPEAKER_0: remote");
         assert_eq!(map["SPEAKER_0"], "Speaker 1");
         assert_eq!(map["SPEAKER_1"], "Speaker 2");
+        assert_eq!(
+            *requested.lock().unwrap(),
+            [(AudioSource::System, 500, 1100), (AudioSource::Mic, 0, 600)]
+        );
     }
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   // Records one session with the saved settings, then follows it through
   // transcription and summarization to the result.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     cancelJob,
     currentRecording,
@@ -29,10 +29,14 @@
   // only the one recording, not a session after Stop. A window session, not
   // local storage, so a crashed app's session isn't picked up on relaunch.
   const IN_FLIGHT_KEY = 'scribular.inFlightSession';
+  const IN_FLIGHT_SPEAKERS_KEY = 'scribular.inFlightMultiSpeaker';
 
   function remember(id: string | null) {
     if (id) sessionStorage.setItem(IN_FLIGHT_KEY, id);
-    else sessionStorage.removeItem(IN_FLIGHT_KEY);
+    else {
+      sessionStorage.removeItem(IN_FLIGHT_KEY);
+      sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
+    }
   }
 
   let sessionId = $state<string | null>(null);
@@ -50,6 +54,29 @@
   let labeled = $state(false);
   let now = $state(Date.now());
   let askSpeakerCount = $state(false);
+  let stopButton = $state<HTMLButtonElement | undefined>();
+  let speakerDialog = $state<HTMLDivElement | undefined>();
+  let returnFocus = $state<HTMLElement | null>(null);
+
+  $effect(() => {
+    if (askSpeakerCount) speakerDialog?.querySelector('button')?.focus();
+    else returnFocus?.focus();
+  });
+
+  function confineDialogFocus(event: KeyboardEvent) {
+    if (event.key !== 'Tab' || !speakerDialog) return;
+    const buttons = Array.from(speakerDialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    const first = buttons[0];
+    const last = buttons.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   let recording = $derived(status === 'recording');
   let working = $derived(isWorking(status));
@@ -93,6 +120,7 @@
       if (session && status === null) status = session.status;
       if (session?.status === 'awaitingModel') result = session;
       labeled = session?.inputMode === 'micAndSystem';
+      if (recording) sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, sessionStorage.getItem(IN_FLIGHT_SPEAKERS_KEY) ?? 'false');
       startedAt = session?.createdAt ?? Date.now();
     });
     return () => {
@@ -109,6 +137,7 @@
       const app = settings.inputMode === 'mic' ? null : settings.targetApp;
       const title = `Session ${new Date().toLocaleString()}`;
       const session = await startRecording(settings.inputMode, app, title);
+      sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, String(settings.multiSpeaker));
       sessionId = session.id;
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
@@ -124,8 +153,11 @@
 
   async function stop() {
     try {
-      if ((await getRecordingSettings()).multiSpeaker) {
+      if (sessionStorage.getItem(IN_FLIGHT_SPEAKERS_KEY) === 'true') {
+        returnFocus = stopButton ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
         askSpeakerCount = true;
+        await tick();
+        speakerDialog?.querySelector('button')?.focus();
         return;
       }
     } catch (e) {
@@ -156,12 +188,13 @@
 
 <section>
   <h2>Record</h2>
+  <div inert={askSpeakerCount}>
   {#if recording}
     <p>
       {progress?.message ?? 'Recording…'}
       {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
     </p>
-    <button onclick={stop} disabled={busy}>Stop</button>
+    <button bind:this={stopButton} onclick={stop} disabled={busy || askSpeakerCount}>Stop</button>
   {:else if working}
     <p>
       {progress?.message ?? 'Working…'}
@@ -172,8 +205,9 @@
     <button onclick={start} disabled={busy || !speechReady}>Start recording</button>
   {/if}
 
+  </div>
   {#if askSpeakerCount}
-    <div role="dialog" aria-modal="true" aria-labelledby="speaker-count-title">
+    <div bind:this={speakerDialog} onkeydown={confineDialogFocus} role="dialog" aria-modal="true" aria-labelledby="speaker-count-title" tabindex="-1">
       <h3 id="speaker-count-title">How many people spoke?</h3>
       <button onclick={() => stopWithCount(2)}>2 people</button>
       <button onclick={() => stopWithCount(3)}>3 people</button>
@@ -194,7 +228,7 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel {session} {active} />
+    <SummaryPanel {session} {active} onUpdate={(updated) => (result = updated)} />
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>

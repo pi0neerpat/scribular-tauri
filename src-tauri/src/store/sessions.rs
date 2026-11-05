@@ -307,6 +307,45 @@ fn samples(c: &Connection, id: &str, source: AudioSource) -> Result<Vec<i16>> {
     Ok(samples)
 }
 
+fn samples_range(
+    c: &Connection,
+    id: &str,
+    source: AudioSource,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<Vec<i16>> {
+    let start = start_ms.max(0).saturating_mul(16) as u64;
+    let end = end_ms.max(0).saturating_mul(16) as u64;
+    if end <= start {
+        return Ok(Vec::new());
+    }
+    let chunk_size = crate::audio::CHUNK_SAMPLES as u64;
+    let first = (start / chunk_size) as i64;
+    let last = (end.saturating_sub(1) / chunk_size) as i64;
+    let mut stmt = c.prepare(
+        "SELECT seq, pcm FROM audio_chunks WHERE session_id = ?1 AND source = ?2 AND seq BETWEEN ?3 AND ?4 ORDER BY seq",
+    )?;
+    let mut rows = stmt.query(params![id, source.as_str(), first, last])?;
+    let mut samples = Vec::with_capacity((end - start) as usize);
+    while let Some(row) = rows.next()? {
+        let seq: u64 = row.get::<_, i64>(0)?.max(0) as u64;
+        let bytes = row.get_ref(1)?.as_blob().map_err(rusqlite::Error::from)?;
+        let chunk: Vec<i16> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect();
+        let chunk_start = seq * chunk_size;
+        let from = start.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
+        let to = end.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
+        if from < to {
+            samples.extend_from_slice(&chunk[from..to]);
+        }
+    }
+    Ok(samples)
+}
+
 fn sweep(c: &mut Connection, now_ms: i64) -> Result<usize> {
     let cutoff = now_ms - AUDIO_RETENTION_MS;
     let tx = c.transaction()?;
@@ -789,6 +828,17 @@ impl Store {
     /// All of one source's stored audio, in chunk order.
     pub fn audio_samples(&self, id: &str, source: AudioSource) -> Result<Vec<i16>> {
         self.with(|c| samples(c, id, source))
+    }
+
+    /// Reads only the samples needed for one timestamped transcript segment.
+    pub fn audio_samples_range(
+        &self,
+        id: &str,
+        source: AudioSource,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<Vec<i16>> {
+        self.with(|c| samples_range(c, id, source, start_ms, end_ms))
     }
 
     pub fn audio_chunk_count(&self, id: &str) -> Result<u32> {

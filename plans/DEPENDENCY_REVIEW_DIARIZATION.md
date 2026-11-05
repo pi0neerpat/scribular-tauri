@@ -2,6 +2,8 @@
 
 **Decision:** Patrick approved the official `sherpa-onnx` and `sherpa-onnx-sys` crates pinned to `=1.13.8` and the official native release for this feature on 2026-11-04. The broader provenance/SBOM and network-disabled-build gates from earlier drafts are superseded by `/Users/admin/.local/state/scribular-parity/specs/02-execution-brief.md`.
 
+This approval permits integration without an Electron embedding-parity result. The comparison remains unavailable and no accuracy or parity claim is made; it is not a release gate for this approved scope.
+
 ## Checks and spike evidence
 
 - Rust crates: exact `=1.13.8` pins, Apache-2.0; extracted crate manifests and `build.rs` inspected. The Rust embedding API and real model inference compiled successfully on macOS arm64.

@@ -45,7 +45,8 @@ pub fn apply_speaker_map(raw: &str, map: &SpeakerMap) -> String {
     for line in raw.lines() {
         let (speaker, text) = match line.split_once(": ") {
             Some((id, text)) if id.starts_with("SPEAKER_") => {
-                (map.get(id).cloned().unwrap_or_else(|| id.to_string()), text)
+                let name = map.get(id).filter(|name| !name.trim().is_empty());
+                (name.cloned().unwrap_or_else(|| id.to_string()), text)
             }
             _ => (String::new(), line),
         };
@@ -75,13 +76,26 @@ pub fn apply_speaker_map(raw: &str, map: &SpeakerMap) -> String {
 }
 
 pub fn substitute_speaker_names(summary: &str, old: &SpeakerMap, new: &SpeakerMap) -> String {
-    old.iter().fold(summary.to_string(), |summary, (id, from)| {
+    let mut summary = summary.to_string();
+    let mut replacements = Vec::new();
+    let mut names: Vec<_> = old.iter().collect();
+    names.sort_by_key(|(_, name)| std::cmp::Reverse(name.chars().count()));
+    for (index, (id, from)) in names.into_iter().enumerate() {
         let to = new.get(id).map(String::as_str).unwrap_or(from);
-        if from == to || from.is_empty() {
-            return summary;
+        if from.is_empty() {
+            continue;
         }
-        replace_whole_words(&summary, from, to)
-    })
+        let mut marker = format!("\0SPEAKER_REPLACEMENT_{index}\0");
+        while summary.contains(&marker) {
+            marker.push('\0');
+        }
+        summary = replace_whole_words(&summary, from, &marker);
+        replacements.push((marker, to.to_string()));
+    }
+    for (marker, to) in replacements {
+        summary = summary.replace(&marker, &to);
+    }
+    summary
 }
 
 fn replace_whole_words(text: &str, from: &str, to: &str) -> String {
@@ -131,6 +145,63 @@ mod tests {
         assert_eq!(
             substitute_speaker_names("Mom spoke a Moment ago", &old, &new),
             "Maria spoke a Moment ago"
+        );
+    }
+
+    #[test]
+    fn substitutes_swapped_names_simultaneously() {
+        let old = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Alice".into()),
+            ("SPEAKER_1".into(), "Bob".into()),
+        ]);
+        let new = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Bob".into()),
+            ("SPEAKER_1".into(), "Alice".into()),
+        ]);
+        assert_eq!(
+            substitute_speaker_names("Alice met Bob", &old, &new),
+            "Bob met Alice"
+        );
+    }
+
+    #[test]
+    fn substitutes_longest_overlapping_name_first() {
+        let old = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Alice".into()),
+            ("SPEAKER_1".into(), "Alice Smith".into()),
+        ]);
+        let new = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Therapist".into()),
+            ("SPEAKER_1".into(), "Client".into()),
+        ]);
+        assert_eq!(
+            substitute_speaker_names("Alice Smith spoke with Alice", &old, &new),
+            "Client spoke with Therapist"
+        );
+    }
+
+    #[test]
+    fn unchanged_longer_name_is_protected_from_a_shorter_rename() {
+        let old = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Alice".into()),
+            ("SPEAKER_1".into(), "Alice Smith".into()),
+        ]);
+        let new = SpeakerMap::from([
+            ("SPEAKER_0".into(), "Therapist".into()),
+            ("SPEAKER_1".into(), "Alice Smith".into()),
+        ]);
+        assert_eq!(
+            substitute_speaker_names("Alice Smith spoke with Alice", &old, &new),
+            "Alice Smith spoke with Therapist"
+        );
+    }
+
+    #[test]
+    fn blank_speaker_name_keeps_the_speaker_id() {
+        let map = SpeakerMap::from([("SPEAKER_0".into(), "  ".into())]);
+        assert_eq!(
+            apply_speaker_map("SPEAKER_0: hello", &map),
+            "SPEAKER_0: hello"
         );
     }
 }

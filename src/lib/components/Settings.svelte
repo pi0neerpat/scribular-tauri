@@ -45,20 +45,29 @@
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let progressVersion = 0;
     void (async () => {
       try {
+        const removeListener = await onModelsProgress((p) => {
+          if (p.modelId === SPEAKER_MODEL) {
+            progressVersion++;
+            speakerModel = p;
+          }
+        });
+        if (disposed) removeListener();
+        else unlisten = removeListener;
         settings = await getRecordingSettings();
         prompts = await listPrompts();
-        speakerModel = (await modelsStatus()).find((m) => m.modelId === SPEAKER_MODEL) ?? null;
-        unlisten = await onModelsProgress((p) => {
-          if (p.modelId === SPEAKER_MODEL) speakerModel = p;
-        });
+        const version = progressVersion;
+        const status = await modelsStatus();
+        if (version === progressVersion) speakerModel = status.find((m) => m.modelId === SPEAKER_MODEL) ?? null;
       } catch (e) {
         error = String(e);
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   });
 
   async function refreshApps() {
@@ -112,7 +121,7 @@
           {speakerModel?.state === 'downloading' || speakerModel?.state === 'verifying' ? 'Downloading speaker model…' : 'Download speaker model'}
         </button>
         {#if speakerModel?.state === 'downloading'}
-          <progress value={speakerModel.downloadedBytes} max={speakerModel.totalBytes}></progress>
+          <progress aria-label="Speaker model download progress" value={speakerModel.downloadedBytes} max={speakerModel.totalBytes}></progress>
         {/if}
         {#if speakerModel?.error}<p role="alert">{speakerModel.error}</p>{/if}
       {/if}

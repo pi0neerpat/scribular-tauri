@@ -14,7 +14,7 @@ const names = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`SPEAKER_$
 const session: Session = {
   id: 'session-1', title: 'Test', createdAt: 0, inputMode: 'mic', status: 'done', error: null,
   promptId: null, modelId: null, transcript: '', plainTranscript: 'plain',
-  rawTranscript: Object.keys(names).map((id) => `${id}: hello`).join('\n'), speakerMap: names,
+  rawTranscript: Object.keys(names).map((id, i) => `${id}: quote ${i + 1}`).join('\n'), speakerMap: names,
   diarizationState: 'pending', summary: '', durationMs: 1000, timings: null, hasAudio: false,
   audioExpiresAt: null,
 };
@@ -22,8 +22,10 @@ const session: Session = {
 describe('speaker assignment card', () => {
   it('shows speaker quotes, typed-name chips, confirm/skip actions, and cycles five colours', () => {
     const { body } = render(SpeakersCard, { props: { session } });
-    expect(body).toContain('hello');
-    expect(body).toContain('Speaker 6');
+    for (let i = 1; i <= 6; i++) {
+      expect(body).toContain(`Speaker ${i}`);
+      expect(body).toContain(`quote ${i}`);
+    }
     expect(body).toContain('Confirm speakers');
     expect(body).toContain('Skip');
     for (let i = 0; i < 5; i++) expect(body).toContain(`color-${i}`);
