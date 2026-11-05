@@ -9,4 +9,12 @@ fileName: string, url: string, size: number,
 /**
  * Lowercase hex.
  */
-sha256: string, license: string, licenseUrl: string, optional: boolean, };
+sha256: string, license: string, licenseUrl: string, optional: boolean, 
+/**
+ * One line for the model picker.
+ */
+description: string, 
+/**
+ * Shown under the description, e.g. a memory warning.
+ */
+caution: string | null, };

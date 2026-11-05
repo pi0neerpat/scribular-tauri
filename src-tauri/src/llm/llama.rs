@@ -25,18 +25,41 @@ use llama_cpp_2::{
 use super::{GenEvent, Generation, LlmError, Result, Summarizer, SummarizerLoader};
 use crate::models::{ModelManager, ModelState, GEMMA_2_2B};
 
-/// gemma-2's trained context; KTD3 budgets each sequence against it.
-const CONTEXT_TOKENS: u32 = 8192;
 /// Tokens per `llama_decode` call while prefilling.
 const BATCH_TOKENS: usize = 2048;
 
+/// Context cap and sampling for one model (spec 03 R21). Stop tokens come
+/// from the GGUF's end-of-generation tokens.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Params {
+    /// KTD3 budgets each sequence against this, capped by the trained context.
+    pub context_tokens: u32,
+    pub top_k: i32,
+    pub top_p: f32,
+    pub temperature: f32,
+    pub repeat_last_n: i32,
+    pub repeat_penalty: f32,
+}
+
 /// Ollama's defaults for `gemma2:2b` (KTD4): its Modelfile sets only stop
 /// words, so the runner defaults apply.
-const TOP_K: i32 = 40;
-const TOP_P: f32 = 0.9;
-const TEMPERATURE: f32 = 0.8;
-const REPEAT_LAST_N: i32 = 64;
-const REPEAT_PENALTY: f32 = 1.1;
+const GEMMA_2: Params = Params {
+    context_tokens: 8192,
+    top_k: 40,
+    top_p: 0.9,
+    temperature: 0.8,
+    repeat_last_n: 64,
+    repeat_penalty: 1.1,
+};
+
+/// Parameters for a manifest LLM id.
+pub fn params(model_id: &str) -> Params {
+    match model_id {
+        GEMMA_2_2B => GEMMA_2,
+        // shortcut: only one LLM ships; give each new manifest LLM its own arm.
+        _ => GEMMA_2,
+    }
+}
 
 fn engine(e: impl std::fmt::Display) -> LlmError {
     LlmError::Engine(e.to_string())
@@ -69,35 +92,41 @@ impl LlamaLoader {
 }
 
 impl SummarizerLoader for LlamaLoader {
-    fn model_id(&self) -> &str {
-        GEMMA_2_2B
+    fn model_id(&self) -> String {
+        self.models.selected_llm()
     }
 
     fn ready(&self) -> bool {
-        self.models.readiness.get(GEMMA_2_2B) == ModelState::Ready
+        self.models.readiness.get(&self.model_id()) == ModelState::Ready
     }
 
     fn load(&self) -> Result<Arc<dyn Summarizer>> {
-        if self.models.readiness.get(GEMMA_2_2B) != ModelState::Ready {
+        let id = self.model_id();
+        if self.models.readiness.get(&id) != ModelState::Ready {
             return Err(LlmError::NotReady);
         }
-        let path = self.models.path(GEMMA_2_2B).ok_or(LlmError::NotReady)?;
-        Ok(Arc::new(LlamaSummarizer::load(&path)?))
+        let path = self.models.path(&id).ok_or(LlmError::NotReady)?;
+        Ok(Arc::new(LlamaSummarizer::load(&path, params(&id))?))
     }
 }
 
 pub struct LlamaSummarizer {
     model: LlamaModel,
     template: LlamaChatTemplate,
+    params: Params,
 }
 
 impl LlamaSummarizer {
     /// Loads a GGUF with every layer on the GPU.
-    pub fn load(path: &std::path::Path) -> Result<Self> {
-        let params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
-        let model = LlamaModel::load_from_file(backend()?, path, &params).map_err(engine)?;
+    pub fn load(path: &std::path::Path, params: Params) -> Result<Self> {
+        let model_params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
+        let model = LlamaModel::load_from_file(backend()?, path, &model_params).map_err(engine)?;
         let template = model.chat_template(None).map_err(engine)?;
-        Ok(Self { model, template })
+        Ok(Self {
+            model,
+            template,
+            params,
+        })
     }
 
     /// `prompt` as the user turn of the GGUF chat template, ready for the
@@ -115,17 +144,18 @@ impl LlamaSummarizer {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.subsec_nanos());
+        let p = &self.params;
         LlamaSampler::chain_simple([
             LlamaSampler::penalties(
                 self.model.n_vocab(),
-                REPEAT_LAST_N,
-                REPEAT_PENALTY,
+                p.repeat_last_n,
+                p.repeat_penalty,
                 0.0,
                 0.0,
             ),
-            LlamaSampler::top_k(TOP_K),
-            LlamaSampler::top_p(TOP_P, 1),
-            LlamaSampler::temp(TEMPERATURE),
+            LlamaSampler::top_k(p.top_k),
+            LlamaSampler::top_p(p.top_p, 1),
+            LlamaSampler::temp(p.temperature),
             LlamaSampler::dist(seed),
         ])
     }
@@ -168,7 +198,7 @@ fn decode(ctx: &mut LlamaContext<'_>, batch: &mut LlamaBatch) -> Result<()> {
 
 impl Summarizer for LlamaSummarizer {
     fn context_tokens(&self) -> usize {
-        self.model.n_ctx_train().min(CONTEXT_TOKENS) as usize
+        self.model.n_ctx_train().min(self.params.context_tokens) as usize
     }
 
     fn count_tokens(&self, text: &str) -> Result<usize> {

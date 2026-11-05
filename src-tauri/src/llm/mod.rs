@@ -76,8 +76,9 @@ pub trait Summarizer: Send + Sync {
 /// Loads the summarizer on demand, so the model only takes memory once a
 /// job needs it (KTD5).
 pub trait SummarizerLoader: Send + Sync {
-    /// The model id stored on sessions summarized with this engine.
-    fn model_id(&self) -> &str;
+    /// The selected model: what `load` loads and what sessions record.
+    /// The queue reloads when it changes.
+    fn model_id(&self) -> String;
 
     /// Whether the model has downloaded and passed verification.
     fn ready(&self) -> bool {

@@ -5,14 +5,16 @@ import { mount, unmount } from 'svelte';
 const downloadModel = vi.fn();
 const getRecordingSettings = vi.fn();
 const listAudioApps = vi.fn();
-const listPrompts = vi.fn();
 const modelsStatus = vi.fn();
 const onModelsProgress = vi.fn();
 const setRecordingSettings = vi.fn();
 vi.mock('../api', () => ({
-  deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps, listPrompts,
+  deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), setRecordingSettings,
 }));
+// Covered by their own tests; stubbed so they don't share the progress mock.
+vi.mock('./NoteStyles.svelte', () => ({ default: () => {} }));
+vi.mock('./SummaryModel.svelte', () => ({ default: () => {} }));
 const { default: Settings } = await import('./Settings.svelte');
 
 const settings = { inputMode: 'mic', targetApp: null, multiSpeaker: false, promptId: 'default', keepAudio: false };
@@ -29,7 +31,6 @@ it('applies a completion event that arrives while the status snapshot is in flig
     return () => {};
   });
   getRecordingSettings.mockResolvedValue(settings);
-  listPrompts.mockResolvedValue([]);
   modelsStatus.mockReturnValue(new Promise((resolve) => { resolveSnapshot = resolve; }));
   const target = document.createElement('div');
   const app = mount(Settings, { target });
@@ -49,7 +50,6 @@ it('lets a newer status snapshot replace progress received before the snapshot s
     return () => {};
   });
   getRecordingSettings.mockReturnValue(new Promise((resolve) => { resolveSettings = resolve; }));
-  listPrompts.mockResolvedValue([]);
   modelsStatus.mockResolvedValue([ready]);
   const target = document.createElement('div');
   const app = mount(Settings, { target });
@@ -76,13 +76,11 @@ it('removes the progress listener if setup resolves after unmount', async () => 
 it('loads core settings and the model status snapshot when progress listener setup rejects', async () => {
   onModelsProgress.mockRejectedValue(new Error('listener unavailable'));
   getRecordingSettings.mockResolvedValue(settings);
-  listPrompts.mockResolvedValue([]);
   modelsStatus.mockResolvedValue([ready]);
   const target = document.createElement('div');
   const app = mount(Settings, { target });
   await vi.waitFor(() => expect(target.textContent).toContain('Identify speakers'));
   expect(getRecordingSettings).toHaveBeenCalledOnce();
-  expect(listPrompts).toHaveBeenCalledOnce();
   expect(modelsStatus).toHaveBeenCalledOnce();
   unmount(app);
 });

@@ -22,7 +22,7 @@ pub use sessions::{
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
     AUDIO_RETENTION_MS,
 };
-pub use settings::{RecordingSettings, ACTIVE_PROMPT_ID};
+pub use settings::{RecordingSettings, ACTIVE_PROMPT_ID, SUMMARY_MODEL_ID};
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -37,6 +37,12 @@ pub enum StoreError {
     /// The database can't be opened (R7); the app shows the locked screen.
     Locked(LockReason),
     Io(std::io::Error),
+    /// Built-in note styles can't be edited or deleted (spec 03 R4).
+    BuiltInPrompt,
+    EmptyPrompt,
+    PromptTooLong,
+    /// Unstarring would leave no favourite style (spec 03 R5).
+    LastFavourite,
 }
 
 impl fmt::Display for StoreError {
@@ -51,6 +57,14 @@ impl fmt::Display for StoreError {
             ),
             Self::Locked(reason) => write!(f, "database is locked: {reason:?}"),
             Self::Io(e) => write!(f, "file error: {e}"),
+            Self::BuiltInPrompt => f.write_str("Built-in styles can't be changed. Duplicate it to edit."),
+            Self::EmptyPrompt => f.write_str("The style's prompt can't be empty."),
+            Self::PromptTooLong => write!(
+                f,
+                "The style's prompt is longer than {} characters.",
+                prompts::MAX_PROMPT_CHARS
+            ),
+            Self::LastFavourite => f.write_str("At least one style must remain starred."),
         }
     }
 }

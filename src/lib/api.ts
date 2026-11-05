@@ -14,6 +14,7 @@ import type { ModelProgress } from './types/ModelProgress';
 import type { ModelSpec } from './types/ModelSpec';
 import type { Privacy } from './types/Privacy';
 import type { Prompt } from './types/Prompt';
+import type { PromptList } from './types/PromptList';
 import type { RecordingSettings } from './types/RecordingSettings';
 import type { Session } from './types/Session';
 import type { SessionListItem } from './types/SessionListItem';
@@ -21,6 +22,7 @@ import type { SessionPatch } from './types/SessionPatch';
 import type { SessionProgress } from './types/SessionProgress';
 import type { SessionSegments } from './types/SessionSegments';
 import type { SummaryDelta } from './types/SummaryDelta';
+import type { SummaryModel } from './types/SummaryModel';
 import type { TranscriptSegment } from './types/TranscriptSegment';
 
 type SpeakerMap = Record<string, string>;
@@ -81,6 +83,49 @@ export function deleteSession(id: string): Promise<boolean> {
 
 export function listPrompts(): Promise<Prompt[]> {
   return invoke<Prompt[]>('list_prompts');
+}
+
+/** Every style plus the active id. The style commands below return the same. */
+export function getPromptList(): Promise<PromptList> {
+  return invoke<PromptList>('get_prompt_list');
+}
+
+export function getActivePromptId(): Promise<string | null> {
+  return invoke<string | null>('get_active_prompt_id');
+}
+
+export function createPrompt(name: string, text: string): Promise<PromptList> {
+  return invoke<PromptList>('create_prompt', { name, text });
+}
+
+export function duplicatePrompt(id: string): Promise<PromptList> {
+  return invoke<PromptList>('duplicate_prompt', { id });
+}
+
+export function updatePrompt(id: string, name: string, text: string): Promise<PromptList> {
+  return invoke<PromptList>('update_prompt', { id, name, text });
+}
+
+export function deletePrompt(id: string): Promise<PromptList> {
+  return invoke<PromptList>('delete_prompt', { id });
+}
+
+export function setPromptStarred(id: string, starred: boolean): Promise<PromptList> {
+  return invoke<PromptList>('set_prompt_starred', { id, starred });
+}
+
+/** Makes `id` the style new sessions use; stars it if needed. */
+export function setActivePrompt(id: string): Promise<PromptList> {
+  return invoke<PromptList>('set_active_prompt', { id });
+}
+
+export function listSummaryModels(): Promise<SummaryModel[]> {
+  return invoke<SummaryModel[]>('list_summary_models');
+}
+
+/** Switches the summary model; a missing one downloads via `onModelsProgress`. */
+export function setSummaryModel(modelId: string): Promise<void> {
+  return invoke<void>('set_summary_model', { modelId });
 }
 
 /** The pinned models with their license terms, in download order. */

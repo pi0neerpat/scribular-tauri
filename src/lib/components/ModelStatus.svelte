@@ -1,17 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { downloadModels, modelsStatus, onModelsProgress } from '../api';
+  import { downloadModels, listSummaryModels, modelsStatus, onModelsProgress } from '../api';
   import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
 
-  const SUMMARY_MODEL = 'gemma-2-2b-it-q4km';
+  // The selected summary model; a switch in Settings emits progress for it.
+  let summaryId = $state<string | null>(null);
   let models = $state<ModelProgress[]>([]);
-  let summary = $derived(models.find((m) => m.modelId === SUMMARY_MODEL));
+  let summary = $derived(models.find((m) => m.modelId === summaryId));
 
   onMount(() => {
+    const selected = () =>
+      listSummaryModels().then((list) => (summaryId = list.find((m) => m.selected)?.spec.id ?? null));
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
+      void selected();
     });
+    void selected();
     // Snapshot after the listener is live, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     unlisten

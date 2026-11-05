@@ -19,7 +19,9 @@ use serde::Serialize;
 use ts_rs::TS;
 
 pub use download::{ensure, model_path, verify_existing, DownloadError};
-pub use manifest::{manifest, ModelKind, ModelSpec, GEMMA_2_2B, SPEAKER_CAMPPLUS, WHISPER_BASE};
+pub use manifest::{
+    manifest, ModelKind, ModelSpec, DEFAULT_LLM, GEMMA_2_2B, SPEAKER_CAMPPLUS, WHISPER_BASE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +89,8 @@ pub struct ModelManager {
     /// One guard per model: retries can proceed while a later model downloads.
     running: Vec<AtomicBool>,
     pub readiness: Readiness,
+    /// The summary model (spec 03 R18); only it downloads with the rest.
+    selected_llm: Mutex<String>,
 }
 
 struct DownloadGuard<'a>(&'a AtomicBool);
@@ -99,13 +103,40 @@ impl Drop for DownloadGuard<'_> {
 
 impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
+        let first_llm = specs
+            .iter()
+            .find(|s| s.kind == ModelKind::Llm)
+            .map(|s| s.id.clone())
+            .unwrap_or_default();
         Self {
             dir,
             running: specs.iter().map(|_| AtomicBool::new(false)).collect(),
             specs,
             client: reqwest::Client::new(),
             readiness: Readiness::default(),
+            selected_llm: Mutex::new(first_llm),
         }
+    }
+
+    pub fn selected_llm(&self) -> String {
+        self.selected_llm.lock().unwrap().clone()
+    }
+
+    /// Makes `model_id` the summary model. Fails for an id that is not an LLM.
+    pub fn select_llm(&self, model_id: &str) -> Result<(), String> {
+        if !self
+            .specs
+            .iter()
+            .any(|s| s.id == model_id && s.kind == ModelKind::Llm)
+        {
+            return Err(format!("unknown summary model {model_id}"));
+        }
+        *self.selected_llm.lock().unwrap() = model_id.into();
+        Ok(())
+    }
+
+    pub fn spec(&self, model_id: &str) -> Option<&ModelSpec> {
+        self.specs.iter().find(|s| s.id == model_id)
     }
 
     pub fn dir(&self) -> &Path {
@@ -157,8 +188,10 @@ impl ModelManager {
     /// retried during the LLM download, with at most one download per model.
     /// Stops at an active model so concurrent calls cannot skip ahead.
     pub async fn ensure_all(&self, on_progress: &(dyn Fn(ModelProgress) + Send + Sync)) {
+        let selected = self.selected_llm();
         for i in 0..self.specs.len() {
-            if !self.specs[i].optional {
+            let spec = &self.specs[i];
+            if !spec.optional && (spec.kind != ModelKind::Llm || spec.id == selected) {
                 if self.running[i].load(Ordering::Acquire) {
                     return;
                 }

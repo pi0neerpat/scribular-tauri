@@ -123,6 +123,8 @@ pub struct FakeLoader {
     pub ready: AtomicBool,
     /// When set, `load` fails with this error instead.
     pub fail: Option<LlmError>,
+    /// What `model_id` reports; tests switch it to simulate a model change.
+    pub model: Mutex<String>,
 }
 
 impl FakeLoader {
@@ -132,13 +134,14 @@ impl FakeLoader {
             loads: AtomicUsize::new(0),
             ready: AtomicBool::new(true),
             fail: None,
+            model: Mutex::new("fake-llm".into()),
         }
     }
 }
 
 impl SummarizerLoader for FakeLoader {
-    fn model_id(&self) -> &str {
-        "fake-llm"
+    fn model_id(&self) -> String {
+        self.model.lock().unwrap().clone()
     }
 
     fn ready(&self) -> bool {

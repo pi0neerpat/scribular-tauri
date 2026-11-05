@@ -6,7 +6,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
-use scribular_lib::llm::llama::{LlamaLoader, LlamaSummarizer};
+use scribular_lib::llm::llama::{params, LlamaLoader, LlamaSummarizer};
 use scribular_lib::llm::prompt::{chunk_budget, chunk_prompt};
 use scribular_lib::llm::Summarizer;
 use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_2_2B};
@@ -66,7 +66,7 @@ impl JobEvents for Quiet {
 #[ignore = "needs the gemma-2-2b model"]
 fn fifty_minute_benchmark_splits_into_at_most_three_chunks() {
     let models = models();
-    let llm = LlamaSummarizer::load(&models.path(GEMMA_2_2B).unwrap()).unwrap();
+    let llm = LlamaSummarizer::load(&models.path(GEMMA_2_2B).unwrap(), params(GEMMA_2_2B)).unwrap();
     let store = Store::open(
         &std::env::temp_dir().join(format!("scribular-llama-chunks-{}.db", std::process::id())),
         &MemoryKeyStore::with_key([7; 32]),

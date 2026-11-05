@@ -594,8 +594,28 @@ fn recording_settings_round_trip_and_clear() {
         multi_speaker: false,
     };
     store.set_recording_settings(&cleared).unwrap();
-    assert_eq!(store.recording_settings().unwrap(), cleared);
-    assert_eq!(store.get_setting(ACTIVE_PROMPT_ID).unwrap(), None);
+    // Spec 03 R6: an absent prompt keeps the active style.
+    assert_eq!(
+        store.recording_settings().unwrap(),
+        RecordingSettings {
+            prompt_id: Some("default-therapy-dora".into()),
+            ..cleared
+        }
+    );
+    assert_eq!(
+        store.get_setting(ACTIVE_PROMPT_ID).unwrap().as_deref(),
+        Some("default-therapy-dora")
+    );
+
+    let unknown = RecordingSettings {
+        prompt_id: Some("no-such-style".into()),
+        ..chosen.clone()
+    };
+    assert!(store.set_recording_settings(&unknown).is_err());
+    assert_eq!(
+        store.get_setting(ACTIVE_PROMPT_ID).unwrap().as_deref(),
+        Some("default-therapy-dora")
+    );
 }
 
 #[test]
@@ -612,7 +632,7 @@ fn recording_settings_are_read_whole_while_saving() {
     let b = RecordingSettings {
         input_mode: InputMode::System,
         target_app: Some("Zoom".into()),
-        prompt_id: None,
+        prompt_id: Some("default-eft".into()),
         keep_audio: true,
         multi_speaker: true,
     };

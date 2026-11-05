@@ -4,7 +4,12 @@
   import SpeakersCard from './SpeakersCard.svelte';
 
   // `active` is false while the record view is hidden behind Settings.
-  let { session, active = true, onUpdate }: { session: Session; active?: boolean; onUpdate?: (session: Session) => void } = $props();
+  let {
+    session,
+    active = true,
+    byline = '',
+    onUpdate,
+  }: { session: Session; active?: boolean; byline?: string; onUpdate?: (session: Session) => void } = $props();
 </script>
 
 <article>
@@ -17,7 +22,7 @@
     <p>Stopped.</p>
   {/if}
   {#if session.summary}
-    <h4>Summary</h4>
+    <h4>Summary{#if byline} · {byline}{/if}</h4>
     <pre>{session.summary}</pre>
   {/if}
   <SpeakersCard {session} {onUpdate} />
