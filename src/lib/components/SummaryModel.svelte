@@ -14,11 +14,11 @@
 
   const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
-  async function refresh(syncPicked = false) {
+  async function refresh() {
     try {
       models = await listSummaryModels();
       const selectedId = models.find((m) => m.selected)?.spec.id ?? null;
-      if (syncPicked || picked === null) picked = selectedId;
+      picked ??= selectedId;
     } catch (e) {
       error = String(e);
     }

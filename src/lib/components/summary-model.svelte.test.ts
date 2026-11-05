@@ -12,13 +12,12 @@ const models = [
   { spec: spec('small', 1_600_000_000, null), selected: true, state: 'ready' },
   { spec: spec('big', 2_500_000_000, 'Needs about 8 GB of free memory.'), selected: false, state: 'missing' },
 ];
-let currentModels = models;
-let modelChanged: (() => void) | undefined;
+let modelChanged: ((id: string) => void) | undefined;
 
 const setSummaryModel = vi.fn();
 const openExternalLink = vi.fn();
-const listSummaryModels = vi.fn(async () => currentModels);
-const onSummaryModelChanged = vi.fn(async (callback: () => void) => { modelChanged = callback; return () => {}; });
+const listSummaryModels = vi.fn(async () => models);
+const onSummaryModelChanged = vi.fn(async (callback: (id: string) => void) => { modelChanged = callback; return () => {}; });
 let reportProgress: ((progress: { modelId: string; state: string; downloadedBytes: number; totalBytes: number; error: string | null }) => void) | undefined;
 vi.mock('../api', () => ({
   listSummaryModels, onModelsProgress: vi.fn(async (callback) => { reportProgress = callback; return () => {}; }),
@@ -27,7 +26,7 @@ vi.mock('../api', () => ({
 }));
 const { default: SummaryModel } = await import('./SummaryModel.svelte');
 
-afterEach(() => { vi.clearAllMocks(); currentModels = models; modelChanged = undefined; });
+afterEach(() => { vi.clearAllMocks(); modelChanged = undefined; });
 
 it('applies progress locally instead of fetching the model list for every tick', async () => {
   const target = document.createElement('div');
@@ -73,8 +72,7 @@ it('restores the backend selection after a download fails', async () => {
   use.click();
   await vi.waitFor(() => expect(radios[1].checked).toBe(true));
   reportProgress!({ modelId: 'big', state: 'failed', downloadedBytes: 0, totalBytes: 2_500_000_000, error: 'network failed' });
-  currentModels = models;
-  modelChanged!();
+  modelChanged!('small');
   await vi.waitFor(() => expect(radios[0].checked).toBe(true));
   expect(target.textContent).toContain('network failed');
   unmount(app);
@@ -85,8 +83,7 @@ it('refreshes selection after another view changes the model', async () => {
   const target = document.createElement('div');
   const app = mount(SummaryModel, { target });
   await vi.waitFor(() => expect(target.textContent).toContain('1.6 GB'));
-  currentModels = models.map((m) => ({ ...m, selected: m.spec.id === 'big' }));
-  modelChanged!();
+  modelChanged!('big');
   await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].checked).toBe(true));
   unmount(app);
   target.remove();
