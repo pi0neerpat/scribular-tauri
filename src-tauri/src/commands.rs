@@ -314,7 +314,7 @@ pub fn set_summary_model(
     let switched = recorder
         .while_idle(|| jobs.while_idle(|| switch_summary_model(&store, &models, false, &model_id)))
         .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?
-        .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?;
+        .ok_or_else(|| MODEL_SWITCH_BUSY.to_owned())?;
     let previous = switched?;
     let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &model_id);
     if models.readiness.get(&model_id) == ModelState::Ready {
