@@ -98,7 +98,6 @@ pub fn run() {
             commands::delete_session,
             commands::list_prompts,
             commands::get_prompt_list,
-            commands::get_active_prompt_id,
             commands::create_prompt,
             commands::duplicate_prompt,
             commands::update_prompt,
@@ -157,9 +156,7 @@ pub fn run() {
             }
             let store = Arc::new(opened?);
             // Parity spec 03 R9: built-in styles follow the shipped JSON.
-            if let Err(e) = store.sync_builtins() {
-                eprintln!("syncing built-in styles failed: {e}");
-            }
+            store.sync_builtins()?;
             app.manage(Arc::clone(&store));
             jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
 
@@ -180,10 +177,14 @@ pub fn run() {
                 models::manifest(),
             ));
             // An id no longer in the manifest keeps the default.
-            if let Ok(Some(id)) = store.get_setting(store::SUMMARY_MODEL_ID) {
-                if let Err(e) = models.select_llm(&id) {
-                    eprintln!("{e}; using the default summary model");
+            match store.get_setting(store::SUMMARY_MODEL_ID) {
+                Ok(Some(id)) => {
+                    if let Err(e) = models.select_llm(&id) {
+                        eprintln!("{e}; using the default summary model");
+                    }
                 }
+                Ok(None) => {}
+                Err(e) => eprintln!("reading the selected summary model failed: {e}"),
             }
             app.manage(Arc::clone(&models));
             let stt = transcriber_loader(&models);

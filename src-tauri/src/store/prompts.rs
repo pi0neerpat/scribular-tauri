@@ -222,9 +222,11 @@ fn checked_text(text: &str) -> Result<&str> {
 
 /// `custom-<32 hex>` from SQLite's CSPRNG, so no id crate is needed.
 fn new_id(c: &Connection) -> Result<String> {
-    Ok(c.query_row("SELECT 'custom-' || lower(hex(randomblob(16)))", [], |r| {
-        r.get(0)
-    })?)
+    Ok(
+        c.query_row("SELECT 'custom-' || lower(hex(randomblob(16)))", [], |r| {
+            r.get(0)
+        })?,
+    )
 }
 
 /// Fails unless `id` names a custom style.
@@ -242,9 +244,11 @@ fn custom(c: &Connection, id: &str) -> Result<()> {
 }
 
 fn starred_count(c: &Connection) -> Result<i64> {
-    Ok(c.query_row("SELECT count(*) FROM prompts WHERE starred", [], |r| {
-        r.get(0)
-    })?)
+    Ok(
+        c.query_row("SELECT count(*) FROM prompts WHERE starred", [], |r| {
+            r.get(0)
+        })?,
+    )
 }
 
 pub(super) fn set_active(c: &Connection, id: &str) -> Result<()> {
@@ -271,7 +275,7 @@ fn repair_active(c: &Connection) -> Result<()> {
     }
     let next: Option<String> = c
         .query_row(
-            "SELECT id FROM prompts ORDER BY starred DESC, rowid LIMIT 1",
+            "SELECT id FROM prompts ORDER BY starred DESC, is_default, rowid LIMIT 1",
             [],
             |r| r.get(0),
         )

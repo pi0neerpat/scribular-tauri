@@ -12,11 +12,12 @@ use std::{
     },
 };
 
-use scribular_lib::models::{
-    ensure, DownloadError, ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState,
-};
 use scribular_lib::commands::{
     revert_summary_model, summary_models, switch_summary_model, MODEL_SWITCH_BUSY,
+};
+use scribular_lib::models::{
+    ensure, manifest, DownloadError, ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState,
+    DEFAULT_LLM,
 };
 use scribular_lib::store::{key::MemoryKeyStore, Store, SUMMARY_MODEL_ID};
 use sha2::{Digest, Sha256};
@@ -452,6 +453,18 @@ fn store_in(dir: &TempDir) -> Store {
     Store::open(&dir.0.join("test.db"), &MemoryKeyStore::with_key([7; 32])).unwrap()
 }
 
+#[test]
+fn manager_prefers_the_default_llm_over_an_earlier_manifest_entry() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let llms = vec![
+        spec(&server, "other", ModelKind::Llm, b"other"),
+        spec(&server, DEFAULT_LLM, ModelKind::Llm, b"default"),
+    ];
+    let manager = ModelManager::new(dir.0.clone(), llms);
+    assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+}
+
 /// Parity spec 03 AS18: the first run fetches speech plus the selected LLM.
 #[test]
 fn as18_first_run_downloads_only_the_selected_llm() {
@@ -472,6 +485,39 @@ fn as18_first_run_downloads_only_the_selected_llm() {
     let paths: Vec<_> = server.seen().into_iter().map(|(p, _)| p).collect();
     assert_eq!(paths, ["speech.bin", "small.bin"]);
     assert_eq!(manager.readiness.get("small"), ModelState::Ready);
+}
+
+#[test]
+fn ensure_all_uses_the_current_selection_for_each_llm() {
+    let (speech, small, big) = (body(MB / 8, 1), body(MB / 8, 2), body(MB / 8, 9));
+    let server = Server::start(
+        HashMap::from([
+            ("speech.bin".into(), speech.clone()),
+            ("big.bin".into(), big.clone()),
+        ]),
+        HashMap::new(),
+    );
+    let dir = TempDir::new();
+    let manager = ModelManager::new(
+        dir.0.clone(),
+        vec![
+            spec(&server, "speech", ModelKind::Speech, &speech),
+            spec(&server, "small", ModelKind::Llm, &small),
+            spec(&server, "big", ModelKind::Llm, &big),
+        ],
+    );
+    let (_, sink) = recorder();
+    let on_progress = |p: ModelProgress| {
+        sink(p.clone());
+        if p.model_id == "speech" && p.state == ModelState::Ready {
+            manager.select_llm("big").unwrap();
+        }
+    };
+
+    run(manager.ensure_all(&on_progress));
+
+    let paths: Vec<_> = server.seen().into_iter().map(|(p, _)| p).collect();
+    assert_eq!(paths, ["speech.bin", "big.bin"]);
 }
 
 /// Parity spec 03 AS17: a busy app refuses the switch and keeps the key.
@@ -499,6 +545,7 @@ fn as16_a_failed_download_reverts_to_the_previous_model() {
     let dir = TempDir::new();
     let store = store_in(&dir);
     let manager = ModelManager::new(dir.0.clone(), two_llms(&server, b"s", b"m"));
+    manager.readiness.set("small", ModelState::Ready);
 
     let previous = switch_summary_model(&store, &manager, false, "big").unwrap();
     assert_eq!(previous, "small");
@@ -507,7 +554,9 @@ fn as16_a_failed_download_reverts_to_the_previous_model() {
         store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
         Some("big")
     );
-    assert!(summary_models(&manager).iter().any(|m| m.spec.id == "big" && m.selected));
+    assert!(summary_models(&manager)
+        .iter()
+        .any(|m| m.spec.id == "big" && m.selected));
 
     let (events, sink) = recorder();
     assert!(run(manager.ensure_one("big", &sink)).is_err());
@@ -516,11 +565,31 @@ fn as16_a_failed_download_reverts_to_the_previous_model() {
         .unwrap()
         .iter()
         .any(|p| p.model_id == "big" && p.state == ModelState::Failed && p.error.is_some()));
-    revert_summary_model(&store, &manager, "big", &previous);
+    assert!(revert_summary_model(&store, &manager, "big", &previous));
 
     assert_eq!(manager.selected_llm(), "small");
     assert_eq!(
         store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
         Some("small")
     );
+}
+
+#[test]
+fn bundled_manifest_keeps_the_declared_default_even_if_order_changes() {
+    let dir = TempDir::new();
+    let manager = ModelManager::new(dir.0.clone(), manifest());
+    assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+}
+
+#[test]
+fn failed_model_does_not_revert_to_a_previous_model_that_is_not_ready() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let store = store_in(&dir);
+    let manager = ModelManager::new(dir.0.clone(), two_llms(&server, b"s", b"m"));
+    let previous = switch_summary_model(&store, &manager, false, "big").unwrap();
+    manager.readiness.set("big", ModelState::Failed);
+
+    assert!(!revert_summary_model(&store, &manager, "big", &previous));
+    assert_eq!(manager.selected_llm(), "big");
 }

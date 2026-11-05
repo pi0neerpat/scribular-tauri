@@ -599,7 +599,7 @@ fn recording_settings_round_trip_and_clear() {
         store.recording_settings().unwrap(),
         RecordingSettings {
             prompt_id: Some("default-therapy-dora".into()),
-            ..cleared
+            ..cleared.clone()
         }
     );
     assert_eq!(
@@ -612,6 +612,13 @@ fn recording_settings_round_trip_and_clear() {
         ..chosen.clone()
     };
     assert!(store.set_recording_settings(&unknown).is_err());
+    assert_eq!(
+        store.recording_settings().unwrap(),
+        RecordingSettings {
+            prompt_id: Some("default-therapy-dora".into()),
+            ..cleared.clone()
+        }
+    );
     assert_eq!(
         store.get_setting(ACTIVE_PROMPT_ID).unwrap().as_deref(),
         Some("default-therapy-dora")

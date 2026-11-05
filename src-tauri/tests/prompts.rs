@@ -63,7 +63,10 @@ fn as2_built_ins_cannot_be_edited_or_deleted() {
         s.update_prompt(DORA, "x", "y"),
         Err(StoreError::BuiltInPrompt)
     ));
-    assert!(matches!(s.delete_prompt(DORA), Err(StoreError::BuiltInPrompt)));
+    assert!(matches!(
+        s.delete_prompt(DORA),
+        Err(StoreError::BuiltInPrompt)
+    ));
     assert_eq!(s.get_prompt(DORA).unwrap(), before);
 }
 
@@ -133,6 +136,20 @@ fn as6_deleting_the_active_style_repairs_active_and_keeps_sessions() {
         s.get_session(&session.id).unwrap().unwrap().prompt_id,
         Some(x.id)
     );
+}
+
+#[test]
+fn deleting_active_prefers_custom_favourites_over_builtin_favourites() {
+    let db = TempDb::new();
+    let s = db.open();
+    let active_style = s.create_prompt("Active", "text").unwrap();
+    let remaining_custom = s.create_prompt("Next", "text").unwrap();
+    s.set_active_prompt(&active_style.id).unwrap();
+
+    s.delete_prompt(&active_style.id).unwrap();
+
+    assert_eq!(active(&s), remaining_custom.id);
+    assert!(s.get_prompt(&remaining_custom.id).unwrap().unwrap().starred);
 }
 
 #[test]

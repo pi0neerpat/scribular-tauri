@@ -4,17 +4,24 @@
   import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
 
-  // The selected summary model; a switch in Settings emits progress for it.
+  // Selection emits its current state; download ticks update the same snapshot.
   let summaryId = $state<string | null>(null);
   let models = $state<ModelProgress[]>([]);
+  let llmIds = new Set<string>();
   let summary = $derived(models.find((m) => m.modelId === summaryId));
 
   onMount(() => {
     const selected = () =>
-      listSummaryModels().then((list) => (summaryId = list.find((m) => m.selected)?.spec.id ?? null));
+      listSummaryModels().then((list) => {
+        llmIds = new Set(list.map((m) => m.spec.id));
+        summaryId = list.find((m) => m.selected)?.spec.id ?? null;
+      });
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
-      void selected();
+      if (llmIds.has(p.modelId)) {
+        if (p.state === 'failed') void selected();
+        else summaryId = p.modelId;
+      }
     });
     void selected();
     // Snapshot after the listener is live, so no progress event is missed;
@@ -22,7 +29,9 @@
     unlisten
       .then(() => modelsStatus())
       .then((value) => (models = mergeSnapshot(value, models)));
-    return () => { unlisten.then((fn) => fn()); };
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   });
 </script>
 

@@ -79,7 +79,8 @@ impl Store {
     }
 
     /// Saves them all at once; an absent app clears it, an absent prompt
-    /// keeps the active one. An unknown prompt id is rejected.
+    /// keeps the active one. Unknown ids are rejected and unstarred styles
+    /// are starred, matching `set_active_prompt`.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;

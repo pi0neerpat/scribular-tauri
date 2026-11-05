@@ -132,7 +132,9 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), llms.len());
         assert_eq!(llms.iter().filter(|m| m.id == DEFAULT_LLM).count(), 1);
-        assert!(llms.iter().all(|m| !m.optional && !m.description.is_empty()));
+        assert!(llms
+            .iter()
+            .all(|m| !m.optional && !m.description.is_empty()));
     }
 
     #[test]

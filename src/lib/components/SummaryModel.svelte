@@ -14,21 +14,26 @@
 
   const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
-  async function refresh() {
+  async function refresh(syncPicked = false) {
     try {
       models = await listSummaryModels();
-      picked ??= models.find((m) => m.selected)?.spec.id ?? null;
+      const selectedId = models.find((m) => m.selected)?.spec.id ?? null;
+      if (syncPicked || picked === null) picked = selectedId;
     } catch (e) {
       error = String(e);
     }
   }
 
   onMount(() => {
-    // A failed download reverts the selection, so re-read it on each event.
     const unlisten = onModelsProgress((p) => {
-      if (models.some((m) => m.spec.id === p.modelId)) void refresh();
+      if (!models.some((m) => m.spec.id === p.modelId)) return;
+      models = models.map((m) => m.spec.id === p.modelId ? { ...m, state: p.state } : m);
+      if (p.state === 'failed') {
+        error = p.error ?? 'Model download failed.';
+        void refresh(true);
+      }
     });
-    unlisten.then(refresh, refresh);
+    unlisten.then(() => refresh(), () => refresh());
     return () => { unlisten.then((fn) => fn(), () => {}); };
   });
 
@@ -38,14 +43,17 @@
       confirming = true;
       return;
     }
+    const id = choice.spec.id;
     confirming = false;
     try {
-      await setSummaryModel(choice.spec.id);
+      await setSummaryModel(id);
+      models = models.map((m) => ({ ...m, selected: m.spec.id === id }));
       error = null;
     } catch (e) {
       error = String(e);
+      await refresh();
+      picked = selected?.spec.id ?? null;
     }
-    await refresh();
   }
 </script>
 
@@ -61,7 +69,10 @@
     </label>
     <p>{m.spec.description}</p>
     {#if m.spec.caution}<p>{m.spec.caution}</p>{/if}
-    <button class="link" onclick={() => openExternalLink(m.spec.licenseUrl)}>{m.spec.license} licence</button>
+    <button class="link" onclick={async () => {
+      try { await openExternalLink(m.spec.licenseUrl); }
+      catch (e) { error = String(e); }
+    }}>{m.spec.license} licence</button>
   {/each}
   {#if confirming && choice}
     <p role="status">Downloads {gb(choice.spec.size)} once. Licence: {choice.spec.license}.</p>

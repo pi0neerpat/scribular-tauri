@@ -13,7 +13,9 @@ use std::{
 };
 
 use scribular_lib::engines::fake::{FakeLoader, FakeSummarizer, TEMPLATE_TOKENS};
-use scribular_lib::jobs::{JobError, JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
+use scribular_lib::jobs::{
+    JobError, JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta,
+};
 use scribular_lib::llm::prompt::{chunk_prompt, combine_prompt, CHUNK_NOTE_TOKENS};
 use scribular_lib::llm::{Generation, LlmError};
 use scribular_lib::store::key::MemoryKeyStore;
@@ -375,7 +377,11 @@ fn a_second_regenerate_waits_for_the_first() {
     let a = h.session(&words(250), "");
     let b = h.session(&words(250), "");
 
+    assert_eq!(h.queue.while_idle(|| 7), Ok(7));
     h.queue.regenerate(&a, PROMPT_ID).unwrap();
+    h.events
+        .wait_for(|p| p.session_id == a && p.state == SessionStatus::Summarizing);
+    assert!(h.queue.while_idle(|| ()).is_err());
     h.queue.regenerate(&b, PROMPT_ID).unwrap();
     h.wait_idle();
 
@@ -513,7 +519,11 @@ fn as15_switching_the_model_reloads_once_and_records_the_new_id() {
     h.wait_idle();
     h.queue.regenerate(&id, PROMPT_ID).unwrap();
     h.wait_idle();
-    assert_eq!(h.loader.loads.load(Ordering::SeqCst), 1, "cached model reused");
+    assert_eq!(
+        h.loader.loads.load(Ordering::SeqCst),
+        1,
+        "cached model reused"
+    );
     assert_eq!(h.get(&id).model_id.as_deref(), Some("fake-llm"));
 
     *h.loader.model.lock().unwrap() = "other-llm".into();

@@ -105,7 +105,8 @@ impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
         let first_llm = specs
             .iter()
-            .find(|s| s.kind == ModelKind::Llm)
+            .find(|s| s.id == DEFAULT_LLM && s.kind == ModelKind::Llm)
+            .or_else(|| specs.iter().find(|s| s.kind == ModelKind::Llm))
             .map(|s| s.id.clone())
             .unwrap_or_default();
         Self {
@@ -120,6 +121,13 @@ impl ModelManager {
 
     pub fn selected_llm(&self) -> String {
         self.selected_llm.lock().unwrap().clone()
+    }
+
+    pub fn is_downloading(&self, model_id: &str) -> bool {
+        self.specs
+            .iter()
+            .position(|spec| spec.id == model_id)
+            .is_some_and(|i| self.running[i].load(Ordering::Acquire))
     }
 
     /// Makes `model_id` the summary model. Fails for an id that is not an LLM.
@@ -188,9 +196,9 @@ impl ModelManager {
     /// retried during the LLM download, with at most one download per model.
     /// Stops at an active model so concurrent calls cannot skip ahead.
     pub async fn ensure_all(&self, on_progress: &(dyn Fn(ModelProgress) + Send + Sync)) {
-        let selected = self.selected_llm();
         for i in 0..self.specs.len() {
             let spec = &self.specs[i];
+            let selected = self.selected_llm();
             if !spec.optional && (spec.kind != ModelKind::Llm || spec.id == selected) {
                 if self.running[i].load(Ordering::Acquire) {
                     return;

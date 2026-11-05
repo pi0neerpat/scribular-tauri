@@ -57,7 +57,9 @@ impl fmt::Display for StoreError {
             ),
             Self::Locked(reason) => write!(f, "database is locked: {reason:?}"),
             Self::Io(e) => write!(f, "file error: {e}"),
-            Self::BuiltInPrompt => f.write_str("Built-in styles can't be changed. Duplicate it to edit."),
+            Self::BuiltInPrompt => {
+                f.write_str("Built-in styles can't be changed. Duplicate it to edit.")
+            }
             Self::EmptyPrompt => f.write_str("The style's prompt can't be empty."),
             Self::PromptTooLong => write!(
                 f,

@@ -90,10 +90,6 @@ export function getPromptList(): Promise<PromptList> {
   return invoke<PromptList>('get_prompt_list');
 }
 
-export function getActivePromptId(): Promise<string | null> {
-  return invoke<string | null>('get_active_prompt_id');
-}
-
 export function createPrompt(name: string, text: string): Promise<PromptList> {
   return invoke<PromptList>('create_prompt', { name, text });
 }

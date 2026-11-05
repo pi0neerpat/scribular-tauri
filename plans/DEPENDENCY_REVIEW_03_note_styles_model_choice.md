@@ -1,8 +1,7 @@
 # Dependency review: parity spec 03 (note styles and summary-model choice)
 
 Policy: dependency choices are reviewed only for being commonly used and
-released within the last 12 months (see the dependency policy in the
-`plans/parity` specs).
+released within the last 12 months.
 
 ## Crates and npm packages
 

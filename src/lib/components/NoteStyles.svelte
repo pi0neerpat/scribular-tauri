@@ -1,7 +1,7 @@
 <script lang="ts">
   // Note styles (parity spec 03 R12, R13): list, star, default, and an inline
   // editor that asks before dropping unsaved edits.
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     createPrompt,
     deletePrompt,
@@ -27,6 +27,8 @@
   let pending = $state<(() => void) | null>(null);
   let deleting = $state<Prompt | null>(null);
   let error = $state<string | null>(null);
+  let saving = $state(false);
+  let dialogElement = $state<HTMLDivElement | undefined>();
 
   let open = $derived(list?.prompts.find((p) => p.id === openId) ?? null);
   let dirty = $derived(
@@ -38,6 +40,10 @@
   ]);
 
   onMount(() => { void call(getPromptList); });
+
+  $effect(() => {
+    if (pending || deleting) void tick().then(() => dialogElement?.querySelector('button')?.focus());
+  });
 
   async function call(fn: () => Promise<PromptList>): Promise<boolean> {
     try {
@@ -63,15 +69,21 @@
   }
 
   async function save(): Promise<boolean> {
-    if (openId === DRAFT) {
-      if (!(await call(() => createPrompt(name, text)))) return false;
-      edit(list!.createdId);
+    if (saving) return false;
+    saving = true;
+    try {
+      if (openId === DRAFT) {
+        if (!(await call(() => createPrompt(name, text)))) return false;
+        edit(list!.createdId);
+        return true;
+      }
+      const id = openId!;
+      if (!(await call(() => updatePrompt(id, name, text)))) return false;
+      edit(id);
       return true;
+    } finally {
+      saving = false;
     }
-    const id = openId!;
-    if (!(await call(() => updatePrompt(id, name, text)))) return false;
-    edit(id);
-    return true;
   }
 
   async function duplicate(id: string) {
@@ -102,7 +114,7 @@
     />
     <button onclick={() => guard(() => edit(DRAFT))}>New style</button>
     {#if openId === DRAFT}
-      <NoteStyleEditor bind:name bind:text readonly={false} {dirty} onSave={save} />
+      <NoteStyleEditor bind:name bind:text readonly={false} {dirty} {saving} onSave={save} />
     {/if}
     {#each groups as [heading, prompts] (heading)}
       {#if prompts.length}
@@ -111,7 +123,7 @@
           {#each prompts as p (p.id)}
             <li>
               <button
-                aria-label={p.starred ? `Unstar ${p.name}` : `Star ${p.name}`}
+                aria-label={`Toggle favourite for ${p.name}`}
                 aria-pressed={p.starred}
                 onclick={() => call(() => setPromptStarred(p.id, !p.starred))}>{p.starred ? '★' : '☆'}</button>
               <button aria-expanded={openId === p.id} onclick={() => guard(() => edit(openId === p.id ? null : p.id))}>
@@ -130,9 +142,10 @@
                   bind:text
                   readonly={p.isDefault}
                   {dirty}
+                  {saving}
                   onSave={save}
                   onDuplicate={() => guard(() => duplicate(p.id))}
-                  onDelete={() => (deleting = p)}
+                  onDelete={() => guard(() => { edit(null); deleting = p; })}
                 />
               {/if}
             </li>
@@ -143,7 +156,7 @@
   {/if}
 
   {#if pending}
-    <div role="dialog" aria-modal="true" aria-label="Discard changes?">
+    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Discard changes?" tabindex="-1" onkeydown={(event) => event.key === 'Escape' && resolve('cancel')}>
       <p>Discard changes?</p>
       <button onclick={() => resolve('save')}>Save</button>
       <button onclick={() => resolve('discard')}>Discard</button>
@@ -152,7 +165,7 @@
   {/if}
   {#if deleting}
     {@const target = deleting}
-    <div role="dialog" aria-modal="true" aria-label="Delete style">
+    <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Delete style" tabindex="-1" onkeydown={(event) => event.key === 'Escape' && (deleting = null)}>
       <p>Delete “{target.name}”? This cannot be undone.</p>
       <button onclick={() => confirmDelete(target.id)}>Delete</button>
       <button onclick={() => (deleting = null)}>Cancel</button>

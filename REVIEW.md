@@ -46,7 +46,7 @@ Most bugs here sit on these seams:
   compatibility with external consumers (there are none).
 - Windows and Linux behaviour (later milestone).
 - Dependency choices: reviewed only for being commonly used and released within
-  the last 12 months (see the dependency policy in `plans/parity` specs).
+  the last 12 months (see `plans/DEPENDENCY_REVIEW_03_note_styles_model_choice.md`).
 - `plans/` and `docs/` prose, unless the PR changes their meaning.
 
 ## Review economy

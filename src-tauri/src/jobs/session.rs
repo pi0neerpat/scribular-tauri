@@ -256,6 +256,15 @@ impl Recorder {
             .map(|r| r.session_id.clone())
     }
 
+    /// Runs `operation` while preventing a recording from starting.
+    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ()> {
+        let recording = lock(&self.inner.recording);
+        if recording.is_some() {
+            return Err(());
+        }
+        Ok(operation())
+    }
+
     /// Creates a session in `Recording` and starts every source `mode`
     /// needs. If a source fails to start, the session is deleted again.
     pub fn start(

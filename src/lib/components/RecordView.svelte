@@ -73,10 +73,12 @@
   // Re-read when shown, since Settings may have changed styles or the model.
   $effect(() => {
     if (!active) return;
-    getPromptList().then((l) => (styles = l)).catch(() => {});
+    let current = true;
+    getPromptList().then((l) => { if (current) styles = l; }).catch(() => {});
     listSummaryModels()
-      .then((ms) => (modelNames = Object.fromEntries(ms.map((m) => [m.spec.id, m.spec.displayName]))))
+      .then((ms) => { if (current) modelNames = Object.fromEntries(ms.map((m) => [m.spec.id, m.spec.displayName])); })
       .catch(() => {});
+    return () => { current = false; };
   });
 
   async function chooseStyle(id: string) {
@@ -84,6 +86,7 @@
       styles = await setActivePrompt(id);
     } catch (e) {
       error = String(e);
+      try { styles = await getPromptList(); } catch {}
     }
   }
   let stopButton = $state<HTMLButtonElement | undefined>();

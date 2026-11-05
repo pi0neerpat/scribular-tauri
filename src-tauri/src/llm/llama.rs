@@ -100,13 +100,12 @@ impl SummarizerLoader for LlamaLoader {
         self.models.readiness.get(&self.model_id()) == ModelState::Ready
     }
 
-    fn load(&self) -> Result<Arc<dyn Summarizer>> {
-        let id = self.model_id();
+    fn load(&self, id: &str) -> Result<Arc<dyn Summarizer>> {
         if self.models.readiness.get(&id) != ModelState::Ready {
             return Err(LlmError::NotReady);
         }
-        let path = self.models.path(&id).ok_or(LlmError::NotReady)?;
-        Ok(Arc::new(LlamaSummarizer::load(&path, params(&id))?))
+        let path = self.models.path(id).ok_or(LlmError::NotReady)?;
+        Ok(Arc::new(LlamaSummarizer::load(&path, params(id))?))
     }
 }
 

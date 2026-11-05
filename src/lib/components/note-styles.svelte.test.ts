@@ -9,8 +9,10 @@ const list = { prompts: [prompt('a', 'Alpha'), prompt('b', 'Beta')], activeId: '
 
 const getPromptList = vi.fn();
 const updatePrompt = vi.fn();
+const createPrompt = vi.fn();
+const deletePrompt = vi.fn();
 vi.mock('../api', () => ({
-  getPromptList, updatePrompt, createPrompt: vi.fn(), deletePrompt: vi.fn(), duplicatePrompt: vi.fn(),
+  getPromptList, updatePrompt, createPrompt, deletePrompt, duplicatePrompt: vi.fn(),
   setActivePrompt: vi.fn(), setPromptStarred: vi.fn(),
 }));
 const { default: NoteStyles } = await import('./NoteStyles.svelte');
@@ -26,13 +28,14 @@ const dialog = () => target.querySelector('[role="dialog"]');
 beforeEach(async () => {
   getPromptList.mockResolvedValue(list);
   target = document.createElement('div');
+  document.body.append(target);
   app = mount(NoteStyles, { target });
   await vi.waitFor(() => expect(button('Alpha')).toBeTruthy());
   button('Alpha').click();
   flushSync();
 });
 
-afterEach(() => { unmount(app); vi.clearAllMocks(); });
+afterEach(() => { unmount(app); target.remove(); vi.clearAllMocks(); });
 
 function typeName(value: string) {
   input().value = value;
@@ -78,4 +81,40 @@ it('save keeps the edits, then opens the other style', async () => {
   await vi.waitFor(() => expect(input().value).toBe('Beta'));
   expect(updatePrompt).toHaveBeenCalledWith('a', 'Alpha 2', 'Alpha text');
   expect(target.textContent).toContain('Alpha 2');
+});
+
+it('asks before deleting a dirty style', () => {
+  typeName('Alpha 2');
+  button('Delete').click();
+  flushSync();
+  expect(dialog()?.textContent).toContain('Discard changes?');
+  expect(deletePrompt).not.toHaveBeenCalled();
+});
+
+it('focuses the discard dialog and lets Escape cancel it', async () => {
+  typeName('Alpha 2');
+  button('Beta').click();
+  flushSync();
+  await vi.waitFor(() => expect(dialog()?.contains(document.activeElement)).toBe(true));
+  dialog()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  flushSync();
+  expect(dialog()).toBeNull();
+  expect(input().value).toBe('Alpha 2');
+});
+
+it('sends only one create request when Save is clicked twice', async () => {
+  let finish!: (value: typeof list) => void;
+  createPrompt.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  button('New style').click();
+  flushSync();
+  const prompt = target.querySelector('textarea')!;
+  prompt.value = 'New text';
+  prompt.dispatchEvent(new Event('input'));
+  flushSync();
+  const save = button('Save');
+  save.click();
+  save.click();
+  expect(createPrompt).toHaveBeenCalledOnce();
+  finish(list);
+  await vi.waitFor(() => expect(createPrompt).toHaveBeenCalledOnce());
 });

@@ -885,8 +885,11 @@ fn as9_a_recording_keeps_the_style_active_at_start() {
     let h = Harness::new();
     let at_start = h.store.get_active_prompt_id().unwrap().unwrap();
     let id = h.start(InputMode::Mic);
+    assert!(h.recorder.while_idle(|| ()).is_err());
     h.feed(2);
-    h.store.set_active_prompt("default-narrative-therapy").unwrap();
+    h.store
+        .set_active_prompt("default-narrative-therapy")
+        .unwrap();
 
     h.recorder.stop().unwrap();
     h.events.wait_for(&id, SessionStatus::Done);

@@ -91,7 +91,7 @@
   async function save() {
     if (!settings) return;
     try {
-      // The active style is written only by NoteStyles (spec 03 R7).
+      // This settings save leaves the active style unchanged.
       await setRecordingSettings({ ...settings, promptId: null });
       error = null;
     } catch (e) {

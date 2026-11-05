@@ -162,17 +162,14 @@ pub fn get_prompt_list(store: State<Arc<Store>>) -> Result<PromptList, String> {
 }
 
 #[tauri::command]
-pub fn get_active_prompt_id(store: State<Arc<Store>>) -> Result<Option<String>, String> {
-    store.get_active_prompt_id().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub fn create_prompt(
     store: State<Arc<Store>>,
     name: String,
     text: String,
 ) -> Result<PromptList, String> {
-    let p = store.create_prompt(&name, &text).map_err(|e| e.to_string())?;
+    let p = store
+        .create_prompt(&name, &text)
+        .map_err(|e| e.to_string())?;
     prompt_list(&store, Some(p.id))
 }
 
@@ -274,19 +271,29 @@ pub fn switch_summary_model(
 /// R19: after `failed` could not download, goes back to `previous`, unless
 /// the user already picked something else or another download of it is
 /// still running.
-pub fn revert_summary_model(store: &Store, models: &ModelManager, failed: &str, previous: &str) {
+pub fn revert_summary_model(
+    store: &Store,
+    models: &ModelManager,
+    failed: &str,
+    previous: &str,
+) -> bool {
     if models.selected_llm() != failed
         || !matches!(
             models.readiness.get(failed),
             ModelState::Failed | ModelState::Missing
         )
+        || models.is_downloading(failed)
+        || models.readiness.get(previous) != ModelState::Ready
         || models.select_llm(previous).is_err()
     {
-        return;
+        return false;
     }
     if let Err(e) = store.set_setting(SUMMARY_MODEL_ID, previous) {
+        let _ = models.select_llm(failed);
         eprintln!("reverting the summary model failed: {e}");
+        return false;
     }
+    true
 }
 
 /// Switches the summary model without a relaunch; a model not yet on disk
@@ -300,8 +307,12 @@ pub fn set_summary_model(
     recorder: State<Arc<Recorder>>,
     model_id: String,
 ) -> Result<(), String> {
-    let busy = jobs.summarizing() || recorder.current().is_some();
-    let previous = switch_summary_model(&store, &models, busy, &model_id)?;
+    let switched = recorder
+        .while_idle(|| jobs.while_idle(|| switch_summary_model(&store, &models, false, &model_id)))
+        .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?
+        .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?;
+    let previous = switched?;
+    emit_model_status(&app, &models, &model_id);
     if models.readiness.get(&model_id) == ModelState::Ready {
         return Ok(());
     }
@@ -314,10 +325,18 @@ pub fn set_summary_model(
             .await;
         if let Err(e) = result {
             eprintln!("summary model {model_id}: {e}");
-            revert_summary_model(&store, &models, &model_id, &previous);
+            if revert_summary_model(&store, &models, &model_id, &previous) {
+                emit_model_status(&app, &models, &previous);
+            }
         }
     });
     Ok(())
+}
+
+fn emit_model_status(app: &AppHandle, models: &ModelManager, model_id: &str) {
+    if let Some(progress) = models.status().into_iter().find(|p| p.model_id == model_id) {
+        let _ = app.emit(MODELS_PROGRESS_EVENT, progress);
+    }
 }
 
 /// The pinned models with their license terms, in download order.

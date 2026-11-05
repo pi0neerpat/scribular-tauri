@@ -85,5 +85,5 @@ pub trait SummarizerLoader: Send + Sync {
         true
     }
 
-    fn load(&self) -> Result<Arc<dyn Summarizer>>;
+    fn load(&self, model_id: &str) -> Result<Arc<dyn Summarizer>>;
 }

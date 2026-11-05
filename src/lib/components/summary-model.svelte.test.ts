@@ -12,16 +12,79 @@ const models = [
   { spec: spec('small', 1_600_000_000, null), selected: true, state: 'ready' },
   { spec: spec('big', 2_500_000_000, 'Needs about 8 GB of free memory.'), selected: false, state: 'missing' },
 ];
+let currentModels = models;
 
 const setSummaryModel = vi.fn();
 const openExternalLink = vi.fn();
+const listSummaryModels = vi.fn(async () => currentModels);
+let reportProgress: ((progress: { modelId: string; state: string; downloadedBytes: number; totalBytes: number; error: string | null }) => void) | undefined;
 vi.mock('../api', () => ({
-  listSummaryModels: vi.fn(async () => models), onModelsProgress: vi.fn(async () => () => {}),
+  listSummaryModels, onModelsProgress: vi.fn(async (callback) => { reportProgress = callback; return () => {}; }),
   openExternalLink, setSummaryModel,
 }));
 const { default: SummaryModel } = await import('./SummaryModel.svelte');
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { vi.clearAllMocks(); currentModels = models; });
+
+it('applies progress locally instead of fetching the model list for every tick', async () => {
+  const target = document.createElement('div');
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(listSummaryModels).toHaveBeenCalledOnce());
+  reportProgress!({ modelId: 'big', state: 'downloading', downloadedBytes: 1, totalBytes: 2_500_000_000, error: null });
+  reportProgress!({ modelId: 'big', state: 'downloading', downloadedBytes: 2, totalBytes: 2_500_000_000, error: null });
+  await vi.waitFor(() => expect(target.textContent).toContain('Downloading'));
+  expect(listSummaryModels).toHaveBeenCalledOnce();
+  unmount(app);
+  target.remove();
+});
+
+it('restores the backend selection when switching fails', async () => {
+  setSummaryModel.mockRejectedValueOnce(new Error('download failed'));
+  const target = document.createElement('div');
+  document.body.append(target);
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.querySelectorAll('input[type="radio"]')).toHaveLength(2));
+  const radios = target.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  radios[1].click();
+  flushSync();
+  const use = [...target.querySelectorAll('button')].at(-1)!;
+  use.click();
+  flushSync();
+  use.click();
+  await vi.waitFor(() => expect(radios[0].checked).toBe(true));
+  unmount(app);
+  target.remove();
+});
+
+it('shows the selected model immediately after a successful switch', async () => {
+  const target = document.createElement('div');
+  document.body.append(target);
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('1.6 GB'));
+  const radios = target.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  radios[1].click();
+  flushSync();
+  [...target.querySelectorAll('button')].at(-1)!.click();
+  flushSync();
+  [...target.querySelectorAll('button')].at(-1)!.click();
+  await vi.waitFor(() => expect(radios[1].checked).toBe(true));
+  expect(setSummaryModel).toHaveBeenCalledWith('big');
+  unmount(app);
+  target.remove();
+});
+
+it('shows errors when the licence link cannot open', async () => {
+  openExternalLink.mockRejectedValueOnce(new Error('browser unavailable'));
+  const target = document.createElement('div');
+  document.body.append(target);
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('1.6 GB'));
+  target.querySelector<HTMLButtonElement>('button')!.click();
+  expect(openExternalLink).toHaveBeenCalledWith('https://ai.google.dev/gemma/terms');
+  await vi.waitFor(() => expect(target.textContent).toContain('browser unavailable'));
+  unmount(app);
+  target.remove();
+});
 
 it('shows size, caution, licence and Installed, and disables Use for the saved model', async () => {
   const target = document.createElement('div');

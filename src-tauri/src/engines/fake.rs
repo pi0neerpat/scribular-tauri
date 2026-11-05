@@ -148,7 +148,7 @@ impl SummarizerLoader for FakeLoader {
         self.ready.load(Ordering::SeqCst)
     }
 
-    fn load(&self) -> Result<Arc<dyn Summarizer>> {
+    fn load(&self, _model_id: &str) -> Result<Arc<dyn Summarizer>> {
         self.loads.fetch_add(1, Ordering::SeqCst);
         match &self.fail {
             Some(e) => Err(e.clone()),
