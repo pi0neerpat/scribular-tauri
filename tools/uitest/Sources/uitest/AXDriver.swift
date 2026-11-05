@@ -5,20 +5,31 @@ import Foundation
 import UITestCore
 
 final class AXDriver: Driver {
-    private let appPath: URL
+    private let lifecycle: AppLifecycle
+    private let runDir: URL
     private let keychainPassword: String?
     private var application: NSRunningApplication?
 
-    init(appPath: URL, keychainPassword: String?) {
-        self.appPath = appPath
+    init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?) {
+        self.lifecycle = lifecycle
+        self.runDir = runDir
         self.keychainPassword = keychainPassword
         self.application = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first
     }
 
     func perform(_ command: Command) throws(DriverError) -> String? {
         switch command {
-        case .launch, .quit:
-            throw .fatal("not implemented")
+        case .launch(let keepData):
+            let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
+            guard let app = appElement(),
+                  let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
+                throw .retryable("app window not ready")
+            }
+            return detail
+        case .quit:
+            lifecycle.quit()
+            application = nil
+            return nil
         case .click(let label, let index, let within):
             let element = try resolve(label, index: index, within: within)
             guard let frame = frame(of: element) else { throw .retryable("not found") }
