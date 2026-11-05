@@ -179,7 +179,13 @@ final class AXDriver: Driver {
         let lines = allElements().filter { frame(of: $0) != nil }.flatMap { element -> [String] in
             let role = (attribute(element, kAXRoleAttribute) as? String ?? "AXUnknown").replacingOccurrences(of: "AX", with: "")
             var seen = Set<String>()  // title/description/value often repeat within one element; distinct elements stay separate for `click ... index N`
-            return labelValues(element).filter { !$0.isEmpty && seen.insert($0).inserted }.map { label in
+            // `click` needs exact labels, so only actionable roles keep full title/description; values and other text are bounded to avoid leaking content into logs
+            let actionable = ["Button", "Link", "MenuItem", "MenuBarItem", "CheckBox", "RadioButton", "PopUpButton", "MenuButton", "Tab", "TabGroup", "DisclosureTriangle"].contains(role)
+            let entries = [(kAXTitleAttribute, actionable), (kAXDescriptionAttribute, actionable), (kAXValueAttribute, false)].compactMap { name, full -> String? in
+                guard let text = (attribute(element, name) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+                return full || text.count <= 80 ? text : String(text.prefix(80)) + "…"
+            }
+            return entries.filter { !$0.isEmpty && seen.insert($0).inserted }.map { label in
                 "\(role) \"\(label.replacingOccurrences(of: "\n", with: " "))\""
             }
         }

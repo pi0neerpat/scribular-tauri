@@ -51,7 +51,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
-| `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Labels are printed in full; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
+| `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Button, link, menu and similar actionable labels are printed in full; values and other text are cut at 80 characters; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
 | `screenshot ["name"]` | Save the app window to `runs/<timestamp>/<name>.png` (default `step-<line>.png`) for checking layout. The step prints the path. |
 | `quit` | Quit the app. |
 
