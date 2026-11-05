@@ -13,6 +13,7 @@
     openPrivacySettings,
     setRecordingSettings,
   } from '../api';
+  import LicenseSettings from './LicenseSettings.svelte';
   import type { AudioApp } from '../types/AudioApp';
   import type { InputMode } from '../types/InputMode';
   import type { Privacy } from '../types/Privacy';
@@ -177,6 +178,8 @@
       </select>
     </label>
   {/if}
+
+  <LicenseSettings />
 
   {#if denied}
     <p role="alert">

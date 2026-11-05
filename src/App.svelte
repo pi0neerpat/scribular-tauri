@@ -6,6 +6,8 @@
   import FirstRun from './lib/components/FirstRun.svelte';
   import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
+  import TrialBadge from './lib/components/TrialBadge.svelte';
+  import { followAccessState } from './lib/license';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
 
@@ -32,8 +34,10 @@
       .then((v) => (version = v))
       .catch((e) => (error = String(e)));
     const unlisten = onHeartbeat((beat) => (beats = beat.seq));
+    const stopLicense = followAccessState();
     return () => {
       unlisten.then((fn) => fn());
+      stopLicense();
     };
   });
 </script>
@@ -61,9 +65,15 @@
   <nav>
     <button onclick={() => (view = 'record')} aria-pressed={view === 'record'}>Record</button>
     <button onclick={() => (view = 'settings')} aria-pressed={view === 'settings'}>Settings</button>
+    <TrialBadge onclick={() => (view = 'settings')} />
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
-  <div hidden={view !== 'record'}><RecordView {speechReady} active={view === 'record'} /></div>
+  <div hidden={view !== 'record'}><RecordView
+      {speechReady}
+      active={view === 'record'}
+      onEnterLicense={() => (view = 'settings')}
+    />
+  </div>
   {#if view === 'settings'}
     <Settings />
   {/if}

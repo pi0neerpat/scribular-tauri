@@ -844,3 +844,36 @@ fn first_run_refuses_recording_until_speech_is_ready_without_creating_a_session(
     assert!(!h.system.is_open());
     assert_eq!(recorder.current(), None);
 }
+
+/// Spec 04 AS11: access lapsing mid-recording never touches the session.
+/// The gate sits only in the `start_recording` command, so here it is
+/// checked directly; stop and the summary job never consult it.
+#[test]
+fn a_lapse_mid_recording_still_saves_and_summarizes() {
+    use scribular_lib::license::{
+        api::FakeLicenseApi, AccessState, Licensing, ManualClock, DAY_MS,
+    };
+
+    let h = Harness::new();
+    let clock = Arc::new(ManualClock::at(1_790_000_000_000));
+    let licensing = Licensing::init(
+        h.store.clone(),
+        Arc::new(MemoryKeyStore::default()),
+        Arc::new(FakeLicenseApi::default()),
+        clock.clone(),
+    );
+    assert!(licensing.require_access().is_ok());
+    let id = h.start(InputMode::Mic);
+    h.feed(6);
+
+    clock.set(1_790_000_000_000 + 15 * DAY_MS);
+    let denied = licensing.require_access().unwrap_err();
+    assert_eq!(denied.state, AccessState::TrialEnded);
+
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    let s = h.get(&id);
+    assert_eq!(s.transcript, TRANSCRIPT);
+    assert!(!s.summary.is_empty());
+}

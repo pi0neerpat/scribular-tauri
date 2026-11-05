@@ -13,7 +13,7 @@ const startRecording = vi.fn();
 const stopRecording = vi.fn();
 let emitProgress: ((progress: SessionProgress) => void) | undefined;
 vi.mock('../api', () => ({
-  cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
+  accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
   onSessionProgress, onSessionSegments, startRecording, stopRecording,
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
