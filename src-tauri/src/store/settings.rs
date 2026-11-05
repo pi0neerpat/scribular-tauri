@@ -52,6 +52,13 @@ impl Store {
         self.with(|c| insert(c, key, value))
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+            Ok(())
+        })
+    }
+
     /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {

@@ -399,7 +399,11 @@ fn as11_migration_logs_no_session_content() {
             .add_segment(
                 &s.id,
                 AudioSource::Mic,
-                &Segment { start_ms: 0, end_ms: 1000, text: Some(CANARY.into()) },
+                &Segment {
+                    start_ms: 0,
+                    end_ms: 1000,
+                    text: Some(CANARY.into()),
+                },
             )
             .unwrap();
         store
@@ -473,6 +477,10 @@ fn start_fresh_that_fails_puts_the_old_file_back() {
         LockReason::KeychainWriteFailed
     );
     assert_eq!(hash(&dir.db()), old);
-    assert!(dir.names().iter().all(|n| !n.contains("unreadable")), "{:?}", dir.names());
+    assert!(
+        dir.names().iter().all(|n| !n.contains("unreadable")),
+        "{:?}",
+        dir.names()
+    );
     assert!(Store::open(&dir.db(), &MemoryKeyStore::with_key(KEY)).is_ok());
 }

@@ -2,6 +2,7 @@ pub mod audio;
 pub mod commands;
 pub mod engines;
 pub mod jobs;
+pub mod license;
 pub mod llm;
 pub mod models;
 pub mod store;
@@ -24,14 +25,14 @@ use stt::TranscriberLoader;
 const DB_KEY_ACCOUNT: &str = "database-key";
 
 #[cfg(target_os = "macos")]
-fn key_store(service: &str) -> Arc<dyn KeyStore> {
-    Arc::new(store::key::KeychainKeyStore::new(service, DB_KEY_ACCOUNT))
+fn key_store(service: &str, account: &str) -> Arc<dyn KeyStore> {
+    Arc::new(store::key::KeychainKeyStore::new(service, account))
 }
 
 // shortcut: no persistent key store off macOS (the app is macOS-only); a
 // relaunch there shows the locked screen. Add one if another OS ships.
 #[cfg(not(target_os = "macos"))]
-fn key_store(_service: &str) -> Arc<dyn KeyStore> {
+fn key_store(_service: &str, _account: &str) -> Arc<dyn KeyStore> {
     Arc::new(store::key::MemoryKeyStore::default())
 }
 
@@ -57,6 +58,29 @@ fn transcriber_loader(_models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader>
 #[cfg(not(feature = "fake-engines"))]
 fn transcriber_loader(models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> {
     Arc::new(stt::whisper::WhisperLoader::new(Arc::clone(models)))
+}
+
+/// R6/R12: re-validate at launch (never blocking it) and daily, raise the
+/// clock high-water mark hourly, and emit whenever the state changes, which
+/// also covers the day rollover.
+fn spawn_license_checks(app: tauri::AppHandle, licensing: Arc<license::Licensing>) {
+    const TICK: Duration = Duration::from_secs(60 * 60);
+    const REVALIDATE_EVERY: u32 = 24;
+    std::thread::spawn(move || {
+        let mut last = None;
+        for tick in (0..REVALIDATE_EVERY).cycle() {
+            if tick == 0 {
+                licensing.revalidate();
+            }
+            licensing.touch();
+            let state = licensing.state();
+            if last.as_ref() != Some(&state) {
+                commands::emit_access(&app, &licensing);
+                last = Some(state);
+            }
+            std::thread::sleep(TICK);
+        }
+    });
 }
 
 pub fn run() {
@@ -85,13 +109,18 @@ pub fn run() {
             commands::locked_state,
             commands::start_fresh,
             commands::quit_app,
-            commands::take_encryption_notice
+            commands::take_encryption_notice,
+            commands::get_access_state,
+            commands::get_masked_license_key,
+            commands::activate_license,
+            commands::deactivate_license,
+            commands::open_external_link
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("scribular.db");
-            let keys = key_store(&app.config().identifier);
+            let keys = key_store(&app.config().identifier, DB_KEY_ACCOUNT);
             let opened = Store::open(&db_path, keys.as_ref());
             let reason = match &opened {
                 Err(StoreError::Locked(reason)) => Some(*reason),
@@ -110,6 +139,18 @@ pub fn run() {
             let store = Arc::new(opened?);
             app.manage(Arc::clone(&store));
             jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
+
+            let licensing = Arc::new(
+                license::Licensing::init(
+                    Arc::clone(&store),
+                    key_store(&app.config().identifier, license::KEYCHAIN_ACCOUNT),
+                    Arc::new(license::api::HttpLicenseApi::new(&license::api::api_root())?),
+                    Arc::new(license::SystemClock),
+                )
+                .with_skip(license::dev_skip()),
+            );
+            app.manage(Arc::clone(&licensing));
+            spawn_license_checks(app.handle().clone(), licensing);
 
             let models = Arc::new(ModelManager::new(
                 data_dir.join("models"),

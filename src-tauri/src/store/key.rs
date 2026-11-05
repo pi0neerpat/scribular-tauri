@@ -22,15 +22,26 @@ pub enum LockReason {
 }
 
 /// Where the database key lives. Errors carry a message for the log only.
+///
+/// `get_bytes` / `set_bytes` hold an arbitrary secret blob in the same item
+/// (spec 04's licence record). Stores that only hold keys refuse them.
 pub trait KeyStore: Send + Sync {
     fn get(&self) -> Result<Option<Key>, String>;
     fn set(&self, key: &Key) -> Result<(), String>;
+
+    fn get_bytes(&self) -> Result<Option<Vec<u8>>, String> {
+        Err("this key store holds keys only".into())
+    }
+
+    fn set_bytes(&self, _bytes: &[u8]) -> Result<(), String> {
+        Err("this key store holds keys only".into())
+    }
 }
 
 /// For tests and `bin/bench.rs`: the real Keychain is never touched there.
 #[derive(Default)]
 pub struct MemoryKeyStore {
-    key: Mutex<Option<Key>>,
+    item: Mutex<Option<Vec<u8>>>,
     /// Makes `set` fail, for the R6/AS5 paths.
     pub fail_set: bool,
 }
@@ -38,22 +49,40 @@ pub struct MemoryKeyStore {
 impl MemoryKeyStore {
     pub fn with_key(key: Key) -> Self {
         Self {
-            key: Mutex::new(Some(key)),
+            item: Mutex::new(Some(key.to_vec())),
             fail_set: false,
+        }
+    }
+
+    /// Empty, and every `set` fails.
+    pub fn refusing() -> Self {
+        Self {
+            fail_set: true,
+            ..Default::default()
         }
     }
 }
 
 impl KeyStore for MemoryKeyStore {
     fn get(&self) -> Result<Option<Key>, String> {
-        Ok(*self.key.lock().unwrap())
+        self.get_bytes()?
+            .map(|b| Key::try_from(b.as_slice()).map_err(|_| format!("item has {} bytes", b.len())))
+            .transpose()
     }
 
     fn set(&self, key: &Key) -> Result<(), String> {
+        self.set_bytes(key)
+    }
+
+    fn get_bytes(&self) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.item.lock().unwrap().clone())
+    }
+
+    fn set_bytes(&self, bytes: &[u8]) -> Result<(), String> {
         if self.fail_set {
             return Err("set refused".into());
         }
-        *self.key.lock().unwrap() = Some(*key);
+        *self.item.lock().unwrap() = Some(bytes.to_vec());
         Ok(())
     }
 }
@@ -184,21 +213,32 @@ impl KeychainKeyStore {
 #[cfg(target_os = "macos")]
 impl KeyStore for KeychainKeyStore {
     fn get(&self) -> Result<Option<Key>, String> {
-        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
-        match security_framework::passwords::generic_password(self.options()) {
-            Ok(mut bytes) => {
+        match self.get_bytes()? {
+            Some(mut bytes) => {
                 let key = Key::try_from(bytes.as_slice())
                     .map_err(|_| format!("stored key has {} bytes", bytes.len()));
                 bytes.fill(0);
                 key.map(Some)
             }
+            None => Ok(None),
+        }
+    }
+
+    fn set(&self, key: &Key) -> Result<(), String> {
+        self.set_bytes(key)
+    }
+
+    fn get_bytes(&self) -> Result<Option<Vec<u8>>, String> {
+        const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+        match security_framework::passwords::generic_password(self.options()) {
+            Ok(bytes) => Ok(Some(bytes)),
             Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
             Err(e) => Err(format!("Keychain read failed ({})", e.code())),
         }
     }
 
-    fn set(&self, key: &Key) -> Result<(), String> {
-        security_framework::passwords::set_generic_password_options(key, self.options())
+    fn set_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+        security_framework::passwords::set_generic_password_options(bytes, self.options())
             .map_err(|e| format!("Keychain write failed ({})", e.code()))
     }
 }

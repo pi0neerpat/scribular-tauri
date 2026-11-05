@@ -3,6 +3,7 @@
   // transcription and summarization to the result.
   import { onMount } from 'svelte';
   import {
+    accessDenied,
     cancelJob,
     currentRecording,
     deniedPrivacy,
@@ -21,8 +22,14 @@
   import SummaryPanel from './SummaryPanel.svelte';
   import PermissionNotice from './PermissionNotice.svelte';
   import { isWorking } from './record-status';
+  import LicenseGate from './LicenseGate.svelte';
+  import { accessState, allows } from '../license';
 
-  let { speechReady = false, active = true }: { speechReady: boolean; active?: boolean } = $props();
+  let {
+    speechReady = false,
+    active = true,
+    onEnterLicense = () => {},
+  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -114,8 +121,13 @@
       status = session.status;
       startedAt = Date.now();
     } catch (e) {
-      denied = deniedPrivacy(String(e));
-      error = String(e);
+      // Refused by the licence check: the gate explains it.
+      const refused = accessDenied(e);
+      if (refused) accessState.set(refused);
+      else {
+        denied = deniedPrivacy(String(e));
+        error = String(e);
+      }
     } finally {
       busy = false;
     }
@@ -154,7 +166,10 @@
     </p>
     <button onclick={cancel}>Cancel</button>
   {:else}
-    <button onclick={start} disabled={busy || !speechReady}>Start recording</button>
+    <LicenseGate access={$accessState} onEnter={onEnterLicense} />
+    <button onclick={start} disabled={busy || !speechReady || !allows($accessState)}>
+      Start recording
+    </button>
   {/if}
 
   {#if sessionId && (recording || working || status === 'failed')}

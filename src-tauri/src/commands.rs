@@ -15,6 +15,7 @@ use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
+use crate::license::{AccessState, ActivationResult, Licensing};
 use crate::models::{ModelManager, ModelProgress, ModelSpec};
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
@@ -33,7 +34,12 @@ pub const EVENTS: &[&str] = &[
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
+    LICENSE_CHANGED_EVENT,
 ];
+
+/// The new [`AccessState`] after activation, removal, re-validation or a day
+/// rollover (spec 04 R12).
+pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
@@ -82,6 +88,9 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Privacy::export_all(cfg)?;
     PlaybackError::export_all(cfg)?;
     LockReason::export_all(cfg)?;
+    AccessState::export_all(cfg)?;
+    ActivationResult::export_all(cfg)?;
+    crate::license::Rejection::export_all(cfg)?;
     Ok(())
 }
 
@@ -296,7 +305,9 @@ pub async fn start_recording(
     mode: InputMode,
     app_id: Option<String>,
     title: String,
+    licensing: State<'_, Arc<Licensing>>,
 ) -> Result<Session, String> {
+    licensing.require_access()?;
     let recorder = Arc::clone(&recorder);
     tauri::async_runtime::spawn_blocking(move || {
         recorder
@@ -341,7 +352,9 @@ pub fn current_recording(recorder: State<Arc<Recorder>>) -> Option<String> {
 pub async fn transcribe_file(
     stt: State<'_, Arc<dyn TranscriberLoader>>,
     path: String,
+    licensing: State<'_, Arc<Licensing>>,
 ) -> Result<Vec<TranscriptSegment>, String> {
+    licensing.require_access()?;
     let stt = Arc::clone(&stt);
     tauri::async_runtime::spawn_blocking(move || {
         let samples = read_wav(Path::new(&path)).map_err(|e| e.to_string())?;
@@ -351,6 +364,75 @@ pub async fn transcribe_file(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The current access state (spec 04 R8).
+#[tauri::command]
+pub fn get_access_state(licensing: State<Arc<Licensing>>) -> AccessState {
+    licensing.state()
+}
+
+/// The stored key as `abcd***-123`, for Settings.
+#[tauri::command]
+pub fn get_masked_license_key(licensing: State<Arc<Licensing>>) -> Option<String> {
+    licensing.masked_key()
+}
+
+/// Validates and stores a key (R5).
+#[tauri::command]
+pub async fn activate_license(
+    app: AppHandle,
+    licensing: State<'_, Arc<Licensing>>,
+    key: String,
+) -> Result<ActivationResult, String> {
+    let licensing = Arc::clone(&licensing);
+    let result = tauri::async_runtime::spawn_blocking({
+        let licensing = Arc::clone(&licensing);
+        move || licensing.activate(&key)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    emit_access(&app, &licensing);
+    Ok(result)
+}
+
+/// Forgets the key locally; no network call (R13).
+#[tauri::command]
+pub fn deactivate_license(app: AppHandle, licensing: State<Arc<Licensing>>) {
+    licensing.deactivate();
+    emit_access(&app, &licensing);
+}
+
+pub fn emit_access(app: &AppHandle, licensing: &Licensing) {
+    let _ = app.emit(LICENSE_CHANGED_EVENT, licensing.state());
+}
+
+/// Opens an http(s) or mailto link in the default handler (spec 04 R11, the
+/// shape spec 08 R22 defines).
+#[tauri::command]
+pub fn open_external_link(url: String) -> Result<(), String> {
+    open_link_with(&url, |u| {
+        std::process::Command::new("/usr/bin/open")
+            .arg(u)
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|s| {
+                s.success()
+                    .then_some(())
+                    .ok_or_else(|| "the link did not open".to_string())
+            })
+    })
+}
+
+fn open_link_with(
+    url: &str,
+    launch: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("not a link: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => launch(parsed.as_str()),
+        other => Err(format!("links of type {other} are not opened")),
+    }
 }
 
 /// Emits job events to the webview.
@@ -415,6 +497,69 @@ mod tests {
             if !dest.join(name).exists() {
                 fs::write(dest.join(name), new).unwrap();
             }
+        }
+    }
+
+    /// AS10 (structure): only the two commands that create a session from
+    /// new audio call the gate; reading, editing and settings never do.
+    #[test]
+    fn as10_only_new_audio_commands_are_gated() {
+        let src = include_str!("commands.rs");
+        let src = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        let mut gated = Vec::new();
+        let mut commands = Vec::new();
+        for chunk in src.split("#[tauri::command]").skip(1) {
+            let name = chunk
+                .split("fn ")
+                .nth(1)
+                .and_then(|r| r.split(['(', '<']).next())
+                .unwrap()
+                .to_string();
+            if chunk.contains("require_access(") {
+                gated.push(name.clone());
+            }
+            commands.push(name);
+        }
+        assert_eq!(gated, ["start_recording", "transcribe_file"]);
+        for open in [
+            "list_sessions",
+            "get_session",
+            "update_session",
+            "delete_session",
+            "regenerate_summary",
+            "set_recording_settings",
+            "stop_recording",
+            "activate_license",
+        ] {
+            assert!(commands.iter().any(|c| c == open), "{open} is a command");
+        }
+    }
+
+    #[test]
+    fn external_links_are_allow_listed() {
+        let mut opened = Vec::new();
+        for ok in [
+            "https://www.scribular.com/#pricing",
+            "http://example.com",
+            "mailto:support@scribular.com",
+        ] {
+            open_link_with(ok, |u| {
+                opened.push(u.to_string());
+                Ok(())
+            })
+            .unwrap();
+        }
+        assert_eq!(opened[0], "https://www.scribular.com/#pricing");
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "x-apple.systempreferences:",
+            "not a url",
+        ] {
+            assert!(
+                open_link_with(bad, |_| panic!("launched {bad}")).is_err(),
+                "{bad}"
+            );
         }
     }
 

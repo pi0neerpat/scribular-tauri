@@ -6,6 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
 
 const {
+  accessDenied,
   appVersion,
   deniedPrivacy,
   onHeartbeat,
@@ -77,5 +78,13 @@ describe('api', () => {
     expect(deniedPrivacy('audio: microphone permission denied')).toBe('microphone');
     expect(deniedPrivacy('audio: system audio recording permission denied')).toBe('systemAudio');
     expect(deniedPrivacy('choose an app to record in Settings')).toBeNull();
+  });
+
+  it('accessDenied reads the licence refusal and nothing else', () => {
+    const state = { kind: 'trialEnded' };
+    expect(accessDenied(JSON.stringify({ kind: 'accessDenied', state }))).toEqual(state);
+    expect(accessDenied('microphone permission denied')).toBeNull();
+    expect(accessDenied(JSON.stringify({ kind: 'other', state }))).toBeNull();
+    expect(accessDenied('null')).toBeNull();
   });
 });

@@ -3,6 +3,8 @@
 // registered command and emitted event has a wrapper here.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { AccessState } from './types/AccessState';
+import type { ActivationResult } from './types/ActivationResult';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { Heartbeat } from './types/Heartbeat';
@@ -176,4 +178,42 @@ export function onSessionSegments(
   handler: (segments: SessionSegments) => void,
 ): Promise<UnlistenFn> {
   return listen<SessionSegments>('session://segments', (event) => handler(event.payload));
+}
+
+/** Trial or licence state, from the last check; changes arrive through `onLicenseChanged`. */
+export function getAccessState(): Promise<AccessState> {
+  return invoke<AccessState>('get_access_state');
+}
+
+/** The saved key as `abcd***wxyz`, or null. */
+export function getMaskedLicenseKey(): Promise<string | null> {
+  return invoke<string | null>('get_masked_license_key');
+}
+
+export function activateLicense(key: string): Promise<ActivationResult> {
+  return invoke<ActivationResult>('activate_license', { key });
+}
+
+/** Forgets the key on this Mac. No network call. */
+export function deactivateLicense(): Promise<void> {
+  return invoke<void>('deactivate_license');
+}
+
+/** Opens an http, https or mailto link in the default app. */
+export function openExternalLink(url: string): Promise<void> {
+  return invoke<void>('open_external_link', { url });
+}
+
+export function onLicenseChanged(handler: (state: AccessState) => void): Promise<UnlistenFn> {
+  return listen<AccessState>('license://changed', (event) => handler(event.payload));
+}
+
+/** The access state inside a refused `startRecording`, if that is why it failed. */
+export function accessDenied(error: unknown): AccessState | null {
+  try {
+    const parsed = JSON.parse(String(error)) as { kind?: string; state: AccessState };
+    return parsed?.kind === 'accessDenied' ? parsed.state : null;
+  } catch {
+    return null;
+  }
 }
