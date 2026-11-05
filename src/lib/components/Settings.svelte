@@ -4,9 +4,12 @@
   import { onMount } from 'svelte';
   import {
     deniedPrivacy,
+    downloadModel,
     getRecordingSettings,
     listAudioApps,
     listPrompts,
+    modelsStatus,
+    onModelsProgress,
     openPrivacySettings,
     setRecordingSettings,
   } from '../api';
@@ -16,6 +19,9 @@
   import type { Privacy } from '../types/Privacy';
   import type { Prompt } from '../types/Prompt';
   import type { RecordingSettings } from '../types/RecordingSettings';
+  import type { ModelProgress } from '../types/ModelProgress';
+
+  const SPEAKER_MODEL = 'speaker-campplus';
 
   const modes: [InputMode, string][] = [
     ['mic', 'Microphone'],
@@ -28,6 +34,7 @@
   let apps = $state<AudioApp[]>([]);
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
+  let speakerModel = $state<ModelProgress | null>(null);
 
   // The saved app stays selectable while it isn't playing.
   let appNames = $derived.by(() => {
@@ -37,14 +44,33 @@
   });
   let selectedIcon = $derived(apps.find((a) => a.name === settings?.targetApp)?.icon ?? null);
 
-  onMount(async () => {
-    try {
-      settings = await getRecordingSettings();
-      prompts = await listPrompts();
-    } catch (e) {
-      error = String(e);
-    }
-    if (settings && settings.inputMode !== 'mic') await refreshApps();
+  onMount(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    let progressVersion = 0;
+    void (async () => {
+      try {
+        try {
+          const removeListener = await onModelsProgress((p) => {
+            if (p.modelId === SPEAKER_MODEL) {
+              progressVersion++;
+              speakerModel = p;
+            }
+          });
+          if (disposed) removeListener();
+          else unlisten = removeListener;
+        } catch { /* The status snapshot still supplies model state. */ }
+        settings = await getRecordingSettings();
+        prompts = await listPrompts();
+        const version = progressVersion;
+        const status = await modelsStatus();
+        if (version === progressVersion) speakerModel = status.find((m) => m.modelId === SPEAKER_MODEL) ?? null;
+      } catch (e) {
+        error = String(e);
+      }
+      if (settings && settings.inputMode !== 'mic') await refreshApps();
+    })();
+    return () => { disposed = true; unlisten?.(); };
   });
 
   async function refreshApps() {
@@ -86,6 +112,22 @@
           {label}
         </label>
       {/each}
+    </fieldset>
+
+    <fieldset>
+      <legend>Multi-speaker</legend>
+      <p>Identify different speakers after recording. The speaker model downloads once and stays on this Mac.</p>
+      {#if speakerModel?.state === 'ready'}
+        <label><input type="checkbox" bind:checked={settings.multiSpeaker} onchange={save} /> Identify speakers</label>
+      {:else}
+        <button onclick={() => downloadModel(SPEAKER_MODEL)} disabled={speakerModel?.state === 'downloading' || speakerModel?.state === 'verifying'}>
+          {speakerModel?.state === 'downloading' || speakerModel?.state === 'verifying' ? 'Downloading speaker model…' : 'Download speaker model'}
+        </button>
+        {#if speakerModel?.state === 'downloading'}
+          <progress aria-label="Speaker model download progress" value={speakerModel.downloadedBytes} max={speakerModel.totalBytes}></progress>
+        {/if}
+        {#if speakerModel?.error}<p role="alert">{speakerModel.error}</p>{/if}
+      {/if}
     </fieldset>
 
     {#if settings.inputMode !== 'mic'}

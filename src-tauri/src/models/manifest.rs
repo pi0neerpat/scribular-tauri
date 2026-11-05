@@ -10,6 +10,7 @@ use ts_rs::TS;
 pub enum ModelKind {
     Speech,
     Llm,
+    Speaker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -27,10 +28,12 @@ pub struct ModelSpec {
     pub sha256: String,
     pub license: String,
     pub license_url: String,
+    pub optional: bool,
 }
 
 pub const WHISPER_BASE: &str = "whisper-base";
 pub const GEMMA_2_2B: &str = "gemma-2-2b-it-q4km";
+pub const SPEAKER_CAMPPLUS: &str = "speaker-campplus";
 
 /// Download order: the speech model first, so recording works as soon as
 /// possible while the larger LLM is still arriving.
@@ -48,6 +51,7 @@ pub fn manifest() -> Vec<ModelSpec> {
             sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe".into(),
             license: "MIT".into(),
             license_url: "https://github.com/openai/whisper/blob/main/LICENSE".into(),
+            optional: false,
         },
         ModelSpec {
             id: GEMMA_2_2B.into(),
@@ -61,6 +65,21 @@ pub fn manifest() -> Vec<ModelSpec> {
             sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787".into(),
             license: "Gemma Terms of Use".into(),
             license_url: "https://ai.google.dev/gemma/terms".into(),
+            optional: false,
+        },
+        ModelSpec {
+            id: SPEAKER_CAMPPLUS.into(),
+            kind: ModelKind::Speaker,
+            display_name: "Speaker recognition".into(),
+            file_name: "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx".into(),
+            url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/\
+                 speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
+                .into(),
+            size: 28_281_164,
+            sha256: "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2".into(),
+            license: "Apache-2.0".into(),
+            license_url: "https://www.apache.org/licenses/LICENSE-2.0".into(),
+            optional: true,
         },
     ]
 }
@@ -88,5 +107,20 @@ mod tests {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         }
+    }
+
+    #[test]
+    fn speaker_model_is_optional_and_pinned() {
+        let speaker = manifest()
+            .into_iter()
+            .find(|model| model.id == SPEAKER_CAMPPLUS)
+            .unwrap();
+        assert_eq!(speaker.kind, ModelKind::Speaker);
+        assert!(speaker.optional);
+        assert_eq!(speaker.size, 28_281_164);
+        assert_eq!(
+            speaker.sha256,
+            "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2"
+        );
     }
 }

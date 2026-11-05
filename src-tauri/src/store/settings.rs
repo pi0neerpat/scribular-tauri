@@ -9,6 +9,7 @@ use super::{InputMode, Result, Store};
 /// The prompt new sessions summarize with. Seeded from Electron's
 /// `activePromptId`.
 pub const ACTIVE_PROMPT_ID: &str = "active_prompt_id";
+pub const MULTI_SPEAKER: &str = "multi_speaker";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
@@ -24,6 +25,7 @@ pub struct RecordingSettings {
     pub prompt_id: Option<String>,
     /// Keep the audio (encrypted, 7 days) after the transcript is saved.
     pub keep_audio: bool,
+    pub multi_speaker: bool,
 }
 
 pub(super) fn insert(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -69,6 +71,7 @@ impl Store {
                 target_app: select(c, TARGET_APP)?,
                 prompt_id: select(c, ACTIVE_PROMPT_ID)?,
                 keep_audio: select(c, KEEP_AUDIO)?.as_deref() == Some("1"),
+                multi_speaker: select(c, MULTI_SPEAKER)?.as_deref() == Some("1"),
             })
         })
     }
@@ -79,6 +82,11 @@ impl Store {
             let tx = c.transaction()?;
             insert(&tx, INPUT_MODE, settings.input_mode.as_str())?;
             insert(&tx, KEEP_AUDIO, if settings.keep_audio { "1" } else { "0" })?;
+            insert(
+                &tx,
+                MULTI_SPEAKER,
+                if settings.multi_speaker { "1" } else { "0" },
+            )?;
             for (key, value) in [
                 (TARGET_APP, &settings.target_app),
                 (ACTIVE_PROMPT_ID, &settings.prompt_id),

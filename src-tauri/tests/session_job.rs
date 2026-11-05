@@ -14,6 +14,7 @@ use std::{
 };
 
 use scribular_lib::audio::Format;
+use scribular_lib::diarize::{SpeakerEmbedder, SpeakerEmbedderLoader};
 use scribular_lib::engines::fake::{
     FakeLoader, FakeMicrophone, FakeSource, FakeSummarizer, FakeSystemAudio, FakeTranscriber,
     FakeTranscriberLoader,
@@ -183,6 +184,24 @@ impl Harness {
         configure_stt: impl FnOnce(&mut FakeTranscriber),
         configure_llm: impl FnOnce(&mut FakeLoader),
     ) -> Self {
+        Self::with_format_and_speakers(
+            format,
+            configure_stt,
+            configure_llm,
+            Arc::new(ErrorSpeakerLoader),
+        )
+    }
+
+    fn with_speakers(speakers: Arc<dyn SpeakerEmbedderLoader>) -> Self {
+        Self::with_format_and_speakers(NATIVE, |_| {}, |_| {}, speakers)
+    }
+
+    fn with_format_and_speakers(
+        format: Format,
+        configure_stt: impl FnOnce(&mut FakeTranscriber),
+        configure_llm: impl FnOnce(&mut FakeLoader),
+        speakers: Arc<dyn SpeakerEmbedderLoader>,
+    ) -> Self {
         let db = TempDb::new();
         let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
         let events = Arc::new(Events {
@@ -208,7 +227,7 @@ impl Harness {
         ));
         let mic = Arc::new(FakeSource::new(format));
         let system = Arc::new(FakeSource::new(format));
-        let recorder = Recorder::new(
+        let recorder = Recorder::new_with_speakers(
             store.clone(),
             queue.clone(),
             Arc::new(FakeTranscriberLoader(stt.clone())),
@@ -218,6 +237,7 @@ impl Harness {
                 source: system.clone(),
                 app: APP.into(),
             }),
+            speakers,
         );
         Self {
             store,
@@ -272,6 +292,67 @@ impl Harness {
             *self.events.stale_rows.lock().unwrap(),
             Vec::<String>::new()
         );
+    }
+}
+
+struct ErrorSpeakerLoader;
+impl SpeakerEmbedderLoader for ErrorSpeakerLoader {
+    fn load(&self) -> Result<Box<dyn SpeakerEmbedder>, String> {
+        Err("speaker model isn't ready".into())
+    }
+}
+
+struct EmbedGate {
+    state: Mutex<(bool, bool)>,
+    changed: Condvar,
+}
+
+impl EmbedGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new((false, false)),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn wait_entered(&self) {
+        let state = self.state.lock().unwrap();
+        let (state, timeout) = self
+            .changed
+            .wait_timeout_while(state, WAIT, |s| !s.0)
+            .unwrap();
+        assert!(
+            state.0 && !timeout.timed_out(),
+            "diarization never reached embedding"
+        );
+    }
+
+    fn release(&self) {
+        self.state.lock().unwrap().1 = true;
+        self.changed.notify_all();
+    }
+}
+
+struct BlockingSpeakerLoader(Arc<EmbedGate>);
+impl SpeakerEmbedderLoader for BlockingSpeakerLoader {
+    fn load(&self) -> Result<Box<dyn SpeakerEmbedder>, String> {
+        Ok(Box::new(BlockingEmbedder(self.0.clone())))
+    }
+}
+
+struct BlockingEmbedder(Arc<EmbedGate>);
+impl SpeakerEmbedder for BlockingEmbedder {
+    fn embed(&self, _: &[f32]) -> Result<Vec<f32>, String> {
+        let mut state = self.0.state.lock().unwrap();
+        state.0 = true;
+        self.0.changed.notify_all();
+        let (state, _) = self
+            .0
+            .changed
+            .wait_timeout_while(state, WAIT, |state| !state.1)
+            .unwrap();
+        assert!(state.1, "test did not release speaker embedding");
+        Ok(vec![1.0, 0.0])
     }
 }
 
@@ -408,6 +489,32 @@ fn cancelling_transcription_keeps_the_partial_transcript() {
     assert!(h.summarizer.summarizer.calls().is_empty(), "no summary");
     assert!(!h.recorder.cancel(&id), "nothing left to cancel");
     h.assert_rows_matched_events();
+}
+
+#[test]
+fn cancelling_during_speaker_identification_saves_plain_transcript() {
+    let gate = Arc::new(EmbedGate::new());
+    let h = Harness::with_speakers(Arc::new(BlockingSpeakerLoader(gate.clone())));
+    let mut settings = h.store.recording_settings().unwrap();
+    settings.multi_speaker = true;
+    h.store.set_recording_settings(&settings).unwrap();
+    let id = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+
+    gate.wait_entered();
+    assert!(h.recorder.cancel(&id));
+    gate.release();
+    h.events.wait_for(&id, SessionStatus::Cancelled);
+
+    let session = h.get(&id);
+    assert_eq!(session.status, SessionStatus::Cancelled);
+    assert_eq!(session.transcript, TRANSCRIPT);
+    assert_eq!(session.raw_transcript, None);
+    assert!(
+        h.summarizer.summarizer.calls().is_empty(),
+        "cancelled sessions are not summarized"
+    );
 }
 
 #[test]

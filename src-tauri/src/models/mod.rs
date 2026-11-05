@@ -19,7 +19,7 @@ use serde::Serialize;
 use ts_rs::TS;
 
 pub use download::{ensure, model_path, verify_existing, DownloadError};
-pub use manifest::{manifest, ModelKind, ModelSpec, GEMMA_2_2B, WHISPER_BASE};
+pub use manifest::{manifest, ModelKind, ModelSpec, GEMMA_2_2B, SPEAKER_CAMPPLUS, WHISPER_BASE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -89,6 +89,14 @@ pub struct ModelManager {
     pub readiness: Readiness,
 }
 
+struct DownloadGuard<'a>(&'a AtomicBool);
+
+impl Drop for DownloadGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
         Self {
@@ -149,33 +157,64 @@ impl ModelManager {
     /// retried during the LLM download, with at most one download per model.
     /// Stops at an active model so concurrent calls cannot skip ahead.
     pub async fn ensure_all(&self, on_progress: &(dyn Fn(ModelProgress) + Send + Sync)) {
-        struct Done<'a>(&'a AtomicBool);
-        impl Drop for Done<'_> {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
+        for i in 0..self.specs.len() {
+            if !self.specs[i].optional {
+                if self.running[i].load(Ordering::Acquire) {
+                    return;
+                }
+                if self.ensure_index(i, on_progress).await.is_none() {
+                    return;
+                }
             }
         }
-        for (spec, running) in self.specs.iter().zip(&self.running) {
-            if running.swap(true, Ordering::AcqRel) {
-                return;
-            }
-            let _done = Done(running);
-            // Report it anyway: a scan may have set Ready after the UI's status snapshot.
-            if self.readiness.get(&spec.id) == ModelState::Ready {
-                on_progress(ModelProgress {
-                    model_id: spec.id.clone(),
-                    state: ModelState::Ready,
-                    downloaded_bytes: spec.size,
-                    total_bytes: spec.size,
-                    error: None,
-                });
-                continue;
-            }
-            let report = |p: ModelProgress| {
-                self.readiness.set(&p.model_id, p.state);
-                on_progress(p);
-            };
-            if let Err(e) = ensure(&self.client, &self.dir, spec, &report).await {
+    }
+
+    /// Downloads one model without starting other optional downloads.
+    pub async fn ensure_one(
+        &self,
+        model_id: &str,
+        on_progress: &(dyn Fn(ModelProgress) + Send + Sync),
+    ) -> Result<(), String> {
+        let i = self
+            .specs
+            .iter()
+            .position(|spec| spec.id == model_id)
+            .ok_or_else(|| format!("unknown model {model_id}"))?;
+        match self.ensure_index(i, on_progress).await {
+            Some(true) => Ok(()),
+            Some(false) => Err(format!("model {model_id} download failed")),
+            None => Err(format!("model {model_id} download is already running")),
+        }
+    }
+
+    async fn ensure_index(
+        &self,
+        i: usize,
+        on_progress: &(dyn Fn(ModelProgress) + Send + Sync),
+    ) -> Option<bool> {
+        let spec = &self.specs[i];
+        let running = &self.running[i];
+        if running.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        let _guard = DownloadGuard(running);
+        if self.readiness.get(&spec.id) == ModelState::Ready {
+            on_progress(ModelProgress {
+                model_id: spec.id.clone(),
+                state: ModelState::Ready,
+                downloaded_bytes: spec.size,
+                total_bytes: spec.size,
+                error: None,
+            });
+            return Some(true);
+        }
+        let report = |p: ModelProgress| {
+            self.readiness.set(&p.model_id, p.state);
+            on_progress(p);
+        };
+        match ensure(&self.client, &self.dir, spec, &report).await {
+            Ok(_) => Some(true),
+            Err(e) => {
                 report(ModelProgress {
                     model_id: spec.id.clone(),
                     state: ModelState::Failed,
@@ -183,6 +222,7 @@ impl ModelManager {
                     total_bytes: spec.size,
                     error: Some(e.to_string()),
                 });
+                Some(false)
             }
         }
     }

@@ -8,10 +8,15 @@
 mod chunk;
 mod clean;
 mod merge;
+mod speakers;
 
 pub use chunk::{chunk_by_chars, chunk_by_tokens, ChunkError, CHUNK_SIZE, MIN_WORDS};
 pub use clean::clean_transcript;
 pub use merge::{merge_diarized_segments, Segment};
+pub use speakers::{
+    apply_speaker_map, build_raw_transcript, default_speaker_map, substitute_speaker_names,
+    SpeakerMap,
+};
 
 /// JS `\s`: WhiteSpace plus LineTerminator code points (ECMA-262 22.2.2.9).
 pub(crate) fn is_js_space(c: u16) -> bool {
