@@ -6,6 +6,7 @@ public enum PickResult<T> {
 
 extension PickResult: Equatable where T: Equatable {}
 
+/// `index` is 1-based, matching the `click ... index N` script syntax.
 public func pick<T>(_ matches: [T], index: Int?) -> PickResult<T> {
     if let index {
         return matches.indices.contains(index - 1) ? .found(matches[index - 1]) : .none

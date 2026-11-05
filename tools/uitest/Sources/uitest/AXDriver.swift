@@ -236,11 +236,17 @@ final class AXDriver: Driver {
     }
 
     private func handleKeychain() throws(DriverError) -> String? {
-        let securityAgent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first
-        guard let securityAgent else { return "no prompt" }
-        let root = AXUIElementCreateApplication(securityAgent.processIdentifier)
-        let windows = (attribute(root, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        guard let window = windows.first else { return "no prompt" }
+        // the prompt can appear a moment after the app touches the keychain; wait up to 5s before concluding there is none
+        var found: (AXUIElement)?
+        for attempt in 0..<20 {
+            if let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first,
+               let first = (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first {
+                found = first
+                break
+            }
+            if attempt < 19 { Thread.sleep(forTimeInterval: 0.25) }
+        }
+        guard let window = found else { return "no prompt" }
         guard let keychainPassword else { throw .fatal("UITEST_KEYCHAIN_PASSWORD not set") }
         let fields = allElements(from: window).filter {
             let role = attribute($0, kAXRoleAttribute) as? String

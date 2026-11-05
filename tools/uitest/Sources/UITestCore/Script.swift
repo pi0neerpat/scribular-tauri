@@ -75,7 +75,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             guard args.isEmpty || args.map(\.text) == ["--keep-data"] else { throw fail("usage: launch [--keep-data]") }
             command = .launch(keepData: !args.isEmpty)
         case "click":
-            guard let label = quoted(args.first) else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
+            guard let label = quoted(args.first), !label.isEmpty else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
             var index: Int?
             var within: String?
             var cursor = 1
@@ -100,7 +100,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             command = .type(value)
         case "key":
             guard args.count == 1, !args[0].quoted else { throw fail("usage: key cmd+shift+s") }
-            let parts = args[0].text.lowercased().split(separator: "+").map(String.init)
+            let parts = args[0].text.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
             guard let key = parts.last, !key.isEmpty else { throw fail("invalid key combo") }
             var modifiers = Set<Modifier>()
             for part in parts.dropLast() {
@@ -142,6 +142,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         }
         steps.append(Step(line: lineNumber, source: source, command: command))
     }
+    guard !steps.isEmpty else { throw ScriptError(line: 0, message: "script has no steps") }
     return steps
 }
 
@@ -171,7 +172,7 @@ private func tokenize(_ line: String, line number: Int) throws(ScriptError) -> [
             index += 1
             var value = ""
             while index < chars.count && chars[index] != "\"" {
-                if chars[index] == "\\", index + 1 < chars.count, chars[index + 1] == "\"" || chars[index] == "\\", index + 1 < chars.count, chars[index + 1] == "\\" {
+                if chars[index] == "\\", index + 1 < chars.count, chars[index + 1] == "\"" || chars[index + 1] == "\\" {
                     index += 1
                 }
                 value.append(chars[index])

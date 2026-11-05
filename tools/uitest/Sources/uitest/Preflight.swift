@@ -8,7 +8,8 @@ struct PreflightError: Error {
 
 enum Preflight {
     static func check(appPath: URL) throws {
-        let host = ProcessInfo.processInfo.processName
+        // the permission belongs to the app hosting the terminal, not to the uitest binary
+        let host = ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "the terminal app running uitest"
         guard AXIsProcessTrusted() else {
             throw PreflightError(message: "grant Accessibility to \(host) in System Settings → Privacy & Security → Accessibility")
         }

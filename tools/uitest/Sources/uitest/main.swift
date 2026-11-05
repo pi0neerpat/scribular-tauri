@@ -17,9 +17,9 @@ private final class Cleanup {
 
     func run() {
         lock.lock()
-        guard !finished else { lock.unlock(); return }
+        defer { lock.unlock() }  // a concurrent caller blocks until the first finishes cleaning
+        guard !finished else { return }
         finished = true
-        lock.unlock()
         lifecycle.quit()
         recorder.stop()
     }
@@ -54,7 +54,7 @@ private func runCLI() -> Int32 {
     }
 
     let stamp = DateFormatter()
-    stamp.dateFormat = "yyyy-MM-dd-HHmmss"
+    stamp.dateFormat = "yyyy-MM-dd-HHmmss-SSS"
     let runName = stamp.string(from: Date())
     let runDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         .appendingPathComponent("runs/\(runName)", isDirectory: true)

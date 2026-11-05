@@ -16,7 +16,7 @@
 - Keychain password only from env var `UITEST_KEYCHAIN_PASSWORD`; never printed, logged, or written to any file.
 - Recordings and screenshots go to `runs/<timestamp>/` (timestamp `yyyy-MM-dd-HHmmss`), relative to the cwd; `runs/` is git-ignored. Nothing is uploaded.
 - `launch` never builds. It prints the launched `.app` path and its build time (bundle executable mtime).
-- App data dir `~/Library/Application Support/com.app.scribular.tauri` is **moved** into the run folder before launch, never deleted. `launch --keep-data` skips the move.
+- App data dir `~/Library/Application Support/com.app.scribular.tauri` is **moved** into the run folder (`runs/<ts>/app-data`) before launch, never deleted, and deliberately not restored: each run starts from a clean app state, and the original data stays recoverable there (move it back manually). `runs/` holds sensitive data, so it must stay git-ignored; delete old run folders when no longer needed. `launch --keep-data` skips the move.
 - Output contract (stdout), verbatim shape:
   ```
   ✓ 1 launch
@@ -192,7 +192,7 @@ No production code. Result is a findings note appended to the spec and a go/no-g
 - Preflight (exit 2 with one-line fix each): `AXIsProcessTrusted()` false → "grant Accessibility to <host process> in System Settings → Privacy & Security → Accessibility"; `CGPreflightScreenCaptureAccess()` false → same for Screen Recording; `ffmpeg` not on PATH; app path missing → "build first: <build command from Task 1 findings>"; display asleep/locked (`CGSessionCopyCurrentDictionary` `CGSSessionScreenIsLocked`) → "unlock the display".
 - `launch`: terminate any running `com.app.scribular.tauri` instance (wait up to 5 s); unless `keepData`, `moveDataDir`; `open -n <app>` equivalent via `NSWorkspace.openApplication`; wait (retryable) until the app has an AX window. Detail string: `<app path> (built <exe mtime ISO8601>)`.
 - `quit`: `NSRunningApplication.terminate()`, then `forceTerminate()` after 5 s.
-- Recorder: spawns `ffmpeg -f avfoundation -framerate 15 -capture_cursor 1 -i "<screen>:none" -pix_fmt yuv420p <runDir>/recording.mp4` (device from Task 1 findings); stop by writing `q` to its stdin and waiting up to 10 s.
+- Recorder: spawns `ffmpeg -f avfoundation -framerate 15 -capture_cursor 1 -i "<screen>:none" -pix_fmt yuv420p -movflags +frag_keyframe+empty_moov <runDir>/recording.mp4` (screen index resolved at runtime by matching `Capture screen` in `ffmpeg -f avfoundation -list_devices true -i ""`; ffmpeg stderr logged to `<runDir>/ffmpeg.log`; fragmented MP4 keeps the file playable after a hard crash); stop by writing `q` to its stdin and waiting up to 10 s.
 
 - [ ] **Step 1: Write failing tests** in `DataDirTests.swift` (temp dirs via `FileManager.default.temporaryDirectory`):
   - `moveDataDirMovesContents`: source with file `a.db` → `.moved(to: run/app-data)`, `run/app-data/a.db` exists, source gone.

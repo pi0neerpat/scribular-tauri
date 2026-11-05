@@ -27,6 +27,8 @@ final class AppLifecycle {
     private let appPath: URL
     private var app: NSRunningApplication?
     private var launched = false
+    private var launching: LaunchResult?
+    private var dataMoved = false
     private var detail: String?
 
     init(appPath: URL) { self.appPath = appPath }
@@ -34,14 +36,16 @@ final class AppLifecycle {
     func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
         if !launched {
             try terminateExisting()
-            if !keepData {
+            if !keepData && !dataMoved {
                 let source = FileManager.default.homeDirectoryForCurrentUser
                     .appendingPathComponent("Library/Application Support/com.app.scribular.tauri", isDirectory: true)
                 do { _ = try moveDataDir(from: source, intoRunDir: runDir) }
                 catch { throw .fatal("could not move app data: \(error.localizedDescription)") }
+                dataMoved = true
             }
             do {
                 let result = LaunchResult()
+                launching = result
                 let completed = DispatchSemaphore(value: 0)
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true
@@ -73,13 +77,15 @@ final class AppLifecycle {
     }
 
     func quit() {
-        guard launched, let running = app else { return }
+        // a launch interrupted mid-wait has no `app` yet; pick up whatever its completion handler delivered
+        guard let running = app ?? launching?.get().0 else { return }
         running.terminate()
         if !waitForTermination(running, seconds: 5) {
             running.forceTerminate()
             _ = waitForTermination(running, seconds: 1)
         }
         app = nil
+        launching = nil
         launched = false
     }
 

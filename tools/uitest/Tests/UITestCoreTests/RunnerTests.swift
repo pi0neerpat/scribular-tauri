@@ -7,10 +7,15 @@ private final class FakeDriver: Driver {
     var calls = [Command]()
     var labels = [String]()
     var screenshots = [URL]()
+    var firstCallDelay = 0.0
 
     func perform(_ command: Command) throws(DriverError) -> String? {
         calls.append(command)
-        guard !results.isEmpty else { return nil }
+        if calls.count == 1 { Thread.sleep(forTimeInterval: firstCallDelay) }
+        guard !results.isEmpty else {
+            Issue.record("FakeDriver: no scripted result for \(command)")
+            return nil
+        }
         return try results.removeFirst().get()
     }
 
@@ -24,6 +29,7 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
 
 @Test func allPassPrintsChecksAndSummary() {
     let driver = FakeDriver()
+    driver.results = [.success(nil), .success(nil)]
     var output = [String]()
     let passed = runSteps(
         [step(1, .launch(keepData: false), source: "launch"), step(2, .quit, source: "quit")],
@@ -83,7 +89,10 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     _ = runSteps([step(1, .handleKeychain, source: "handle-keychain")], driver: driver,
                  options: RunOptions(runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4", secrets: ["hunter2"]),
                  out: { output.append($0) })
+    #expect(!output.isEmpty)
     #expect(output.allSatisfy { !$0.contains("hunter2") })
+    #expect(output[0].contains("bad password ***"))
+    #expect(output.contains("  visible: \"***\""))
 }
 
 @Test func screenshotStepSavesNamedFileAndPrintsPath() {
@@ -96,4 +105,14 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(driver.screenshots == [runDir.appendingPathComponent("layout.png"), runDir.appendingPathComponent("step-2.png")])
     #expect(driver.calls.isEmpty)
     #expect(output[0] == "✓ 1 screenshot \"layout\" /tmp/run/layout.png")
+}
+
+@Test func slowFirstAttemptDoesNotConsumeTimeout() {
+    let driver = FakeDriver()
+    driver.firstCallDelay = 0.2
+    driver.results = [.failure(.retryable("not yet")), .success(nil)]
+    var output = [String]()
+    #expect(runSteps([step(1, .launch(keepData: false), source: "launch")], driver: driver,
+                     options: RunOptions(timeout: 0.1, poll: 0.01, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4"),
+                     out: { output.append($0) }))
 }

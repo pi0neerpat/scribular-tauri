@@ -59,7 +59,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
     }
 
     for step in steps {
-        let started = Date()
+        var started: Date?  // the wait window opens at the first retryable failure, not before the first attempt
         let detail: String?
         while true {
             do {
@@ -72,7 +72,8 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                     emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
                     return false
                 case .retryable(let message):
-                    let remaining = options.timeout - Date().timeIntervalSince(started)
+                    if started == nil { started = Date() }
+                    let remaining = options.timeout - Date().timeIntervalSince(started ?? Date())
                     if remaining <= 0 {
                         let timeout = options.timeout == floor(options.timeout)
                             ? String(Int(options.timeout))

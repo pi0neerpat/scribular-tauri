@@ -17,4 +17,5 @@ expect "Discard changes?"
 click "Cancel" in "Discard changes?"
 expect-not "Discard changes?"
 expect "Note styles"
+expect "Changed prompt"
 quit

@@ -68,3 +68,21 @@ import Testing
         #expect(throws: ScriptError.self) { try parseScript(bad) }
     }
 }
+
+@Test func parsesExpectNotWaitMsAndEscapedQuote() throws {
+    let steps = try parseScript("expect \"A\"\nexpect-not \"B\"\nwait 500ms\ntype \"say \\\"hi\\\"\"")
+    #expect(steps.map(\.command) == [.expect("A"), .expectNot("B"), .wait(seconds: 0.5), .type("say \"hi\"")])
+}
+
+@Test func rejectsEmptyClickLabel() {
+    #expect(throws: ScriptError.self) { try parseScript("click \"\"") }
+}
+
+@Test func rejectsKeyComboWithEmptyComponent() {
+    #expect(throws: ScriptError.self) { try parseScript("key cmd++s") }
+}
+
+@Test func rejectsScriptWithNoSteps() {
+    #expect(throws: ScriptError.self) { try parseScript("") }
+    #expect(throws: ScriptError.self) { try parseScript("# only a comment\n\n") }
+}
