@@ -253,3 +253,12 @@ AS18. [manual real-app] Activate the same key on a third device and see the "alr
 1. PR1 (S, 1 d): `DEPENDENCY_REVIEW_LICENSE.md`. Wait for approval.
 2. PR2 (M, 2-3 d): the `license` module (trial, state machine, vault wrapper over 01's `KeyStore`, API trait and fake), the gate in `commands.rs`, and tests AS1-AS12.
 3. PR3 (S-M, 2 d): commands and events, the ts-rs types and `api.ts` wrappers, the Settings licence section, `LicenseGate`, the badge, and vitest AS13. Then the manual checks AS14-AS18.
+
+## Execution notes (Patrick via Darby, 2026-11-05)
+- **Reviewer is Cubic, not Knightwatch.** The cwf task is set to `reviewer=cubic`. Use the configured `cwf review` / `cwf kw` commands only; never run Knightwatch quota or request commands. Handle every live Cubic finding: fix with a regression check, or answer with precise evidence and resolve the thread using the agent-reply marker.
+- **Spec 01 is merged** (main `9e17ac0`). Reuse its `KeyStore` / `KeychainKeyStore` (account-parameterised) and its SQLCipher store. Do not add a second Keychain abstraction or crate.
+- **Dependencies.** Step 1 is still `plans/DEPENDENCY_REVIEW_LICENSE.md`. If the work needs no new crate (uuid formatted in-house from `getrandom` or an existing `uuid`, `open` via `std::process::Command`, `reqwest` reused), record "none" and carry on. If any new crate is needed, write the review, transition to `blocked`, and wait for Patrick.
+- **Parallel work.** Spec 02 (diarization, PR #8) is being built by another agent in `/Volumes/My Shared Files/Scribular/scribular-tauri`. Do not touch that checkout. Work only in this clone (`scribular-tauri-p04`). Expect overlap in `commands.rs`, `src/lib/api.ts` and `Settings.svelte`: keep changes minimal there, and rebase on `origin/main` before opening the PR.
+- **Decisions for Patrick:** proceed on the recommended defaults in the spec. The server-side `testing-success-shoemaker-392` backdoor is a separate server task and is out of scope.
+- **Manual checks AS14-AS18.** Do what can honestly be done on this VM (release build, Keychain item, clock/offline checks). Where a check needs a real licence key, a third device, a throwaway macOS user, or Little Snitch, say so plainly in the verification record. Do not fabricate evidence. Follow cwf's screenshot budget.
+- No release, signing or merge work. Product approval and merge stay with Patrick.
