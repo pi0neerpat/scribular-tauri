@@ -213,6 +213,7 @@ it('keeps pending navigation while a save is already in progress', async () => {
   button('Beta').click();
   flushSync();
   expect(dialog()).not.toBeNull();
+  await vi.waitFor(() => expect(dialog()?.contains(document.activeElement)).toBe(true));
   dialog()!.querySelector<HTMLButtonElement>('button')!.click();
   finish({ ...list, prompts: [{ ...list.prompts[0], name: 'Alpha 2' }, list.prompts[1]] });
   await vi.waitFor(() => expect(input().value).toBe('Beta'));

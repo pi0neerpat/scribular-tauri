@@ -59,7 +59,8 @@
 
   $effect(() => {
     if (pending || deleting) {
-      void tick().then(() => dialogElement?.querySelector<HTMLElement>('[data-dialog-initial-focus]')?.focus());
+      const selector = pending && saving ? '[data-dialog-save]' : '[data-dialog-initial-focus]';
+      void tick().then(() => dialogElement?.querySelector<HTMLElement>(selector)?.focus());
     } else if (dialogOpener) {
       const opener = dialogOpener;
       dialogOpener = null;
@@ -219,7 +220,7 @@
   {#if pending}
     <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Discard changes?" tabindex="-1" onkeydown={dialogKeydown}>
       <p>Discard changes?</p>
-      <button onclick={() => resolve('save')}>Save</button>
+      <button onclick={() => resolve('save')} data-dialog-save>Save</button>
       <button onclick={() => resolve('discard')} disabled={saving}>Discard</button>
       <button onclick={() => resolve('cancel')} disabled={saving} data-dialog-initial-focus>Cancel</button>
     </div>
