@@ -1,7 +1,11 @@
 # Multi-speaker diarization — Tauri parity spec
 Status: draft for cwf; Date: 2026-11-03
 
-> Authoring note: web access was denied while writing, so every claim about third-party crates (sherpa-onnx Rust bindings, `sherpa-rs`, `ort`) comes from prior knowledge and is **unverified**. Implementation step 1 re-checks all of it live.
+## Approved execution decision — 2026-11-04
+
+Patrick approved official `sherpa-onnx`/`sherpa-onnx-sys` `=1.13.8` and its official native release for implementation and integration without an Electron parity result. This supersedes R1 as a prerequisite to implementation and the historical FFI-first recommendation below. Cross-engine parity remains an open, unmeasured verification item: the Electron baseline and fixed-clip comparison are unavailable, and no accuracy or parity claim is made. This implementation approval is separate from verification, technical review, Patrick product approval, merge, and release/signing approval.
+
+> Historical authoring note: third-party crate and build claims were unverified when this draft was written. The selected sherpa crate/native release were rechecked as recorded in `plans/DEPENDENCY_REVIEW_DIARIZATION.md`; the alternative-engine maturity notes below remain historical and unverified.
 
 ## Intent
 Couples and family therapists record in-person sessions with 2–4+ voices on one mic. A plain transcript is useless to them, and `todo.md:10` calls diarization a gating feature for marriage and family therapists. Users need to: turn it on once, say how many people spoke when they stop, get a transcript split by speaker, name the speakers ("Therapist", "Maria"), and get a summary that uses those names. They can skip, and can add speakers later.
@@ -47,7 +51,7 @@ Couples and family therapists record in-person sessions with 2–4+ voices on on
 **Anti-goals**: no diarization while recording (CPU contention with streaming whisper); no blocking recording on a model download; no cloud or Python path; no speaker content in logs.
 
 ## Requirements
-- **R1** Dependency review first: `plans/DEPENDENCY_REVIEW_DIARIZATION.md`, approved by Patrick before any crate or native library is added. It includes a spike measuring embedding parity against `sherpa-onnx-node` on fixed clips (cosine ≥ 0.99).
+- **R1** Dependency review: `plans/DEPENDENCY_REVIEW_DIARIZATION.md`. The original cosine ≥ 0.99 fixed-clip comparison against `sherpa-onnx-node` remains open verification, but Patrick's dated approval above supersedes it as a prerequisite to implementation. Do not claim parity until the comparison is measured.
 - **R2** Setting `multi_speaker` (bool, default false) in the KV store, with get/set commands and a Settings toggle.
 - **R3** Add `ModelKind::Speaker` and a `speaker-campplus` manifest entry (28,281,164 B, Apache-2.0, sha256-verified). It is **optional**: skipped by `ensure_all`, downloaded on demand when the user enables the toggle; the toggle only stays on once the model is Ready.
 - **R4** Engine behind a trait (`SpeakerEmbedder::embed(&[f32]) -> Result<Vec<f32>>`, loaded on demand like `TranscriberLoader`) with a fake under `fake-engines`.
@@ -106,7 +110,7 @@ Electron needs only the **embedding** model; it must be run on 80-dim Kaldi-styl
 | D. `ort` + in-house fbank | ONNX Runtime bindings; we compute fbank | No sherpa dependency; runtime dylib pinned | `ort` 2.x has been long in release-candidate form (check if stable now); must reimplement fbank exactly (parity test mandatory) or accuracy silently drops |
 | E. `candle` / `tract` | Pure Rust | No native lib | CAM++ operator coverage unverified; highest risk |
 
-**Spec author's call — recommendation**: spike C, then A, with D as fallback, because C/A reuse the exact code Electron's benchmarks were measured with. Criteria: parity ≥ 0.99, loads in a notarized build, size, no symbol clash. The ggml duplicate-symbol risk (whisper-rs-sys vs llama-cpp-sys-2, `DEPENDENCY_REVIEW_ENGINES.md`) does not apply to ONNX Runtime, but verify dylib packaging: Electron already needed rpath fixes for `libonnxruntime`.
+**Historical spec recommendation, superseded for implementation by the approved execution decision above**: spike C, then A, with D as fallback, because C/A reuse the exact code Electron's benchmarks were measured with. The parity criterion remains unverified, and the notarized-build, size, and symbol checks remain separate verification/release work. The ggml duplicate-symbol risk (whisper-rs-sys vs llama-cpp-sys-2, `DEPENDENCY_REVIEW_ENGINES.md`) does not apply to ONNX Runtime, but verify dylib packaging: Electron already needed rpath fixes for `libonnxruntime`.
 
 ## New dependencies (review needed — implementation step 1)
 Follow `plans/DEPENDENCY_REVIEW_ENGINES.md`: exact `=` pin, newest stable ≥ 2 weeks old, owners, 90-day downloads, OSV + RustSec, `build.rs` read.

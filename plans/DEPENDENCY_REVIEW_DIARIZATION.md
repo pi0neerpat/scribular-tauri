@@ -1,8 +1,8 @@
 # Diarization dependency review
 
-**Decision:** Patrick approved the official `sherpa-onnx` and `sherpa-onnx-sys` crates pinned to `=1.13.8` and the official native release for this feature on 2026-11-04. The broader provenance/SBOM and network-disabled-build gates from earlier drafts are superseded by `/Users/admin/.local/state/scribular-parity/specs/02-execution-brief.md`.
+## Approved decision and supersession — 2026-11-04
 
-This approval permits integration without an Electron embedding-parity result. The comparison remains unavailable and no accuracy or parity claim is made; it is not a release gate for this approved scope.
+Patrick approved the official `sherpa-onnx` and `sherpa-onnx-sys` crates pinned to `=1.13.8` and the official native release for implementation and integration. This supersedes the parity-before-implementation requirement and FFI-first recommendation in `plans/parity/02-multi-speaker-diarization.md`. The Electron comparison remains unavailable and cross-engine parity remains unverified; no accuracy or parity claim is made. This is implementation/dependency approval only. Verification, technical review, Patrick product approval, merge, and release/signing approval remain separate. The broader provenance/SBOM and network-disabled-build gates from earlier drafts are superseded by `/Users/admin/.local/state/scribular-parity/specs/02-execution-brief.md`.
 
 ## Checks and spike evidence
 
