@@ -69,6 +69,10 @@ import Testing
     }
 }
 
+@Test func duplicateScreenshotNamesRejected() {
+    #expect(throws: ScriptError.self) { try parseScript("screenshot \"a\"\nscreenshot \"a\"") }
+}
+
 @Test func parsesExpectNotWaitMsAndEscapedQuote() throws {
     let steps = try parseScript("expect \"A\"\nexpect-not \"B\"\nwait 500ms\ntype \"say \\\"hi\\\"\"")
     #expect(steps.map(\.command) == [.expect("A"), .expectNot("B"), .wait(seconds: 0.5), .type("say \"hi\"")])

@@ -103,7 +103,7 @@ final class AXDriver: Driver {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         var arguments = ["-x"]
-        // crop to the app window so the image holds only Scribular; a keychain prompt or a missing window needs the full screen
+        // crop to the app window's screen region (overlapping windows can still appear); a keychain prompt or a missing window needs the full screen
         let keychainPrompt = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty
         if !keychainPrompt, let app = appElement(),
            let window = axElement(attribute(app, kAXFocusedWindowAttribute)) ?? (attribute(app, kAXWindowsAttribute) as? [AXUIElement])?.first,
@@ -174,17 +174,15 @@ final class AXDriver: Driver {
         return CGRect(origin: origin, size: dimensions)
     }
 
-    /// Every on-screen label with its role, one per line, in tree order: what `click` and `expect` can see.
+    /// Every accessible label with its role, one entry per element in tree order: what `click` and `expect` can see.
     private func labelListing() -> String {
-        var seen = Set<String>()
         let lines = allElements().filter { frame(of: $0) != nil }.flatMap { element -> [String] in
             let role = (attribute(element, kAXRoleAttribute) as? String ?? "AXUnknown").replacingOccurrences(of: "AX", with: "")
-            return labelValues(element).filter { !$0.isEmpty }.map { label in
-                // long values (transcripts, summaries) would flood the output; click needs exact labels, so mark the cut
-                let shown = label.count > 80 ? String(label.prefix(80)) + "…" : label
-                return "\(role) \"\(shown.replacingOccurrences(of: "\n", with: " "))\""
+            var seen = Set<String>()  // title/description/value often repeat within one element; distinct elements stay separate for `click ... index N`
+            return labelValues(element).filter { !$0.isEmpty && seen.insert($0).inserted }.map { label in
+                "\(role) \"\(label.replacingOccurrences(of: "\n", with: " "))\""
             }
-        }.filter { seen.insert($0).inserted }
+        }
         return "\(lines.count) labels" + lines.map { "\n  " + $0 }.joined()
     }
 

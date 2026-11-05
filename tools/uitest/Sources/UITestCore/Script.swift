@@ -133,6 +133,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             guard args.isEmpty || name.map({ !$0.isEmpty && !$0.contains("/") && !$0.hasPrefix(".") }) == true else {
                 throw fail("screenshot name must be a quoted file name without / or a leading .")
             }
+            if let name, steps.contains(where: { $0.command == .screenshot(name: name) }) {
+                throw fail("duplicate screenshot name: \(name)")
+            }
             command = .screenshot(name: name)
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }

@@ -51,7 +51,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
-| `labels` | Print every on-screen label with its role (`Button "Save"`), so you can write `click`/`expect` lines without reading the app source. Values over 80 characters are cut with `…`. |
+| `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Labels are printed in full; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
 | `screenshot ["name"]` | Save the app window to `runs/<timestamp>/<name>.png` (default `step-<line>.png`) for checking layout. The step prints the path. |
 | `quit` | Quit the app. |
 
@@ -68,7 +68,7 @@ quit
 
 ## Output
 
-Each action prints one line. A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. The final line includes the result and recording path:
+Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. The final line includes the result and recording path:
 
 ```text
 ✓ 1 launch /path/to/Scribular.app (built 2026-11-05T20:00:00Z)
