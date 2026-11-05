@@ -49,7 +49,13 @@ final class AppLifecycle {
                     result.set(app: application, error: error)
                     completed.signal()
                 }
-                guard completed.wait(timeout: .now() + 30) == .success else { throw NSError(domain: "uitest.launch", code: 1, userInfo: [NSLocalizedDescriptionKey: "app launch timed out"]) }
+                let deadline = Date().addingTimeInterval(30)
+                var didComplete = false
+                while Date() < deadline {
+                    if completed.wait(timeout: .now()) == .success { didComplete = true; break }
+                    _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+                }
+                guard didComplete else { throw NSError(domain: "uitest.launch", code: 1, userInfo: [NSLocalizedDescriptionKey: "app launch timed out"]) }
                 let (opened, error) = result.get()
                 if let error { throw error }
                 guard let opened else { throw NSError(domain: "uitest.launch", code: 2, userInfo: [NSLocalizedDescriptionKey: "app did not start"]) }
