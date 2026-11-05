@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import type { SessionProgress } from '../types/SessionProgress';
 
 const cancelJob = vi.fn();
 const currentRecording = vi.fn();
@@ -10,6 +11,7 @@ const onSessionProgress = vi.fn();
 const onSessionSegments = vi.fn();
 const startRecording = vi.fn();
 const stopRecording = vi.fn();
+let emitProgress: ((progress: SessionProgress) => void) | undefined;
 vi.mock('../api', () => ({
   cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
   onSessionProgress, onSessionSegments, startRecording, stopRecording,
@@ -27,6 +29,7 @@ beforeEach(() => {
   getRecordingSettings.mockResolvedValue(settings(true));
   getSession.mockResolvedValue(null);
   onSessionProgress.mockResolvedValue(() => {});
+  emitProgress = undefined;
   onSessionSegments.mockResolvedValue(() => {});
   startRecording.mockResolvedValue(recording);
   stopRecording.mockResolvedValue(undefined);
@@ -106,6 +109,33 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(sessionStorage.getItem('scribular.inFlightSession')).toBe(recording.id));
     unmount(fresh.app);
     fresh.target.remove();
+  });
+
+  it('keeps a new attempt marker when an older session finishes', async () => {
+    onSessionProgress.mockImplementation(async (callback) => {
+      emitProgress = callback;
+      return () => {};
+    });
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 1, stepCount: 1, message: 'Done' });
+    await vi.waitFor(() => expect(target.textContent).toContain('Start recording'));
+
+    let rejectStart!: (error: Error) => void;
+    startRecording.mockReturnValueOnce(new Promise((_, reject) => { rejectStart = reject; }));
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalledTimes(2));
+    const attempt = sessionStorage.getItem('scribular.inFlightStartAttempt');
+    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 1, stepCount: 1, message: 'Done' });
+    expect(sessionStorage.getItem('scribular.inFlightStartAttempt')).toBe(attempt);
+    expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBe('true');
+    rejectStart(new Error('new startup failed'));
+    await vi.waitFor(() => expect(target.textContent).toContain('new startup failed'));
+    expect(sessionStorage.getItem('scribular.inFlightStartAttempt')).toBeNull();
+    expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBeNull();
+    unmount(app);
+    target.remove();
   });
 
   it('uses the recording-start setting after the saved setting changes and confines focus', async () => {

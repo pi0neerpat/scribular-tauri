@@ -36,8 +36,7 @@
     if (id) sessionStorage.setItem(IN_FLIGHT_KEY, id);
     else {
       sessionStorage.removeItem(IN_FLIGHT_KEY);
-      sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
-      sessionStorage.removeItem(IN_FLIGHT_START_KEY);
+      if (!sessionStorage.getItem(IN_FLIGHT_START_KEY)) sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
     }
   }
 
