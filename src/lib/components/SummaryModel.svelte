@@ -71,7 +71,7 @@
   <legend>Summary model</legend>
   {#each models as m (m.spec.id)}
     <label>
-      <input type="radio" name="summary-model" checked={picked === m.spec.id} onchange={() => { picked = m.spec.id; confirming = false; }} />
+      <input type="radio" name="summary-model" checked={picked === m.spec.id} disabled={switching} onchange={() => { picked = m.spec.id; confirming = false; }} />
       {m.spec.displayName} · {gb(m.spec.size)}
       {#if m.state === 'ready'}<span>Installed</span>
       {:else if m.state === 'downloading' || m.state === 'verifying'}<span>Downloading</span>

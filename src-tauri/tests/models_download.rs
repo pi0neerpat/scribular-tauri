@@ -490,6 +490,7 @@ fn concurrent_ensure_one_waits_for_the_download_owner_to_finish() {
     let (started_tx, started_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let release_rx = Mutex::new(release_rx);
+    let (second_started_tx, second_started_rx) = std::sync::mpsc::channel();
     let (finished_tx, finished_rx) = std::sync::mpsc::channel();
     let timeout = std::time::Duration::from_secs(5);
 
@@ -506,9 +507,11 @@ fn concurrent_ensure_one_waits_for_the_download_owner_to_finish() {
 
         let second_manager = Arc::clone(&manager);
         let second = scope.spawn(move || {
+            second_started_tx.send(()).unwrap();
             let result = run(second_manager.ensure_one("shared", &|_| {}));
             finished_tx.send(result).unwrap();
         });
+        second_started_rx.recv_timeout(timeout).unwrap();
         let finished_while_owned = finished_rx
             .recv_timeout(std::time::Duration::from_millis(50))
             .is_ok();

@@ -31,7 +31,7 @@ it('keeps switch and rollback events newer than the initial model snapshot', asy
   await vi.waitFor(() => expect(modelChanged).toBeTypeOf('function'));
   await vi.waitFor(() => expect(listSummaryModels).toHaveBeenCalledOnce());
   modelChanged!('big');
-  await vi.waitFor(() => expect(target.textContent).toContain('Summary model downloading(50%)'));
+  await vi.waitFor(() => expect(target.textContent).toMatch(/Summary model downloading\s*\(50%\)/));
 
   resolveList([
     { spec: { id: 'small' }, selected: true },
@@ -39,7 +39,7 @@ it('keeps switch and rollback events newer than the initial model snapshot', asy
   ]);
   await vi.waitFor(() => expect(initialListResolved).toBe(true));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(target.textContent).toContain('Summary model downloading(50%)');
+  expect(target.textContent).toMatch(/Summary model downloading\s*\(50%\)/);
 
   modelChanged!('small');
   await vi.waitFor(() => expect(target.textContent).toContain('Summary model ready'));

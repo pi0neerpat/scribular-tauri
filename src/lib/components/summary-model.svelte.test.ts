@@ -122,6 +122,11 @@ it('disables model selection while a switch is pending', async () => {
   flushSync();
   expect(setSummaryModel).toHaveBeenCalledOnce();
   expect(use.disabled).toBe(true);
+  const radios = target.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  expect([...radios].every((radio) => radio.disabled)).toBe(true);
+  radios[0].click();
+  flushSync();
+  expect(radios[1].checked).toBe(true);
   finish();
   await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].checked).toBe(true));
   unmount(app);
