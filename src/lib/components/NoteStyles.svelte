@@ -31,6 +31,7 @@
   let saving = $state(false);
   let dialogElement = $state<HTMLDivElement | undefined>();
   let dialogOpener = $state<HTMLElement | null>(null);
+  let dialogFallback = $state<HTMLElement | null>(null);
 
   let open = $derived(list?.prompts.find((p) => p.id === openId) ?? null);
   let dirty = $derived(
@@ -63,8 +64,13 @@
       void tick().then(() => dialogElement?.querySelector<HTMLElement>(selector)?.focus());
     } else if (dialogOpener) {
       const opener = dialogOpener;
+      const fallback = dialogFallback;
       dialogOpener = null;
-      void tick().then(() => { if (opener.isConnected) opener.focus(); });
+      dialogFallback = null;
+      void tick().then(() => {
+        if (opener.isConnected) opener.focus();
+        else fallback?.focus();
+      });
     }
   });
 
@@ -127,8 +133,14 @@
   }
 
   async function confirmDelete(id: string) {
+    const fallback = dialogFallback;
     deleting = null;
-    if (await call(() => deletePrompt(id)) && openId === id) edit(null);
+    const deleted = await call(() => deletePrompt(id));
+    if (deleted && openId === id) edit(null);
+    if (deleted && fallback?.isConnected) {
+      await tick();
+      fallback.focus();
+    }
   }
 
   async function resolve(choice: 'save' | 'discard' | 'cancel') {
@@ -205,6 +217,7 @@
                   onDuplicate={(opener) => guard(() => duplicate(p.id), opener)}
                   onDelete={(opener) => guard(() => {
                     dialogOpener = opener.closest('li')?.querySelector<HTMLElement>('button[aria-expanded]') ?? opener;
+                    dialogFallback = opener.closest('section')?.querySelector<HTMLElement>('button') ?? null;
                     edit(null);
                     deleting = p;
                   }, opener)}

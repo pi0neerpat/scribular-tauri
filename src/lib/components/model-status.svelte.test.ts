@@ -58,3 +58,14 @@ it('loads the status snapshot if progress listener setup fails', async () => {
   unmount(app);
   target.remove();
 });
+
+it('handles a rejected model-change listener during setup and cleanup', async () => {
+  onSummaryModelChanged.mockRejectedValueOnce(new Error('listener unavailable'));
+  const target = document.createElement('div');
+  const app = mount(ModelStatus, { target });
+  await vi.waitFor(() => expect(listSummaryModels).toHaveBeenCalledOnce());
+  resolveList([{ spec: { id: 'small' }, selected: true }]);
+  await vi.waitFor(() => expect(target.textContent).toContain('Summary model ready'));
+  unmount(app);
+  target.remove();
+});

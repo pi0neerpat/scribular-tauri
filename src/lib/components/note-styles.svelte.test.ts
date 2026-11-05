@@ -122,6 +122,14 @@ it('focuses Cancel in the delete dialog', async () => {
   await vi.waitFor(() => expect(document.activeElement).toBe(opener), { timeout: 3000 });
 });
 
+it('moves focus to New style after deleting the style that opened the dialog', async () => {
+  deletePrompt.mockResolvedValue({ ...list, prompts: [list.prompts[1]], activeId: 'b' });
+  button('Delete').click();
+  flushSync();
+  button('Delete').click();
+  await vi.waitFor(() => expect(button('New style')).toBe(document.activeElement));
+});
+
 it('traps focus in the discard dialog and restores its opener on close', async () => {
   typeName('Alpha 2');
   const opener = button('Beta');
