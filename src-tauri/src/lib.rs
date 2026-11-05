@@ -61,16 +61,20 @@ fn transcriber_loader(models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> 
 }
 
 /// R6/R12: re-validate at launch (never blocking it) and daily, raise the
-/// clock high-water mark hourly, and emit whenever the state changes, which
+/// clock high-water mark every tick, and emit whenever the state changes, which
 /// also covers the day rollover.
 fn spawn_license_checks(app: tauri::AppHandle, licensing: Arc<license::Licensing>) {
-    const TICK: Duration = Duration::from_secs(60 * 60);
-    const REVALIDATE_EVERY: u32 = 24;
+    // `sleep` stops while the Mac sleeps, so the schedule reads the wall
+    // clock; the short tick bounds how late a check runs after waking.
+    const TICK: Duration = Duration::from_secs(5 * 60);
     std::thread::spawn(move || {
         let mut last = None;
-        for tick in (0..REVALIDATE_EVERY).cycle() {
-            if tick == 0 {
+        let mut revalidated_at: Option<i64> = None;
+        loop {
+            let now = store::now_ms();
+            if revalidated_at.is_none_or(|t| now - t >= license::DAY_MS || now < t) {
                 licensing.revalidate();
+                revalidated_at = Some(now);
             }
             licensing.touch();
             let state = licensing.state();

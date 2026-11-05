@@ -38,15 +38,16 @@ impl HttpLicenseApi {
         let url = reqwest::Url::parse(root)
             .and_then(|u| u.join("/api/validate"))
             .map_err(|e| format!("bad API root: {e}"))?;
-        let host = url.host_str().unwrap_or_default().to_owned();
+        let origin = url.origin();
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(15))
-            // Same-host redirects only (www → apex style hops stay refused).
+            // Same scheme, host and port only: no downgrade to http, no other
+            // service (www → apex style hops stay refused too).
             .redirect(reqwest::redirect::Policy::custom(move |attempt| {
                 if attempt.previous().len() >= 5 {
                     attempt.error("too many redirects")
-                } else if attempt.url().host_str() == Some(host.as_str()) {
+                } else if attempt.url().origin() == origin {
                     attempt.follow()
                 } else {
                     attempt.stop()
@@ -72,7 +73,8 @@ impl LicenseApi for HttpLicenseApi {
                 .await
                 .map_err(|e| e.without_url().to_string())?;
             let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
+            // A body cut off mid-read is a transport failure, not a reply.
+            let body = resp.text().await.map_err(|e| e.without_url().to_string())?;
             Ok(HttpReply { status, body })
         })
     }

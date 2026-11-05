@@ -33,7 +33,8 @@ const LAST_SEEN: &str = "license.last_seen_at";
 const LAST_VERIFIED: &str = "license.last_verified_at";
 const EXPIRES: &str = "license.expires_at";
 const INVALID_REASON: &str = "license.invalid_reason";
-/// Only written when the Keychain refuses the item (R10 fallback).
+/// Only written when the Keychain refuses the item (R10 fallback). While
+/// present it overrides the item's key, which may be stale; `""` means no key.
 const KEY_FALLBACK: &str = "license.key_fallback";
 
 /// Why a key was refused by the server.
@@ -249,8 +250,12 @@ pub fn classify(status: u16, body: &str) -> ActivationResult {
         return ActivationResult::ServerError;
     };
     match reply.valid {
-        Some(true) => ActivationResult::Valid {
-            expires_at: reply.expiration_date.as_deref().and_then(parse_date_ms),
+        // A date we can't read must not become "never expires".
+        Some(true) => match reply.expiration_date.as_deref().map(parse_date_ms) {
+            Some(None) => ActivationResult::ServerError,
+            parsed => ActivationResult::Valid {
+                expires_at: parsed.flatten(),
+            },
         },
         Some(false) => match reply.message.as_deref().unwrap_or("") {
             "Invalid license key format" => ActivationResult::BadFormat,
@@ -359,14 +364,18 @@ impl Licensing {
         log: Log,
     ) -> Self {
         let now = clock.now_ms();
-        let stored = match keys.get_bytes() {
-            Ok(Some(bytes)) => serde_json::from_slice::<Secrets>(&bytes)
-                .inspect_err(|_| log("Keychain licence item unreadable; rebuilding it"))
-                .ok(),
-            Ok(None) => None,
+        let (stored, read_ok) = match keys.get_bytes() {
+            Ok(Some(mut bytes)) => {
+                let parsed = serde_json::from_slice::<Secrets>(&bytes)
+                    .inspect_err(|_| log("Keychain licence item unreadable; rebuilding it"))
+                    .ok();
+                bytes.fill(0);
+                (parsed, true)
+            }
+            Ok(None) => (None, true),
             Err(e) => {
                 log(&format!("Keychain unavailable, using settings: {e}"));
-                None
+                (None, false)
             }
         };
         let setting = |k: &str| store.get_setting(k).ok().flatten();
@@ -388,10 +397,10 @@ impl Licensing {
             .or_else(|| setting(DEVICE_MIRROR).filter(|d| is_uuid(d)))
             .unwrap_or_else(new_uuid_v4);
         let secrets = Secrets {
-            license_key: stored
-                .as_ref()
-                .and_then(|s| s.license_key.clone())
-                .or_else(|| setting(KEY_FALLBACK)),
+            license_key: match setting(KEY_FALLBACK) {
+                Some(k) => Some(k).filter(|k| !k.is_empty()),
+                None => stored.as_ref().and_then(|s| s.license_key.clone()),
+            },
             device_id,
             trial_started_at: rfc3339(trial),
         };
@@ -406,8 +415,9 @@ impl Licensing {
             skip: false,
         };
         // Only rewrite the Keychain when something changed: each write can
-        // prompt the user on an unsigned build.
-        if stored.as_ref() != Some(&secrets) {
+        // prompt the user on an unsigned build. Never after a failed read: the
+        // item may hold a key we couldn't see, and a rewrite would erase it.
+        if read_ok && stored.as_ref() != Some(&secrets) {
             this.save(&secrets);
         }
         this.set(TRIAL_MIRROR, &secrets.trial_started_at);
@@ -525,7 +535,8 @@ impl Licensing {
         let had = next.license_key.take();
         self.save(&next);
         *self.secrets.lock().unwrap() = next;
-        for k in [LAST_VERIFIED, EXPIRES, INVALID_REASON, KEY_FALLBACK] {
+        // `save` owns KEY_FALLBACK: it may be the tombstone over a stale item.
+        for k in [LAST_VERIFIED, EXPIRES, INVALID_REASON] {
             self.delete(k);
         }
         if let Some(key) = had {
@@ -560,10 +571,9 @@ impl Licensing {
             Ok(()) => self.delete(KEY_FALLBACK),
             Err(e) => {
                 (self.log)(&format!("Keychain write failed, using settings: {e}"));
-                match &secrets.license_key {
-                    Some(k) => self.set(KEY_FALLBACK, k),
-                    None => self.delete(KEY_FALLBACK),
-                }
+                // The old item may still be readable, so the fallback must
+                // win over it at the next launch, even when it says "no key".
+                self.set(KEY_FALLBACK, secrets.license_key.as_deref().unwrap_or(""));
             }
         }
     }
@@ -1101,6 +1111,65 @@ mod tests {
             .any(|l| l.contains("Keychain")));
     }
 
+    /// A store holding `bytes` whose reads or writes fail.
+    fn keychain_with(bytes: &[u8], fail_get: bool, fail_set: bool) -> Arc<MemoryKeyStore> {
+        let mut k = MemoryKeyStore::default();
+        k.set_bytes(bytes).unwrap();
+        k.fail_get = fail_get;
+        k.fail_set = fail_set;
+        Arc::new(k)
+    }
+
+    #[test]
+    fn failed_keychain_read_never_erases_the_licence() {
+        let f = Fixture::new();
+        f.licensed();
+        let item = f.keys.get_bytes().unwrap().unwrap();
+        let keys = keychain_with(&item, true, false);
+        let lic = Licensing::init(
+            f.store.clone(),
+            keys.clone(),
+            f.api.clone(),
+            f.clock.clone(),
+        );
+        drop(lic);
+        let mut keys = Arc::try_unwrap(keys).ok().unwrap();
+        keys.fail_get = false;
+        assert_eq!(keys.get_bytes().unwrap().unwrap(), item, "item untouched");
+    }
+
+    #[test]
+    fn fallback_overrides_a_stale_keychain_item() {
+        let f = Fixture::new();
+        f.licensed();
+        let item = f.keys.get_bytes().unwrap().unwrap();
+        // The Keychain still serves the old item but refuses every write.
+        let keys = keychain_with(&item, false, true);
+        let init = || {
+            Licensing::init(
+                f.store.clone(),
+                keys.clone(),
+                f.api.clone(),
+                f.clock.clone(),
+            )
+        };
+        init().deactivate();
+        let after = init();
+        assert_eq!(after.masked_key(), None, "removed key stays removed");
+        assert_eq!(after.state(), AccessState::Trial { days_left: 14 });
+
+        drop(after);
+        // Once writes work again the item is fixed and the fallback dropped.
+        let mut k = Arc::try_unwrap(keys).ok().unwrap();
+        k.fail_set = false;
+        let k = Arc::new(k);
+        let healed = Licensing::init(f.store.clone(), k.clone(), f.api.clone(), f.clock.clone());
+        assert_eq!(healed.masked_key(), None);
+        assert_eq!(f.store.get_setting(KEY_FALLBACK).unwrap(), None);
+        let s: Secrets = serde_json::from_slice(&k.get_bytes().unwrap().unwrap()).unwrap();
+        assert_eq!(s.license_key, None);
+    }
+
     #[test]
     fn release_builds_ignore_the_skip_variable() {
         assert!(!skip_requested(false, Some("1")));
@@ -1142,6 +1211,11 @@ mod tests {
                 },
             ),
             (200, r#"{"valid":true}"#, Valid { expires_at: None }),
+            (
+                200,
+                r#"{"valid":true,"expirationDate":"soon"}"#,
+                ServerError,
+            ),
             (
                 200,
                 r#"{"valid":false,"message":"Invalid device ID format"}"#,

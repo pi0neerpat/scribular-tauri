@@ -24,7 +24,8 @@ pub enum LockReason {
 /// Where the database key lives. Errors carry a message for the log only.
 ///
 /// `get_bytes` / `set_bytes` hold an arbitrary secret blob in the same item
-/// (spec 04's licence record). Stores that only hold keys refuse them.
+/// (spec 04's licence record). Stores that only hold keys refuse them. The
+/// blob is a secret: callers zero the returned buffer when done with it.
 pub trait KeyStore: Send + Sync {
     fn get(&self) -> Result<Option<Key>, String>;
     fn set(&self, key: &Key) -> Result<(), String>;
@@ -44,13 +45,15 @@ pub struct MemoryKeyStore {
     item: Mutex<Option<Vec<u8>>>,
     /// Makes `set` fail, for the R6/AS5 paths.
     pub fail_set: bool,
+    /// Makes `get_bytes` fail, like a transient Keychain error.
+    pub fail_get: bool,
 }
 
 impl MemoryKeyStore {
     pub fn with_key(key: Key) -> Self {
         Self {
             item: Mutex::new(Some(key.to_vec())),
-            fail_set: false,
+            ..Default::default()
         }
     }
 
@@ -75,6 +78,9 @@ impl KeyStore for MemoryKeyStore {
     }
 
     fn get_bytes(&self) -> Result<Option<Vec<u8>>, String> {
+        if self.fail_get {
+            return Err("get refused".into());
+        }
         Ok(self.item.lock().unwrap().clone())
     }
 
