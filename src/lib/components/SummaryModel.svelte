@@ -31,6 +31,8 @@
       if (p.state === 'failed') {
         error = p.error ?? 'Model download failed.';
         void refresh(true);
+      } else if (p.state === 'missing' || p.state === 'ready') {
+        void refresh(true);
       }
     });
     unlisten.then(() => refresh(), () => refresh());

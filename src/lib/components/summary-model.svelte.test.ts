@@ -56,6 +56,26 @@ it('restores the backend selection when switching fails', async () => {
   target.remove();
 });
 
+it('restores the backend selection after a download fails', async () => {
+  const target = document.createElement('div');
+  document.body.append(target);
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.querySelectorAll('input[type="radio"]')).toHaveLength(2));
+  const radios = target.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  radios[1].click();
+  flushSync();
+  const use = [...target.querySelectorAll('button')].at(-1)!;
+  use.click();
+  flushSync();
+  use.click();
+  await vi.waitFor(() => expect(radios[1].checked).toBe(true));
+  reportProgress!({ modelId: 'big', state: 'failed', downloadedBytes: 0, totalBytes: 2_500_000_000, error: 'network failed' });
+  await vi.waitFor(() => expect(radios[0].checked).toBe(true));
+  expect(target.textContent).toContain('network failed');
+  unmount(app);
+  target.remove();
+});
+
 it('shows the selected model immediately after a successful switch', async () => {
   const target = document.createElement('div');
   document.body.append(target);
