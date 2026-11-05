@@ -63,10 +63,10 @@ Counters persist in `userData/usageAnalytics.json`, reset each week (`:39-69`). 
 - **Developer section** (debug builds only, `global.debug`): test error report and test unhandled exception buttons (`settings.js:1091-1114`, `registerIpcHandlers.js:320-331`).
 
 ## Tauri state today (what exists, what is missing, with file refs)
-- No logger. Diagnostics are `eprintln!` to stderr only: `jobs/queue.rs:112,217,234,302,303,348,355`, `jobs/summarize.rs:84,263`, `jobs/session.rs:262,279,576,615`, `audio/mic.rs:146`, `audio/system.rs:370`, `audio/chunk_writer.rs:84`. A packaged app has no visible stderr, so users have nothing to send. These print error values and ids, not transcript text (grep of `eprintln!` for transcript/text/summary found only `bin/bench.rs:225`, a dev tool).
+- No content-free logger exists. App-side production errors and logs across retention, commands, store, licensing, jobs, audio, STT, LLM and models need one logger; logging raw error values can expose request data. Keep dev tools separate.
 - No panic hook. Only `catch_unwind` in the job queue (`jobs/queue.rs:7,329` → `summarize::fail_after_panic`, `summarize.rs:117`). `lib.rs:114` ends with `.expect("error while running tauri application")`.
 - No webview error handlers (no `onerror` in `src/`).
-- No telemetry, install id, or `telemetry_enabled` setting. Settings is a KV table (`store/settings.rs:27-47`, `get_setting`/`set_setting`); migrations are `store/migrations.rs:11` (v1-v3).
+- No telemetry, install id, or `telemetry_enabled` setting. Settings is a KV table (`store/settings.rs:27-47`, `get_setting`/`set_setting`); the current schema baseline is migrations v1-v5 (`store/migrations.rs:11`).
 - `commands.rs` has `app_version` (`:85`) and `open_privacy_settings` (`:226`, shells out to macOS) but no diagnostics/logs command. IPC test `lib.rs:154-171` forces every command to have an `api.ts` wrapper.
 - Settings UI: `src/lib/components/Settings.svelte` (only recording settings).
 - Only network use is model download via `reqwest` (`models/download.rs`, `reqwest 0.13.5` native-tls, `Cargo.toml:29`). CSP `default-src 'self'` (`tauri.conf.json:21`) blocks webview-originated requests, so all telemetry must go through Rust.
@@ -94,19 +94,19 @@ Anti-goals
 **Logging**
 - R1. A `diag::log` module writes lines `ISO-8601 LEVEL [module] message` to `<app_data_dir>/logs/scribular.log` (Spec author's call: data dir as the brief asks; one place to purge; not `~/Library/Logs`). Directory mode 0700, file 0600. Also mirrors to stderr in debug builds.
 - R2. Rotation: when the active file passes 1 MiB, rename `scribular.log`→`.1`→`.2`→`.3`, dropping the oldest, so at most ~4 MiB (Spec author's call: Electron's 500 KB × 1 file loses the lines just before a crash). Rotate at open as well as at write time.
-- R3. Startup banner logs app version, macOS version, arch (as Electron `index.js:18`). Initialised first in `run()` before `Builder`.
-- R4. Content-free by construction: the log API accepts `&str` messages but call sites may log only ids, counts, durations, model ids, error *kinds*. Provide `diag::kind(&dyn Error)` helper that returns a short enum-like label; error `Display` strings from llama/whisper/SQLite/reqwest-with-URL are not logged raw. A test (AS7) enforces it with a canary.
-- R5. Convert the existing `eprintln!` sites (list above) to `diag::log`. Redirect ggml/llama/whisper log callbacks to the logger at level WARN+ only (drops verbose token/prompt output; see ENGINES review).
+- R3. Startup banner logs app version, macOS version, arch (as Electron `index.js:18`). Install the panic hook first in `run()`. In `.setup`, resolve `app_data_dir`, then initialize the file logger and write the startup banner as the first operation.
+- R4. Content-free by construction: the log API accepts `&str` messages but call sites may log only ids, counts, durations, model ids, error *kinds*. Provide `diag::kind(&dyn Error)` helper that returns a short enum-like label; error `Display` strings from llama/whisper/SQLite/reqwest-with-URL are not logged raw. A test (AS6) enforces it with a canary.
+- R5. Every app-side production error and log site in retention, commands, store, licensing, jobs, audio, STT, LLM and models goes through the content-free `diag::log`. Call sites log only ids, counts, durations, model ids and error kinds as in R4; never raw error display text. Redirect ggml/llama/whisper callbacks through the logger at WARN+ only (drops verbose token/prompt output; see ENGINES review). Enforce this with a grep-based acceptance check, not a maintained site inventory.
 - R6. A logging failure (disk full, permission) is swallowed after one stderr note.
 
 **Panic and webview capture**
-- R7. `std::panic::set_hook` installed in `run()` first. It logs `PANIC thread=<name> at <file>:<line>:<col>` plus the payload *type* only. It does **not** log the payload text (Rust string-slicing and `unwrap` panics can embed the string being processed). It chains to the previous hook in debug builds. It never panics itself.
+- R7. `std::panic::set_hook` installed first in `run()`. It logs `PANIC` plus a fixed generic message or one of a small closed set of fixed codes. It does not log payload text, payload type, or dynamic location (Rust panics can embed the string being processed). It does not chain to the default hook, including in debug builds. It never panics itself.
 - R8. Panics inside `catch_unwind` (job queue) also pass through the hook, then keep the existing `fail_after_panic` behaviour.
-- R9. Webview: `src/main.ts` registers `window.onerror` and `onunhandledrejection`, calling command `report_frontend_error { kind, name, frames }` where `frames` is `file:line:col` entries with the origin stripped. The error `message` is **not** sent to Rust (Spec author's call: it can quote data). Rust logs it and (if remote enabled) queues a report with code `webview:<name>`. Rate-limit: max 20 per minute, then drop with one "suppressed N" line.
+- R9. Webview: `src/main.ts` registers `window.onerror` and `onunhandledrejection`, calling command `report_frontend_error { kind, frames }` where `kind` maps to a closed set of Rust report codes and `frames` is `file:line:col` entries with the origin stripped. The JavaScript `Error.name` and `Error.message` are not sent to or logged by Rust. Rust logs a fixed code and (if remote enabled) queues a report with that code. Rate-limit: max 20 per minute, then drop with one "suppressed N" line.
 - R10. A webview-side unhandled error shows no dialog (parity with Electron renderer). A Rust panic on the main/job thread logs and, for a main-thread panic, lets the process abort as Tauri does (Electron shows a dialog; Tauri has no equivalent and a dialog on the panic path is unsafe).
 
 **Actions**
-- R11. Command `get_diagnostics() -> String` returns, one per line: `Scribular <version> (build <git sha if available>)`, `macOS <version> (arm64)`, `Tauri <tauri::VERSION>`, `DB schema v<n>` (`Store::user_version`, `store/mod.rs:95`), installed model ids with status (from `ModelManager`), `Telemetry: on|off|undecided`, `Log dir: ~/Library/Application Support/<id>/logs` (home replaced by `~`). No counts of sessions, no titles, no paths with the username.
+- R11. Command `get_diagnostics() -> String` returns, one per line: `Scribular <version> (build <git sha if available>)`, `macOS <version> (arm64)`, `Tauri <tauri::VERSION>`, `DB schema v<n>` (`Store::schema_version`, `store/mod.rs:193-194`), installed model ids with status (from `ModelManager`), `Telemetry: on|off|undecided`, `Log dir: ~/Library/Application Support/<id>/logs` (home replaced by `~`). No counts of sessions, no titles, no paths with the username.
 - R12. "Copy diagnostics" button copies that text to the clipboard and shows the same brief confirmation as Electron; failure shows an inline error.
 - R13. Command `view_logs()` creates the log file if missing and runs `open <file>` (same pattern as `commands.rs:226`); returns `Err(String)` if `open` fails and the UI shows an inline error (fixing Electron's swallowed error).
 
@@ -115,7 +115,7 @@ Anti-goals
 - R15. One chokepoint `telemetry::send_allowed(&Store)` reads the setting from the store on every call (no cached copy) and gates *all* of: usage counters recording, usage send, error report send. Quit-time and first-session sends use the same gate (fixes Electron `index.js:575`, `registerIpcHandlers.js:161`). Turning the toggle off discards unsent queued reports and zeroes counters.
 - R16. Install id: random UUID v4 in setting `install_id`, created lazily on first *allowed* send, never before. Not shared with licensing unless spec 04 chooses to. Deleted when telemetry is turned off (Spec author's call: unlinks past data; a new id is made if re-enabled).
 - R17. Usage payload identical in shape to Electron (`deviceId, sessionsThisWeek, avgSessionDurationMinutes, appLaunchesThisWeek, appVersion, platform:"darwin-arm64", weekStart`) with the same clamps. Counters live in settings keys (`usage_week_start`, `usage_sessions`, `usage_total_seconds`, `usage_launches`). Triggers: launch (after gate), every 3 h while running, first saved session, app quit (best effort, 2 s cap). A "session" is counted once at transition to a saved transcript, not on summary completion (Electron `registerIpcHandlers.js:149-159`).
-- R18. Error report payload: `{ context, message, metadata:{version,platform,arch,code}, timestamp, deviceId }`. `context` is from the server's closed list; `message` is a **fixed string from a closed Rust enum** (`"summarize failed"`, `"recording failed"`, `"model download failed"`, `"panic at src/jobs/queue.rs:329"`, `"webview TypeError"`). No stack, no error text, no titles. This works with the unchanged server (`route.ts:58-79`). Mapping: summarise/LLM→`summarize`; capture/transcribe→`recording`; model download→`dialog`; panic/webview→`unhandled`.
+- R18. Error report payload: `{ context, message, metadata:{version,platform,arch,code}, timestamp, deviceId }`. `context` is from the server's closed list; `message` is a fixed generic string or a small closed set of fixed strings, including a generic panic message with no location. No stack, dynamic path, error text, titles, or JavaScript error name/message. This works with the unchanged server (`route.ts:58-79`). Mapping: summarise/LLM→`summarize`; capture/transcribe→`recording`; model download→`dialog`; panic/webview→`unhandled`.
 - R19. All requests are made by Rust (`reqwest`, already a dependency), 10 s timeout, fire-and-forget on a background thread, max 30/min and de-duplicated by code per 10 min. Panic reports are written to the log immediately and sent at the **next launch** (if allowed), not from the panic handler.
 - R20. API root: release builds `https://www.scribular.com`. Debug builds send nothing unless env `SCRIBULAR_API_ROOT` is set (Electron defaults debug to localhost:3000, `apiConfig.js:7-9`). Tests inject the root.
 - R21. Developer section, debug builds only: "Send test error" (`report_test_error`) and "Trigger test panic" (`trigger_test_panic`); both compiled out with `cfg(debug_assertions)`.
@@ -124,25 +124,26 @@ Anti-goals
 - R22. New commands registered in `lib.rs` `generate_handler!`, with wrappers in `src/lib/api.ts` (enforced by `lib.rs:154-171`) and ts-rs types for any struct.
 
 ## Acceptance scenarios (numbered AS1..)
-- AS1 (automated, cargo test): Given a temp data dir, when 3,000 lines of 400 bytes are logged, then `scribular.log` ≤ 1 MiB, files `.1`–`.3` exist, `.4` does not, and the newest line is in `scribular.log`.
-- AS2 (automated, cargo test): Given the panic hook installed, when a thread panics with message `"CANARY-CLIENT-JANE"` (including via string-slice panic on a canary string), then the log contains the file:line and no `CANARY`.
+- AS1 (automated, cargo test): Given a temp data dir, when 12,000 lines of 400 bytes are logged, then `scribular.log` ≤ 1 MiB, files `.1`–`.3` exist, `.4` does not, and the newest line is in `scribular.log`.
+- AS2 (automated, cargo test): Given the panic hook installed, when a thread panics with message `"CANARY-CLIENT-JANE"` (including via string-slice panic on a canary string), then the log contains the fixed panic code and neither the log nor captured stderr contains `CANARY` or a dynamic location.
 - AS3 (automated, cargo test): Given `telemetry_enabled` absent, when the app init sequence runs (recording launch, saving a session, reporting an error, quit hook) against a local `TcpListener` as API root, then the listener receives zero connections and no `install_id` setting exists.
 - AS4 (automated, cargo test): Given `telemetry_enabled="1"`, when a session is saved and quit is signalled, then exactly the usage JSON of R17 arrives with a valid UUID, clamps applied, and keys equal to the Electron set.
 - AS5 (automated, cargo test): Given `"1"` and a pending error report, when the setting flips to `"0"` before the sender runs, then nothing is sent, counters are zero, and `install_id` is deleted.
 - AS6 (automated, cargo test): Given a fake-engines summarisation that fails with an error whose text contains `CANARY-CLIENT-JANE`, when the report is built, then the request body, log file and `get_diagnostics()` output contain no `CANARY`, and `message` is one of the closed strings.
-- AS7 (automated, vitest): Given `window.onerror` is triggered with an Error whose message is a canary, then the mocked `invoke('report_frontend_error')` argument contains `name` and `frames` and no canary.
-- AS8 (automated, cargo test): `get_diagnostics()` has the 6 expected lines and no `/Users/<name>` path.
+- AS7 (automated, vitest): Given `window.onerror` is triggered with an Error whose name and message are canaries, then the mocked `invoke('report_frontend_error')` argument contains only the closed `kind` and `frames`, with neither canary.
+- AS8 (automated, cargo test): `get_diagnostics()` has the 7 expected lines and no `/Users/<name>` path.
 - AS9 (automated, cargo test): Webview error flood (100 in 1 s) produces ≤20 log entries plus one "suppressed" line.
 - AS10 (manual real-app): Fresh install, quit before choosing at FirstRun, and watch traffic (Little Snitch/`nettop`): no connection to scribular.com. Then choose "off", record and summarise a session: still none.
 - AS11 (manual real-app): Settings → Privacy → Copy diagnostics, paste into a text editor: text matches R11. View logs opens `scribular.log` in the default app and it shows the startup banner.
 - AS12 (manual real-app, debug build): "Trigger test panic" → relaunch shows PANIC line in the log; "Send test error" with `SCRIBULAR_API_ROOT` pointing to a local netcat shows the R18 body.
 - AS13 (manual real-app): Record a session containing a spoken canary name, summarise, open the log file, search for the name: not found.
+- AS14 (automated, source check): A grep-based check over app-side production Rust source finds no direct `eprintln!`, `println!`, `dbg!`, `log::*!` or `tracing::*!` sites outside `diag`; dev-only tools and test code are excluded.
 
 ## Design notes (modules, commands/events, data model + migration, UI components)
 - New `src-tauri/src/diag/` : `log.rs` (file writer + rotation + level), `panic.rs` (hook), `report.rs` (closed enum `ReportCode`, payload builder), `telemetry.rs` (gate, counters, sender thread, quit hook), `info.rs` (diagnostics text). Pure functions take `&Store`/a clock/an API root so tests need no Tauri runtime.
-- `lib.rs`: call `diag::init(data_dir)` before `Builder`; telemetry thread started in `setup` after `Store::open`; quit send in `.run(|app, event| … RunEvent::ExitRequested …)` (replace the trailing `.run(generate_context!())` accordingly).
+- `lib.rs`: install the panic hook first in `run()`. In `.setup`, resolve `app_data_dir`, then initialize the file logger and startup banner as the first operation; start telemetry after `Store::open`; send on quit in `.run(|app, event| … RunEvent::ExitRequested …)` (replace the trailing `.run(generate_context!())` accordingly).
 - `commands.rs`: `get_diagnostics`, `view_logs`, `report_frontend_error`, `get_telemetry_setting`, `set_telemetry_setting`; debug-only `report_test_error`, `trigger_test_panic`.
-- Data model: settings KV keys only (`telemetry_enabled`, `install_id`, `usage_*`, `pending_report`). **No schema migration** (store keeps `user_version` 3). If spec 01 moves to SQLCipher the keys move with the DB.
+- Data model: settings KV keys only (`telemetry_enabled`, `install_id`, `usage_*`, `pending_report`). **No schema migration** (store stays at v5). If spec 01 moves to SQLCipher the keys move with the DB.
 - `src/main.ts`: handlers (R9). `src/lib/api.ts`: wrappers. `Settings.svelte`: new "Privacy & diagnostics" section with toggle, Copy diagnostics, View logs; debug-only Developer rows.
 - Tauri capabilities: no new plugin permissions (app commands are allowed by default, `capabilities/default.json`). Clipboard: `navigator.clipboard.writeText` from a click handler, as Electron.
 - Closed-set error mapping lives in one `ReportCode` enum so adding a code is a compile-time change and reviewers see every string that can leave the device.
@@ -161,7 +162,7 @@ Default: **none** (reqwest, serde_json, std are enough). No review doc is needed
 - Windows paths.
 
 ## Depends on / interacts with (other parity specs by slug)
-- 07-onboarding-samples: the telemetry choice is a FirstRun/onboarding step; this spec defines the setting and gate, 07 places the UI (fallback: Settings toggle only, telemetry stays "undecided" = off).
+- 07-onboarding-samples: this spec defines the telemetry setting and gate; 07 owns its FirstRun choice UI, while this spec owns the Settings toggle (fallback: Settings toggle only, telemetry stays "undecided" = off).
 - 04-licensing-trial: Electron reuses `deviceId` for `/api/validate`; if 04 introduces an id, it must stay separate or be sent only by 04's own consented call.
 - 01-encryption-audio-retention: logs are plaintext outside the encrypted DB, which is why R4 forbids content; settings keys move into the encrypted DB.
 - 05-auto-update: any update-check request must also obey `telemetry_enabled` only if it transmits the install id (preferably it doesn't).
@@ -169,7 +170,7 @@ Default: **none** (reqwest, serde_json, std are enough). No review doc is needed
 
 ## Coordination notes (gap-check 2026-11-04)
 - **Order:** 01, 04 and 05 land first. Settings keys (`telemetry_enabled`, `install_id`, `pending_report`) live in 01's encrypted DB, so start the telemetry thread only after unlock. While the store is Locked, nothing is sent (undecided = off). Copy diagnostics may include 01's `cipher_version` and lock reason, never the key.
-- **Converts earlier logging:** 04 (masked licence key) and 05 (update outcomes) log with `eprintln!` until this spec lands. Move them onto `diag` here and keep the masking.
+- **Converts earlier logging:** 04 (masked licence key) and 05 (update outcomes) use the content-free logger defined here and keep the masking.
 - **FirstRun consent:** 07 lands after this spec. Ship the Settings → Privacy toggle here (telemetry stays undecided = off); 07 adds the FirstRun choice. AS10's FirstRun part is re-run in 07.
 - **No runtime test switch:** Electron turns reporting off under `--e2e-test` at runtime (`errorReporter.js:15-17`). Here, tests use a fake transport behind `cfg(test)`/`fake-engines`; there is no CLI flag or env var.
 - **Openers:** `view_logs` opens a local file with `open` (R13). It is not a URL, so it does not go through 04's `open_external_link` allow-list. Keep it a separate command. The Privacy section is a headed section in the current Settings view; 08 later moves it into its category layout.
@@ -182,5 +183,5 @@ Default: **none** (reqwest, serde_json, std are enough). No review doc is needed
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR
 M, about 5 days.
-- PR1 (2.5 d): R0, R1-R13, R22, AS1,2,7,8,9,11,13. Local only, no network.
+- PR1 (2.5 d): R0, R1-R13, R22, AS1,2,7,8,9,11,13,14. Local only, no network.
 - PR2 (2.5 d): R14-R21, AS3-6,10,12, Settings Privacy section; needs decision 1 and, for the FirstRun step, a hand-off to spec 07.
