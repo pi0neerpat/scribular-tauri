@@ -32,6 +32,10 @@ final class AXDriver: Driver {
             return nil
         case .click(let label, let index, let within):
             let element = try resolve(label, index: index, within: within)
+            // a click on a disabled button is silently dropped; wait for it like any other UI state
+            if attribute(element, kAXEnabledAttribute) as? Bool == false { throw .retryable("disabled") }
+            // WebKit reports frames for off-screen content; scroll first so the click lands on the element
+            if AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success { Thread.sleep(forTimeInterval: 0.2) }
             guard let frame = frame(of: element) else { throw .retryable("not found") }
             try click(at: CGPoint(x: frame.midX, y: frame.midY))
             return nil
@@ -39,6 +43,9 @@ final class AXDriver: Driver {
             for character in text {
                 guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                       let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { throw .fatal("could not create keyboard event") }
+                // nil-source events inherit session modifier state; a stuck flag (seen: numeric-pad) makes WebKit drop the text
+                down.flags = []
+                up.flags = []
                 var units = Array(String(character).utf16)
                 down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
                 up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
@@ -172,7 +179,11 @@ final class AXDriver: Driver {
     private func resolve(_ label: String, index: Int?, within: String?) throws(DriverError) -> AXUIElement {
         var elements = allElements()
         if let within {
-            let scopes = elements.filter { matches($0, exact: within) }
+            let labelled = elements.filter { matches($0, exact: within) }
+            // A container and its own heading often share a label (aria-label + <p>); keep the outermost
+            let scopes = labelled.filter { scope in
+                !labelled.contains { other in !CFEqual(other, scope) && allElements(from: other).contains { CFEqual($0, scope) } }
+            }
             let scope: AXUIElement
             switch pick(scopes, index: nil) {
             case .none: throw .retryable("scope not found")

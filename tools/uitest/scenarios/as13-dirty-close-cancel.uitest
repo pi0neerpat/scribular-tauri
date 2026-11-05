@@ -2,14 +2,16 @@ launch
 click "Settings"
 expect "Note styles"
 click "New style"
-click "Name"
+click "Name" index 2
 type "UITest Draft"
 key tab
 type "Initial prompt"
-click "Save"
-click "Prompt"
+click "Save" index 1
+expect-not "Unsaved changes"
+click "Prompt" index 2
 key cmd+a
 type "Changed prompt"
+expect "Unsaved changes"
 close-window
 expect "Discard changes?"
 click "Cancel" in "Discard changes?"

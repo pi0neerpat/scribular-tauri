@@ -7,7 +7,9 @@ final class Recorder {
 
     init(output: URL) {
         process.executableURL = Preflight.executable("ffmpeg")
-        process.arguments = ["-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "0:none", "-pix_fmt", "yuv420p", output.path]
+        process.arguments = ["-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "0:none",
+                             // libx264 yuv420p needs even dimensions; some displays (e.g. 1495x1297 VMs) are odd
+                             "-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p", output.path]
         process.standardInput = input
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
