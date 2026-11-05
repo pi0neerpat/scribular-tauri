@@ -662,31 +662,32 @@ impl Inner {
                 .map(|&source| self.store.segments(id, source).map(|s| (source, s)))
                 .collect::<Result<Vec<_>, _>>();
             match segments {
-                Ok(segments) => match crate::diarize::diarize(
-                    session.input_mode,
-                    &segments,
-                    &|source, start, end| {
-                        self.store
-                            .audio_samples_range(id, source, start, end)
-                            .map_err(|e| e.to_string())
-                    },
-                    num_speakers,
-                    &*self.speakers,
-                    cancel,
-                ) {
-                    Ok(value) => Some(value),
-                    Err(e) => {
-                        if !cancel.load(Ordering::Relaxed) {
-                            eprintln!("record {id}: diarization unavailable: {e}");
-                            self.emit(
-                                id,
-                                SessionStatus::Finalizing,
-                                "Speaker labels unavailable; continuing with the transcript.",
-                            );
+                Ok(segments) => {
+                    let mut audio = self.store.audio_range_reader(id);
+                    match crate::diarize::diarize(
+                        session.input_mode,
+                        &segments,
+                        &mut |source, start, end| {
+                            audio.samples(source, start, end).map_err(|e| e.to_string())
+                        },
+                        num_speakers,
+                        &*self.speakers,
+                        cancel,
+                    ) {
+                        Ok(value) => Some(value),
+                        Err(e) => {
+                            if !cancel.load(Ordering::Relaxed) {
+                                eprintln!("record {id}: diarization unavailable: {e}");
+                                self.emit(
+                                    id,
+                                    SessionStatus::Finalizing,
+                                    "Speaker labels unavailable; continuing with the transcript.",
+                                );
+                            }
+                            None
                         }
-                        None
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("record {id}: diarization data unavailable: {e}");
                     None

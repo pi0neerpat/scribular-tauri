@@ -49,6 +49,65 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it.each([["2 people", 2], ["3 people", 3], ["4+ (beta)", null]] as const)(
+    'forwards %s to stopRecording', async (choice, count) => {
+      const { target, app } = await renderRecordView();
+      await clickButton(target, 'Start recording');
+      await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+      await clickButton(target, 'Stop');
+      await clickButton(target, choice);
+      await vi.waitFor(() => expect(stopRecording).toHaveBeenCalledWith(count));
+      unmount(app);
+      target.remove();
+    },
+  );
+
+  it('stores the speaker marker before startup IPC and clears it if startup fails', async () => {
+    let resolveStart!: (value: typeof recording) => void;
+    startRecording.mockReturnValueOnce(new Promise((resolve) => { resolveStart = resolve; }));
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalled());
+    expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBe('true');
+    resolveStart(recording);
+    await vi.waitFor(() => expect(sessionStorage.getItem('scribular.inFlightSession')).toBe(recording.id));
+    unmount(app);
+    target.remove();
+
+    sessionStorage.clear();
+    startRecording.mockRejectedValueOnce(new Error('startup failed'));
+    const failed = await renderRecordView();
+    await clickButton(failed.target, 'Start recording');
+    await vi.waitFor(() => expect(failed.target.textContent).toContain('startup failed'));
+    expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBeNull();
+    unmount(failed.app);
+    failed.target.remove();
+
+    sessionStorage.clear();
+    let rejectOld!: (error: Error) => void;
+    startRecording.mockReturnValueOnce(new Promise((_, reject) => { rejectOld = reject; }));
+    const old = await renderRecordView();
+    await clickButton(old.target, 'Start recording');
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalledTimes(3));
+    unmount(old.app);
+    old.target.remove();
+
+    let resolveNew!: (value: typeof recording) => void;
+    startRecording.mockReturnValueOnce(new Promise((resolve) => { resolveNew = resolve; }));
+    const fresh = await renderRecordView();
+    await clickButton(fresh.target, 'Start recording');
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalledTimes(4));
+    const freshAttempt = sessionStorage.getItem('scribular.inFlightStartAttempt');
+    rejectOld(new Error('old startup failed'));
+    await vi.waitFor(() => expect(fresh.target.textContent).not.toContain('old startup failed'));
+    expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBe('true');
+    expect(sessionStorage.getItem('scribular.inFlightStartAttempt')).toBe(freshAttempt);
+    resolveNew(recording);
+    await vi.waitFor(() => expect(sessionStorage.getItem('scribular.inFlightSession')).toBe(recording.id));
+    unmount(fresh.app);
+    fresh.target.remove();
+  });
+
   it('uses the recording-start setting after the saved setting changes and confines focus', async () => {
     const { target, app } = await renderRecordView();
     await clickButton(target, 'Start recording');

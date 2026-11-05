@@ -307,45 +307,6 @@ fn samples(c: &Connection, id: &str, source: AudioSource) -> Result<Vec<i16>> {
     Ok(samples)
 }
 
-fn samples_range(
-    c: &Connection,
-    id: &str,
-    source: AudioSource,
-    start_ms: i64,
-    end_ms: i64,
-) -> Result<Vec<i16>> {
-    let start = start_ms.max(0).saturating_mul(16) as u64;
-    let end = end_ms.max(0).saturating_mul(16) as u64;
-    if end <= start {
-        return Ok(Vec::new());
-    }
-    let chunk_size = crate::audio::CHUNK_SAMPLES as u64;
-    let first = (start / chunk_size) as i64;
-    let last = (end.saturating_sub(1) / chunk_size) as i64;
-    let mut stmt = c.prepare(
-        "SELECT seq, pcm FROM audio_chunks WHERE session_id = ?1 AND source = ?2 AND seq BETWEEN ?3 AND ?4 ORDER BY seq",
-    )?;
-    let mut rows = stmt.query(params![id, source.as_str(), first, last])?;
-    let mut samples = Vec::with_capacity((end - start) as usize);
-    while let Some(row) = rows.next()? {
-        let seq: u64 = row.get::<_, i64>(0)?.max(0) as u64;
-        let bytes = row.get_ref(1)?.as_blob().map_err(rusqlite::Error::from)?;
-        let chunk: Vec<i16> = bytes
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| i16::from_le_bytes(*b))
-            .collect();
-        let chunk_start = seq * chunk_size;
-        let from = start.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
-        let to = end.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
-        if from < to {
-            samples.extend_from_slice(&chunk[from..to]);
-        }
-    }
-    Ok(samples)
-}
-
 fn sweep(c: &mut Connection, now_ms: i64) -> Result<usize> {
     let cutoff = now_ms - AUDIO_RETENTION_MS;
     let tx = c.transaction()?;
@@ -838,7 +799,21 @@ impl Store {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<Vec<i16>> {
-        self.with(|c| samples_range(c, id, source, start_ms, end_ms))
+        self.audio_range_reader(id)
+            .samples(source, start_ms, end_ms)
+    }
+
+    pub(crate) fn audio_range_reader(&self, id: &str) -> AudioRangeReader<'_> {
+        AudioRangeReader {
+            store: self,
+            id: id.to_owned(),
+            source: None,
+            chunks: Vec::new(),
+            #[cfg(test)]
+            queried_chunks: 0,
+            #[cfg(test)]
+            decoded_chunks: 0,
+        }
     }
 
     pub fn audio_chunk_count(&self, id: &str) -> Result<u32> {
@@ -879,6 +854,175 @@ impl Store {
             tx.commit()?;
             Ok(resumed + interrupted)
         })
+    }
+}
+
+/// Reads diarization ranges with only chunks still intersecting the ordered
+/// segment overlap window in memory. The reader lives for one diarization pass.
+pub(crate) struct AudioRangeReader<'a> {
+    store: &'a Store,
+    id: String,
+    source: Option<AudioSource>,
+    chunks: Vec<(u64, Vec<i16>)>,
+    #[cfg(test)]
+    queried_chunks: usize,
+    #[cfg(test)]
+    decoded_chunks: usize,
+}
+
+impl AudioRangeReader<'_> {
+    pub(crate) fn samples(
+        &mut self,
+        source: AudioSource,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<Vec<i16>> {
+        let start = start_ms.max(0).saturating_mul(16) as u64;
+        let end = end_ms.max(0).saturating_mul(16) as u64;
+        if end <= start {
+            return Ok(Vec::new());
+        }
+        if self.source != Some(source) {
+            self.source = Some(source);
+            self.chunks.clear();
+        }
+        let chunk_size = crate::audio::CHUNK_SAMPLES as u64;
+        // Segment starts are ordered; retain only chunks that overlap this start.
+        self.chunks
+            .retain(|(seq, _)| (seq + 1) * chunk_size > start);
+        self.store.with(|c| {
+            let first = start / chunk_size;
+            let last = end.saturating_sub(1) / chunk_size;
+            let mut samples = Vec::with_capacity((end - start) as usize);
+            for seq in first..=last {
+                if !self.chunks.iter().any(|(cached, _)| *cached == seq) {
+                    #[cfg(test)]
+                    { self.queried_chunks += 1; }
+                    let pcm = c
+                        .query_row(
+                            "SELECT pcm FROM audio_chunks WHERE session_id = ?1 AND source = ?2 AND seq = ?3",
+                            params![self.id, source.as_str(), seq as i64],
+                            |row| row.get::<_, Vec<u8>>(0),
+                        )
+                        .optional()?;
+                    let Some(bytes) = pcm else { continue };
+                    self.chunks.push((
+                        seq,
+                        bytes.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect(),
+                    ));
+                    #[cfg(test)]
+                    { self.decoded_chunks += 1; }
+                }
+                let Some((_, chunk)) = self.chunks.iter().find(|(cached, _)| *cached == seq) else {
+                    continue;
+                };
+                let chunk_start = seq * chunk_size;
+                let from = start.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
+                let to = end.saturating_sub(chunk_start).min(chunk.len() as u64) as usize;
+                if from < to {
+                    samples.extend_from_slice(&chunk[from..to]);
+                }
+            }
+            Ok(samples)
+        })
+    }
+}
+
+#[cfg(test)]
+mod audio_range_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    fn store() -> Store {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE audio_chunks (session_id TEXT, source TEXT, seq INTEGER, pcm BLOB, PRIMARY KEY(session_id, source, seq))",
+            [],
+        )
+        .unwrap();
+        for source in [AudioSource::Mic, AudioSource::System] {
+            for seq in 0..6 {
+                let pcm = vec![seq as i16; crate::audio::CHUNK_SAMPLES];
+                let bytes = pcm
+                    .iter()
+                    .flat_map(|sample| sample.to_le_bytes())
+                    .collect::<Vec<_>>();
+                conn.execute(
+                    "INSERT INTO audio_chunks VALUES ('session-1', ?1, ?2, ?3)",
+                    params![source.as_str(), seq, bytes],
+                )
+                .unwrap();
+            }
+        }
+        Store {
+            conn: Mutex::new(conn),
+        }
+    }
+
+    #[test]
+    fn overlapping_multichunk_ranges_reuse_decodes_and_evict_outside_the_active_window() {
+        let store = store();
+        let mut reader = store.audio_range_reader("session-1");
+        assert_eq!(
+            reader.samples(AudioSource::Mic, 0, 16_000).unwrap().len(),
+            256_000
+        );
+        assert_eq!(reader.decoded_chunks, 4);
+        assert_eq!(reader.queried_chunks, 4);
+        assert_eq!(
+            reader
+                .samples(AudioSource::Mic, 4_000, 20_000)
+                .unwrap()
+                .len(),
+            256_000
+        );
+        assert_eq!(reader.decoded_chunks, 4);
+        assert_eq!(reader.queried_chunks, 4);
+        assert_eq!(reader.chunks.len(), 4);
+        reader.samples(AudioSource::Mic, 20_000, 21_000).unwrap();
+        assert_eq!(reader.decoded_chunks, 5);
+        assert_eq!(reader.queried_chunks, 5);
+        assert_eq!(reader.chunks.len(), 1);
+    }
+
+    #[test]
+    fn source_and_reader_sessions_do_not_share_cached_audio() {
+        let store = store();
+        let mut reader = store.audio_range_reader("session-1");
+        reader.samples(AudioSource::Mic, 0, 100).unwrap();
+        reader.samples(AudioSource::System, 0, 100).unwrap();
+        assert_eq!(reader.decoded_chunks, 2);
+        assert_eq!(reader.queried_chunks, 2);
+        assert_eq!(reader.chunks.len(), 1);
+
+        let mut other_session = store.audio_range_reader("session-2");
+        other_session.samples(AudioSource::Mic, 0, 100).unwrap();
+        assert_eq!(other_session.decoded_chunks, 0);
+        assert_eq!(other_session.queried_chunks, 1);
+        assert!(other_session.chunks.is_empty());
+    }
+
+    #[test]
+    fn cache_is_dropped_before_retention_deletes_audio() {
+        let store = store();
+        {
+            let mut reader = store.audio_range_reader("session-1");
+            reader.samples(AudioSource::Mic, 0, 100).unwrap();
+            assert_eq!(reader.decoded_chunks, 1);
+        }
+        store
+            .with(|conn| {
+                conn.execute(
+                    "DELETE FROM audio_chunks WHERE session_id = 'session-1'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let mut reader = store.audio_range_reader("session-1");
+        assert!(reader.samples(AudioSource::Mic, 0, 100).unwrap().is_empty());
+        assert_eq!(reader.decoded_chunks, 0);
     }
 }
 

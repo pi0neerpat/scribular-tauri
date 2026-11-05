@@ -30,12 +30,14 @@
   // local storage, so a crashed app's session isn't picked up on relaunch.
   const IN_FLIGHT_KEY = 'scribular.inFlightSession';
   const IN_FLIGHT_SPEAKERS_KEY = 'scribular.inFlightMultiSpeaker';
+  const IN_FLIGHT_START_KEY = 'scribular.inFlightStartAttempt';
 
   function remember(id: string | null) {
     if (id) sessionStorage.setItem(IN_FLIGHT_KEY, id);
     else {
       sessionStorage.removeItem(IN_FLIGHT_KEY);
       sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
+      sessionStorage.removeItem(IN_FLIGHT_START_KEY);
     }
   }
 
@@ -132,18 +134,26 @@
     busy = true;
     error = denied = null;
     result = progress = null;
+    let attempt: string | null = null;
     try {
       const settings = await getRecordingSettings();
       const app = settings.inputMode === 'mic' ? null : settings.targetApp;
       const title = `Session ${new Date().toLocaleString()}`;
-      const session = await startRecording(settings.inputMode, app, title);
+      attempt = crypto.randomUUID();
+      sessionStorage.setItem(IN_FLIGHT_START_KEY, attempt);
       sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, String(settings.multiSpeaker));
+      const session = await startRecording(settings.inputMode, app, title);
+      if (sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) sessionStorage.removeItem(IN_FLIGHT_START_KEY);
       sessionId = session.id;
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
       startedAt = Date.now();
     } catch (e) {
+      if (attempt && sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) {
+        sessionStorage.removeItem(IN_FLIGHT_START_KEY);
+        sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
+      }
       denied = deniedPrivacy(String(e));
       error = String(e);
     } finally {
@@ -228,7 +238,7 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel {session} {active} onUpdate={(updated) => (result = updated)} />
+    <SummaryPanel {session} {active} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>

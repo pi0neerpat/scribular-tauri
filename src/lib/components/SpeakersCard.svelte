@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap } from '../api';
   import type { Session } from '../types/Session';
   type SpeakerMap = Record<string, string>;
@@ -10,6 +11,8 @@
   let addingLater = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  let disposed = false;
+  onDestroy(() => { disposed = true; });
   $effect(() => {
     current = incoming;
     editing = incoming.diarizationState === 'pending';
@@ -33,8 +36,9 @@
   }
 
   async function refresh() {
-    const updated = await getSession(session.id);
-    if (updated) {
+    const id = session.id;
+    const updated = await getSession(id);
+    if (updated && !disposed && incoming.id === id) {
       current = updated;
       overrides = null;
       addingLater = false;

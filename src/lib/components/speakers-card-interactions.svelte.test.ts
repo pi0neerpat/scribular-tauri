@@ -61,3 +61,40 @@ it('refreshes the parent summary after renaming a confirmed speaker', async () =
   expect(updateSpeakerMap).toHaveBeenCalledWith('session-1', { SPEAKER_0: 'Therapist' });
   unmount(app);
 });
+
+it('does not publish a refresh after the card unmounts', async () => {
+  let resolveSession!: (value: Session) => void;
+  const onUpdate = vi.fn();
+  getSession.mockReturnValue(new Promise((resolve) => { resolveSession = resolve; }));
+  confirmSpeakerLabels.mockResolvedValue('Alice: hello');
+  const target = document.createElement('div');
+  const app = mount(SpeakersCard, { target, props: { session: session('pending'), onUpdate } });
+  target.querySelector('button')!.click();
+  flushSync();
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Confirm speakers')!.click();
+  await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('session-1'));
+  unmount(app);
+  resolveSession(session('confirmed'));
+  await Promise.resolve();
+  expect(onUpdate).not.toHaveBeenCalled();
+});
+
+it('does not publish a refresh after the incoming session changes', async () => {
+  let resolveSession!: (value: Session) => void;
+  const onUpdate = vi.fn();
+  getSession.mockReturnValue(new Promise((resolve) => { resolveSession = resolve; }));
+  confirmSpeakerLabels.mockResolvedValue('Alice: hello');
+  const props = $state({ session: session('pending'), onUpdate });
+  const target = document.createElement('div');
+  const app = mount(SpeakersCard, { target, props });
+  target.querySelector('button')!.click();
+  flushSync();
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Confirm speakers')!.click();
+  await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('session-1'));
+  props.session = { ...session('pending'), id: 'session-2' };
+  flushSync();
+  resolveSession(session('confirmed'));
+  await Promise.resolve();
+  expect(onUpdate).not.toHaveBeenCalled();
+  unmount(app);
+});

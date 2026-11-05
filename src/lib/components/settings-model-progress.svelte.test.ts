@@ -72,3 +72,17 @@ it('removes the progress listener if setup resolves after unmount', async () => 
   resolveListener(remove);
   await vi.waitFor(() => expect(remove).toHaveBeenCalledOnce());
 });
+
+it('loads core settings and the model status snapshot when progress listener setup rejects', async () => {
+  onModelsProgress.mockRejectedValue(new Error('listener unavailable'));
+  getRecordingSettings.mockResolvedValue(settings);
+  listPrompts.mockResolvedValue([]);
+  modelsStatus.mockResolvedValue([ready]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('Identify speakers'));
+  expect(getRecordingSettings).toHaveBeenCalledOnce();
+  expect(listPrompts).toHaveBeenCalledOnce();
+  expect(modelsStatus).toHaveBeenCalledOnce();
+  unmount(app);
+});

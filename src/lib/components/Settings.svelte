@@ -49,14 +49,16 @@
     let progressVersion = 0;
     void (async () => {
       try {
-        const removeListener = await onModelsProgress((p) => {
-          if (p.modelId === SPEAKER_MODEL) {
-            progressVersion++;
-            speakerModel = p;
-          }
-        });
-        if (disposed) removeListener();
-        else unlisten = removeListener;
+        try {
+          const removeListener = await onModelsProgress((p) => {
+            if (p.modelId === SPEAKER_MODEL) {
+              progressVersion++;
+              speakerModel = p;
+            }
+          });
+          if (disposed) removeListener();
+          else unlisten = removeListener;
+        } catch { /* The status snapshot still supplies model state. */ }
         settings = await getRecordingSettings();
         prompts = await listPrompts();
         const version = progressVersion;

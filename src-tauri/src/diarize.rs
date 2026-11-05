@@ -63,7 +63,7 @@ impl SpeakerEmbedder for FakeEmbedder {
 pub fn diarize(
     mode: InputMode,
     source_segments: &[(AudioSource, Vec<Segment>)],
-    audio_samples: &dyn Fn(AudioSource, i64, i64) -> Result<Vec<i16>, String>,
+    audio_samples: &mut dyn FnMut(AudioSource, i64, i64) -> Result<Vec<i16>, String>,
     max_speakers: Option<u8>,
     loader: &dyn SpeakerEmbedderLoader,
     cancel: &AtomicBool,
@@ -300,7 +300,7 @@ mod tests {
         let (raw, map) = diarize(
             InputMode::MicAndSystem,
             &segments,
-            &|source, start, end| {
+            &mut |source, start, end| {
                 requested.lock().unwrap().push((source, start, end));
                 Ok(vec![0; 17_600])
             },
