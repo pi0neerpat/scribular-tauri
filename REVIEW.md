@@ -39,15 +39,19 @@ Most bugs here sit on these seams:
    chunking cost (see `docs/solutions/`), download retry and verification.
 4. **Privacy:** transcript or audio leaking to logs, temp files or the network.
    Model downloads come from the fixed manifest only.
+5. **New dependencies:** flag a known exploitable vulnerability that affects
+   our use, an incompatible license, or a build script that unexpectedly
+   downloads or executes code.
 
 ## Out of scope — don't spend effort here
 
 - Scale, multi-user, concurrency beyond one recording at a time, backward
   compatibility with external consumers (there are none).
 - Windows and Linux behaviour (later milestone).
-- Dependency versions: they are pinned on purpose under the two-week rule in
-  `plans/DEPENDENCY_REVIEW_*.md`.
-- `plans/` and `docs/` prose, unless the PR changes their meaning.
+- Dependency versions are pinned exactly on purpose; don't review version
+  choice, publish dates or maintainer history.
+- `plans/` and `docs/` prose, unless the PR changes their meaning. Spec authors:
+  use `plans/SPEC_TEMPLATE.md`.
 
 ## Review economy
 

@@ -199,6 +199,7 @@ These are the scorecard thresholds R19 checks against. All are measured on the M
 - KTD14. Dependencies follow the policy in `plans/DEPENDENCY_REVIEW_M0.md`: exact pins, versions at least two weeks old, and `build.rs` reviewed like an npm `postinstall`.
   - Each unit that adds a package lands its review document first.
   - whisper-rs and llama-cpp-2 are reviewed in U1, so the ggml link check runs on approved pins.
+  - KTD14 is superseded 2026-11-05 by the light security check in `plans/SPEC_TEMPLATE.md`.
 - KTD15. `processTranscript`, `mergeDiarizedSegments` and `chunkTranscript` are ported to `text/` and checked against fixtures. A node script in this repo generates those fixtures from the Electron JavaScript and reads that code without changing it. Governs R3.
 - KTD16. Per-stage timings are stored as JSON on the session row: tail transcription, model load, each chunk, combine and save. The session view shows them with a copy button. Governs R13.
 

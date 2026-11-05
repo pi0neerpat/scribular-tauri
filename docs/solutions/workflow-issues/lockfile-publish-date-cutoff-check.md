@@ -18,6 +18,8 @@ resolution_type: tooling_addition
 tags: [lockfile, supply-chain, cargo, npm, dependency-cutoff, ktd14, crates-io]
 ---
 
+> Superseded 2026-11-05: the publish-date cutoff is no longer required; see `plans/SPEC_TEMPLATE.md`. Kept as history.
+
 # Enforcing the dependency publish-date cutoff on the whole lockfile
 
 ## Context
