@@ -36,12 +36,13 @@
     <button onclick={buy}>Buy licence</button>
     {#if error}<p>{error}</p>{/if}
   </div>
-{:else if notice && !(notice.dismissible && dismissed)}
+{:else if notice && !(notice.dismissible && dismissed && dismissedToday())}
   <p role="status">
     {notice.text}
     {#if notice.dismissible}
       <button onclick={buy}>Buy licence</button>
       <button onclick={dismiss}>Dismiss</button>
     {/if}
+    {#if error}<span role="alert">{error}</span>{/if}
   </p>
 {/if}

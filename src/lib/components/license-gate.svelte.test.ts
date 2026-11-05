@@ -57,6 +57,20 @@ describe('LicenseGate', () => {
   });
 });
 
+describe('LicenseGate warning', () => {
+  it('shows an opener failure beside the warning', async () => {
+    openExternalLink.mockRejectedValueOnce('no browser' as never);
+    const t = render(LicenseGate, {
+      access: { kind: 'trialWarning', daysLeft: 2 },
+      onEnter: () => {},
+    });
+    named(t, 'Buy licence')!.click();
+    await tick();
+    await tick();
+    expect(t.querySelector('[role=alert]')?.textContent).toBe('no browser');
+  });
+});
+
 describe('RecordView with a licence state', () => {
   it('shows the trial warning and keeps Start enabled', async () => {
     accessState.set({ kind: 'trialWarning', daysLeft: 2 });

@@ -13,9 +13,15 @@ export const accessState = writable<AccessState | null>(null);
 
 /** Starts following the state; returns the cleanup. */
 export function followAccessState(): () => void {
-  const unlisten = onLicenseChanged((s) => accessState.set(s));
-  getAccessState()
-    .then((s) => accessState.set(s))
+  // An event is newer than any snapshot, so the snapshot never overwrites one.
+  let heard = false;
+  const unlisten = onLicenseChanged((s) => {
+    heard = true;
+    accessState.set(s);
+  });
+  unlisten
+    .then(() => getAccessState())
+    .then((s) => heard || accessState.set(s))
     .catch(() => {}); // locked store: no licensing state, nothing to show
   return () => {
     unlisten.then((fn) => fn());
@@ -62,7 +68,7 @@ export function deniedReason(s: AccessState | null): string | null {
     case 'licenseInvalid':
       return rejectionText[s.reason];
     case 'licenseLapsed':
-      return "Scribular couldn't verify your licence for over 37 days. Connect to the internet to re-verify it.";
+      return "Your licence has expired, or Scribular hasn't been able to verify it for too long. Connect to the internet to re-verify it.";
     default:
       return null;
   }

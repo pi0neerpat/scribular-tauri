@@ -11,7 +11,14 @@
   let confirming = $state(false);
 
   let s = $derived($accessState);
-  let valid = $derived(s?.kind === 'licensed' || s?.kind === 'licensedGrace');
+  // Lapsed can be only "offline too long", so it isn't called invalid.
+  let validity = $derived(
+    s?.kind === 'licensed' || s?.kind === 'licensedGrace'
+      ? 'Valid'
+      : s?.kind === 'licenseLapsed'
+        ? 'Not verified'
+        : 'Invalid',
+  );
 
   onMount(refresh);
 
@@ -61,7 +68,7 @@
 
   {#if masked}
     <p>
-      <span data-testid="license-validity">{valid ? 'Valid' : 'Invalid'}</span>
+      <span data-testid="license-validity">{validity}</span>
       <code>{masked}</code>
       {#if confirming}
         Remove the licence from this Mac?

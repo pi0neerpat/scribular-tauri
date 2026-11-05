@@ -208,7 +208,7 @@ export function onLicenseChanged(handler: (state: AccessState) => void): Promise
   return listen<AccessState>('license://changed', (event) => handler(event.payload));
 }
 
-/** The access state inside a refused `startRecording`, if that is why it failed. */
+/** The access state inside a refused `startRecording` or `transcribeFile`, if that is why it failed. */
 export function accessDenied(error: unknown): AccessState | null {
   try {
     const parsed = JSON.parse(String(error)) as { kind?: string; state: AccessState };
