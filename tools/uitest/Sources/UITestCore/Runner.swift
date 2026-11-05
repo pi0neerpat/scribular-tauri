@@ -51,12 +51,19 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         emit("  visible: \(visible)")
     }
 
+    func execute(_ step: Step) throws(DriverError) -> String? {
+        guard case .screenshot(let name) = step.command else { return try driver.perform(step.command) }
+        let url = options.runDir.appendingPathComponent("\(name ?? "step-\(step.line)").png")
+        do { try driver.screenshot(to: url) } catch { throw .fatal("screenshot failed: \(error.localizedDescription)") }
+        return screenshotPath(url)
+    }
+
     for step in steps {
         let started = Date()
         let detail: String?
         while true {
             do {
-                detail = try driver.perform(step.command)
+                detail = try execute(step)
                 break
             } catch let error {
                 switch error {

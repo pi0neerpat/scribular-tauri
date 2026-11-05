@@ -87,6 +87,10 @@ final class AXDriver: Driver {
             return nil
         case .handleKeychain:
             return try handleKeychain()
+        case .labels:
+            return labelListing()
+        case .screenshot:
+            throw .fatal("screenshot is handled by the runner")
         }
     }
 
@@ -98,7 +102,15 @@ final class AXDriver: Driver {
     func screenshot(to url: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", url.path]
+        var arguments = ["-x"]
+        // crop to the app window so the image holds only Scribular; a keychain prompt or a missing window needs the full screen
+        let keychainPrompt = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty
+        if !keychainPrompt, let app = appElement(),
+           let window = axElement(attribute(app, kAXFocusedWindowAttribute)) ?? (attribute(app, kAXWindowsAttribute) as? [AXUIElement])?.first,
+           let rect = frame(of: window) {
+            arguments += ["-R", "\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))"]
+        }
+        process.arguments = arguments + [url.path]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -160,6 +172,20 @@ final class AXDriver: Driver {
         guard AXValueGetValue(position, .cgPoint, &origin), AXValueGetValue(size, .cgSize, &dimensions),
               dimensions.width > 0, dimensions.height > 0 else { return nil }
         return CGRect(origin: origin, size: dimensions)
+    }
+
+    /// Every on-screen label with its role, one per line, in tree order: what `click` and `expect` can see.
+    private func labelListing() -> String {
+        var seen = Set<String>()
+        let lines = allElements().filter { frame(of: $0) != nil }.flatMap { element -> [String] in
+            let role = (attribute(element, kAXRoleAttribute) as? String ?? "AXUnknown").replacingOccurrences(of: "AX", with: "")
+            return labelValues(element).filter { !$0.isEmpty }.map { label in
+                // long values (transcripts, summaries) would flood the output; click needs exact labels, so mark the cut
+                let shown = label.count > 80 ? String(label.prefix(80)) + "…" : label
+                return "\(role) \"\(shown.replacingOccurrences(of: "\n", with: " "))\""
+            }
+        }.filter { seen.insert($0).inserted }
+        return "\(lines.count) labels" + lines.map { "\n  " + $0 }.joined()
     }
 
     private func labelValues(_ element: AXUIElement) -> [String] {

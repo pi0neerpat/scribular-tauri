@@ -24,6 +24,8 @@ public enum Command: Equatable {
     case wait(seconds: Double)
     case closeWindow
     case handleKeychain
+    case labels
+    case screenshot(name: String?)
     case quit
 }
 
@@ -121,6 +123,17 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             }
             guard let seconds else { throw fail("invalid duration: \(duration)") }
             command = .wait(seconds: seconds)
+        case "labels":
+            guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
+            command = .labels
+        case "screenshot":
+            guard args.count <= 1 else { throw fail("usage: screenshot [\"name\"]") }
+            let name = quoted(args.first)
+            // the name becomes a file in the run folder; keep it from escaping or hiding
+            guard args.isEmpty || name.map({ !$0.isEmpty && !$0.contains("/") && !$0.hasPrefix(".") }) == true else {
+                throw fail("screenshot name must be a quoted file name without / or a leading .")
+            }
+            command = .screenshot(name: name)
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit

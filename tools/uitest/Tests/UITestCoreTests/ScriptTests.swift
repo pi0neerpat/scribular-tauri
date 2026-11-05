@@ -57,3 +57,14 @@ import Testing
 @Test func badDurationFails() {
     #expect(throws: ScriptError.self) { try parseScript("wait soon") }
 }
+
+@Test func parsesLabelsAndScreenshot() throws {
+    let steps = try parseScript("labels\nscreenshot\nscreenshot \"settings-layout\"")
+    #expect(steps.map(\.command) == [.labels, .screenshot(name: nil), .screenshot(name: "settings-layout")])
+}
+
+@Test func screenshotNameCannotEscapeRunFolder() {
+    for bad in ["screenshot \"../x\"", "screenshot \".hidden\"", "screenshot \"\"", "screenshot x", "screenshot \"a\" \"b\""] {
+        #expect(throws: ScriptError.self) { try parseScript(bad) }
+    }
+}

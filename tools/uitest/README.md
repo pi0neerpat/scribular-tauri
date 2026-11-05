@@ -51,11 +51,24 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
+| `labels` | Print every on-screen label with its role (`Button "Save"`), so you can write `click`/`expect` lines without reading the app source. Values over 80 characters are cut with `…`. |
+| `screenshot ["name"]` | Save the app window to `runs/<timestamp>/<name>.png` (default `step-<line>.png`) for checking layout. The step prints the path. |
 | `quit` | Quit the app. |
+
+To explore a screen, write a short script that navigates there and ends with `labels` and `screenshot`. Put an `expect` before `labels`: right after `launch` the web content is not loaded yet, and `labels` lists only the window and menu bar.
+
+```text
+launch
+click "Settings"
+expect "Note styles"
+labels
+screenshot "settings"
+quit
+```
 
 ## Output
 
-Each action prints one line. A failed step stops the run and prints its screenshot path and up to 40 visible labels. The final line includes the result and recording path:
+Each action prints one line. A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. The final line includes the result and recording path:
 
 ```text
 ✓ 1 launch /path/to/Scribular.app (built 2026-11-05T20:00:00Z)

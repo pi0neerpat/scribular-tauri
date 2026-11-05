@@ -85,3 +85,15 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
                  out: { output.append($0) })
     #expect(output.allSatisfy { !$0.contains("hunter2") })
 }
+
+@Test func screenshotStepSavesNamedFileAndPrintsPath() {
+    let driver = FakeDriver()
+    var output = [String]()
+    let runDir = URL(fileURLWithPath: "/tmp/run")
+    #expect(runSteps([step(1, .screenshot(name: "layout"), source: "screenshot \"layout\""),
+                      step(2, .screenshot(name: nil), source: "screenshot")], driver: driver,
+                     options: RunOptions(runDir: runDir, recordingPath: "r.mp4"), out: { output.append($0) }))
+    #expect(driver.screenshots == [runDir.appendingPathComponent("layout.png"), runDir.appendingPathComponent("step-2.png")])
+    #expect(driver.calls.isEmpty)
+    #expect(output[0] == "✓ 1 screenshot \"layout\" /tmp/run/layout.png")
+}
