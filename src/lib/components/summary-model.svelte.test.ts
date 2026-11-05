@@ -106,6 +106,28 @@ it('shows the selected model immediately after a successful switch', async () =>
   target.remove();
 });
 
+it('disables model selection while a switch is pending', async () => {
+  let finish!: () => void;
+  setSummaryModel.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+  const target = document.createElement('div');
+  document.body.append(target);
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.querySelectorAll('input[type="radio"]')).toHaveLength(2));
+  target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
+  flushSync();
+  const use = [...target.querySelectorAll('button')].at(-1)!;
+  use.click();
+  flushSync();
+  use.click();
+  flushSync();
+  expect(setSummaryModel).toHaveBeenCalledOnce();
+  expect(use.disabled).toBe(true);
+  finish();
+  await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].checked).toBe(true));
+  unmount(app);
+  target.remove();
+});
+
 it('shows errors when the licence link cannot open', async () => {
   openExternalLink.mockRejectedValueOnce(new Error('browser unavailable'));
   const target = document.createElement('div');

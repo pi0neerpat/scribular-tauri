@@ -471,7 +471,7 @@ fn concurrent_ensure_one_waits_for_the_download_owner_to_finish() {
     let corrupted = body(MB + 123, 8);
     let server = Server::start(
         HashMap::from([("shared.bin".into(), corrupted)]),
-        HashMap::from([("shared.bin".into(), (MB + 1) as usize)]),
+        HashMap::from([("shared.bin".into(), MB + 1)]),
     );
     let dir = TempDir::new();
     let small = body(10, 9);

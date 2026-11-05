@@ -7,6 +7,7 @@
   let models = $state<SummaryModel[]>([]);
   let picked = $state<string | null>(null);
   let confirming = $state(false);
+  let switching = $state(false);
   let error = $state<string | null>(null);
 
   let selected = $derived(models.find((m) => m.selected) ?? null);
@@ -44,13 +45,14 @@
   });
 
   async function use() {
-    if (!choice) return;
+    if (!choice || switching) return;
     if (choice.state !== 'ready' && !confirming) {
       confirming = true;
       return;
     }
     const id = choice.spec.id;
     confirming = false;
+    switching = true;
     try {
       await setSummaryModel(id);
       models = models.map((m) => ({ ...m, selected: m.spec.id === id }));
@@ -59,6 +61,8 @@
       error = String(e);
       await refresh();
       picked = selected?.spec.id ?? null;
+    } finally {
+      switching = false;
     }
   }
 </script>
@@ -83,7 +87,7 @@
   {#if confirming && choice}
     <p role="status">Downloads {gb(choice.spec.size)} once. Licence: {choice.spec.license}.</p>
   {/if}
-  <button onclick={use} disabled={!choice || choice.spec.id === selected?.spec.id}>
+  <button onclick={use} disabled={!choice || choice.spec.id === selected?.spec.id || switching}>
     {confirming ? 'Download and use' : 'Use this model'}
   </button>
   {#if error}<p role="alert">{error}</p>{/if}
