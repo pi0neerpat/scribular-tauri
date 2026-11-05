@@ -171,7 +171,7 @@ Data model
 - `RecordingSettings.prompt_id` duplicates the active prompt id (`settings.rs:22`). To avoid two writers, `set_active_prompt` and `set_recording_settings` use the same validated setter: reject unknown ids and auto-star an unstarred target. The Settings radio and prompt `<select>` are replaced by `StylePicker`.
 
 Events
-- Reuse `models://progress` for model downloads and emit the selected model's current `ModelProgress` after a switch or rollback, including when it is already installed. Add no events. Prompt changes need none: each command returns the fresh list.
+- Reuse `models://progress` for downloads. Emit the selected model id on `summary-model://changed` after a switch or rollback, including a switch to an installed model. Prompt changes need no event: each command returns the fresh list.
 
 UI notes
 - `StylePicker` takes `{prompts, selectedId, includeId?}` and is used on the recording screen and (with spec 09) the session view. The recording screen itself belongs to the existing app shell; this spec only adds the component and mounts it where `Settings.svelte` shows the select today, plus the recording screen if present at implementation time.

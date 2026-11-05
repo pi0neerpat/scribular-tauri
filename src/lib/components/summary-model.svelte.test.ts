@@ -13,18 +13,21 @@ const models = [
   { spec: spec('big', 2_500_000_000, 'Needs about 8 GB of free memory.'), selected: false, state: 'missing' },
 ];
 let currentModels = models;
+let modelChanged: (() => void) | undefined;
 
 const setSummaryModel = vi.fn();
 const openExternalLink = vi.fn();
 const listSummaryModels = vi.fn(async () => currentModels);
+const onSummaryModelChanged = vi.fn(async (callback: () => void) => { modelChanged = callback; return () => {}; });
 let reportProgress: ((progress: { modelId: string; state: string; downloadedBytes: number; totalBytes: number; error: string | null }) => void) | undefined;
 vi.mock('../api', () => ({
   listSummaryModels, onModelsProgress: vi.fn(async (callback) => { reportProgress = callback; return () => {}; }),
+  onSummaryModelChanged,
   openExternalLink, setSummaryModel,
 }));
 const { default: SummaryModel } = await import('./SummaryModel.svelte');
 
-afterEach(() => { vi.clearAllMocks(); currentModels = models; });
+afterEach(() => { vi.clearAllMocks(); currentModels = models; modelChanged = undefined; });
 
 it('applies progress locally instead of fetching the model list for every tick', async () => {
   const target = document.createElement('div');
@@ -70,8 +73,21 @@ it('restores the backend selection after a download fails', async () => {
   use.click();
   await vi.waitFor(() => expect(radios[1].checked).toBe(true));
   reportProgress!({ modelId: 'big', state: 'failed', downloadedBytes: 0, totalBytes: 2_500_000_000, error: 'network failed' });
+  currentModels = models;
+  modelChanged!();
   await vi.waitFor(() => expect(radios[0].checked).toBe(true));
   expect(target.textContent).toContain('network failed');
+  unmount(app);
+  target.remove();
+});
+
+it('refreshes selection after another view changes the model', async () => {
+  const target = document.createElement('div');
+  const app = mount(SummaryModel, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('1.6 GB'));
+  currentModels = models.map((m) => ({ ...m, selected: m.spec.id === 'big' }));
+  modelChanged!();
+  await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].checked).toBe(true));
   unmount(app);
   target.remove();
 });

@@ -33,6 +33,7 @@ pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
     MODELS_PROGRESS_EVENT,
+    SUMMARY_MODEL_CHANGED_EVENT,
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
@@ -45,6 +46,9 @@ pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
+
+/// The selected summary model changed or reverted after a failed download.
+pub const SUMMARY_MODEL_CHANGED_EVENT: &str = "summary-model://changed";
 
 /// Job progress, one [`SessionProgress`] per step or state change.
 pub const SESSION_PROGRESS_EVENT: &str = "session://progress";
@@ -312,7 +316,7 @@ pub fn set_summary_model(
         .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?
         .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?;
     let previous = switched?;
-    emit_model_status(&app, &models, &model_id);
+    let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &model_id);
     if models.readiness.get(&model_id) == ModelState::Ready {
         return Ok(());
     }
@@ -326,17 +330,11 @@ pub fn set_summary_model(
         if let Err(e) = result {
             eprintln!("summary model {model_id}: {e}");
             if revert_summary_model(&store, &models, &model_id, &previous) {
-                emit_model_status(&app, &models, &previous);
+                let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &previous);
             }
         }
     });
     Ok(())
-}
-
-fn emit_model_status(app: &AppHandle, models: &ModelManager, model_id: &str) {
-    if let Some(progress) = models.status().into_iter().find(|p| p.model_id == model_id) {
-        let _ = app.emit(MODELS_PROGRESS_EVENT, progress);
-    }
 }
 
 /// The pinned models with their license terms, in download order.

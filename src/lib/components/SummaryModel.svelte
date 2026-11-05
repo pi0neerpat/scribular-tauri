@@ -1,7 +1,7 @@
 <script lang="ts">
   // Summary model picker (parity spec 03 R19, R23).
   import { onMount } from 'svelte';
-  import { listSummaryModels, onModelsProgress, openExternalLink, setSummaryModel } from '../api';
+  import { listSummaryModels, onModelsProgress, onSummaryModelChanged, openExternalLink, setSummaryModel } from '../api';
   import type { SummaryModel } from '../types/SummaryModel';
 
   let models = $state<SummaryModel[]>([]);
@@ -30,13 +30,17 @@
       models = models.map((m) => m.spec.id === p.modelId ? { ...m, state: p.state } : m);
       if (p.state === 'failed') {
         error = p.error ?? 'Model download failed.';
-        void refresh(true);
-      } else if (p.state === 'missing' || p.state === 'ready') {
-        void refresh(true);
       }
     });
+    const changed = onSummaryModelChanged((id) => {
+      models = models.map((m) => ({ ...m, selected: m.spec.id === id }));
+      picked = id;
+    });
     unlisten.then(() => refresh(), () => refresh());
-    return () => { unlisten.then((fn) => fn(), () => {}); };
+    return () => {
+      unlisten.then((fn) => fn(), () => {});
+      changed.then((fn) => fn(), () => {});
+    };
   });
 
   async function use() {

@@ -1,28 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { downloadModels, listSummaryModels, modelsStatus, onModelsProgress } from '../api';
+  import { downloadModels, listSummaryModels, modelsStatus, onModelsProgress, onSummaryModelChanged } from '../api';
   import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
 
-  // Selection emits its current state; download ticks update the same snapshot.
+  // The selected summary model, refreshed only after a switch or rollback.
   let summaryId = $state<string | null>(null);
   let models = $state<ModelProgress[]>([]);
-  let llmIds = new Set<string>();
   let summary = $derived(models.find((m) => m.modelId === summaryId));
 
   onMount(() => {
     const selected = () =>
       listSummaryModels().then((list) => {
-        llmIds = new Set(list.map((m) => m.spec.id));
         summaryId = list.find((m) => m.selected)?.spec.id ?? null;
       });
     const unlisten = onModelsProgress((p) => {
       models = [...models.filter((m) => m.modelId !== p.modelId), p];
-      if (llmIds.has(p.modelId)) {
-        if (p.state === 'failed') void selected();
-        else summaryId = p.modelId;
-      }
     });
+    const changed = onSummaryModelChanged((id) => (summaryId = id));
     void selected();
     // Snapshot after the listener is live, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
@@ -31,6 +26,7 @@
       .then((value) => (models = mergeSnapshot(value, models)));
     return () => {
       unlisten.then((fn) => fn());
+      changed.then((fn) => fn());
     };
   });
 </script>

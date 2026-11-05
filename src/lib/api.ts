@@ -158,6 +158,10 @@ export function onModelsProgress(handler: (progress: ModelProgress) => void): Pr
   return listen<ModelProgress>('models://progress', (event) => handler(event.payload));
 }
 
+export function onSummaryModelChanged(handler: (modelId: string) => void): Promise<UnlistenFn> {
+  return listen<string>('summary-model://changed', (event) => handler(event.payload));
+}
+
 /** Queues a fresh summary; progress arrives through `onSessionProgress`. */
 export function regenerateSummary(sessionId: string, promptId: string): Promise<void> {
   return invoke<void>('regenerate_summary', { sessionId, promptId });
