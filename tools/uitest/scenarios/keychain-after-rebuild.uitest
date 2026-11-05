@@ -1,0 +1,4 @@
+launch --keep-data
+handle-keychain
+expect "Settings"
+quit

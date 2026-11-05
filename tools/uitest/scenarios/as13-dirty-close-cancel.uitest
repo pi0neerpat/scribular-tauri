@@ -1,0 +1,18 @@
+launch
+click "Settings"
+expect "Note styles"
+click "New style"
+click "Name"
+type "UITest Draft"
+key tab
+type "Initial prompt"
+click "Save"
+click "Prompt"
+key cmd+a
+type "Changed prompt"
+close-window
+expect "Discard changes?"
+click "Cancel" in "Discard changes?"
+expect-not "Discard changes?"
+expect "Note styles"
+quit

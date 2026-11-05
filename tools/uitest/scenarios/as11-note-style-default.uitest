@@ -1,0 +1,17 @@
+launch
+click "Settings"
+expect "Note styles"
+click "New style"
+click "Name"
+type "UITest Recap"
+key tab
+type "Bullet points only."
+click "Save"
+click "Toggle favourite for UITest Recap"
+click "Make default" index 1
+click "Record"
+click "Start recording"
+wait 30s
+click "Stop"
+expect "UITest Recap"
+quit

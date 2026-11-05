@@ -209,7 +209,13 @@ final class AXDriver: Driver {
             let role = attribute($0, kAXRoleAttribute) as? String
             return role == kAXTextFieldRole || role == "AXSecureTextField"
         }
-        guard let field = fields.first, let fieldRect = frame(of: field) else { throw .fatal("keychain password field not found") }
+        let field: AXUIElement
+        switch pick(fields, index: nil) {
+        case .none: throw .fatal("keychain password field not found")
+        case .ambiguous(let count): throw .fatal("ambiguous: \(count) keychain password fields")
+        case .found(let value): field = value
+        }
+        guard let fieldRect = frame(of: field) else { throw .fatal("keychain password field not found") }
         try click(at: CGPoint(x: fieldRect.midX, y: fieldRect.midY))
         _ = try perform(.type(keychainPassword))
         let allow = allElements(from: window).filter { matches($0, exact: "Always Allow") }
