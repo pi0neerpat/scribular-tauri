@@ -4,3 +4,5 @@ dist/
 src-tauri/target/
 src-tauri/target-host/
 src-tauri/gen/
+runs/
+tools/uitest/.build/
