@@ -3,4 +3,4 @@
 /**
  * The System Settings privacy pane that grants a source's access.
  */
-export type Privacy = "microphone" | "systemAudio";
+export type Privacy = "microphone" | "systemAudio" | "notifications";

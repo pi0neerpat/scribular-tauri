@@ -194,6 +194,10 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    pub fn is_recording(&self) -> bool {
+        lock(&self.inner.recording).is_some()
+    }
+
     pub fn new(
         store: Arc<Store>,
         jobs: Arc<JobQueue>,
@@ -279,6 +283,16 @@ impl Recorder {
             || lock(&self.models)
                 .as_ref()
                 .is_some_and(|models| models.is_busy())
+    }
+
+    /// Whether quitting would interrupt recording, transcription or summary work.
+    pub fn quit_confirmation_needed(&self) -> bool {
+        lock(&self.inner.recording).is_some()
+            || !lock(&self.inner.state).finalizing.is_empty()
+            || self.inner.jobs.is_busy()
+            || lock(&self.finalizers)
+                .iter()
+                .any(|worker| !worker.is_finished())
     }
 
     /// Runs `operation` while preventing a recording from starting.
@@ -388,7 +402,7 @@ impl Recorder {
             .take()
             .ok_or(RecordError::NotRecording)?;
         let id = recording.session_id;
-        let diarize = recording.multi_speaker;
+        let diarize = recording.multi_speaker && num_speakers != Some(0);
         let mut samples = 0;
         let mut failure = None;
         let mut streamers = Vec::new();
@@ -456,6 +470,28 @@ impl Recorder {
         }
         self.inner.jobs.cancel(session_id)
     }
+
+    /// Stops the recorder once, preserving in-flight sessions for launch recovery.
+    pub fn shutdown(&self) {
+        let _gate = lock(&self.install_gate);
+        {
+            let mut state = lock(&self.inner.state);
+            if state.shutdown {
+                return;
+            }
+            state.shutdown = true;
+            for flag in state.finalizing.values() {
+                flag.store(true, Ordering::Relaxed);
+            }
+        }
+        let recording = lock(&self.inner.recording).take();
+        if let Some(recording) = recording {
+            abandon(recording.sources, &recording.cancel, true);
+        }
+        for worker in lock(&self.finalizers).drain(..) {
+            let _ = worker.join();
+        }
+    }
 }
 
 impl Drop for Recorder {
@@ -463,22 +499,7 @@ impl Drop for Recorder {
     /// transcription leaves it `Finalizing`; either way the next launch marks
     /// it interrupted and keeps its audio (KTD2).
     fn drop(&mut self) {
-        // Not `if let Some(..) = lock(..).take()`: the guard would live through
-        // the block, and a streamer locks `recording` before it can stop.
-        let recording = lock(&self.inner.recording).take();
-        if let Some(recording) = recording {
-            abandon(recording.sources, &recording.cancel, true);
-        }
-        {
-            let mut state = lock(&self.inner.state);
-            state.shutdown = true;
-            for flag in state.finalizing.values() {
-                flag.store(true, Ordering::Relaxed);
-            }
-        }
-        for worker in lock(&self.finalizers).drain(..) {
-            let _ = worker.join();
-        }
+        self.shutdown();
     }
 }
 

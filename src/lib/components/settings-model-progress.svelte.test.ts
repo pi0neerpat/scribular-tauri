@@ -4,6 +4,7 @@ import { mount, unmount } from 'svelte';
 
 const downloadModel = vi.fn();
 const getRecordingSettings = vi.fn();
+const getAppSettings = vi.fn();
 const listAudioApps = vi.fn();
 const modelsStatus = vi.fn();
 const onModelsProgress = vi.fn();
@@ -13,11 +14,16 @@ const checkForUpdates = vi.fn();
 const getUpdateState = vi.fn().mockResolvedValue({ state: 'idle', installable: false });
 const installUpdate = vi.fn();
 const onUpdateState = vi.fn().mockResolvedValue(() => {});
+const requestNotificationPermission = vi.fn();
+const setAppSettings = vi.fn();
+const getTelemetrySetting = vi.fn().mockResolvedValue('off');
 vi.mock('../api', () => ({
-  appVersion, checkForUpdates, getUpdateState, installUpdate, onUpdateState,
+  appVersion, checkForUpdates, getAppSettings, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
-  modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), setRecordingSettings,
+  modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
+  setAppSettings, setRecordingSettings, getTelemetrySetting,
 }));
+import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.
 vi.mock('./NoteStyles.svelte', () => ({ default: () => {} }));
 vi.mock('./SummaryModel.svelte', () => ({ default: () => {} }));
@@ -27,7 +33,10 @@ const settings = { inputMode: 'mic', targetApp: null, multiSpeaker: false, promp
 const downloading = { modelId: 'speaker-campplus', state: 'downloading', downloadedBytes: 4, totalBytes: 10, error: null };
 const ready = { ...downloading, state: 'ready', downloadedBytes: 10 };
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  appSettings.set({ notifySummaryComplete: false, showBackgroundAnimation: true });
+  vi.clearAllMocks();
+});
 
 it('applies a completion event that arrives while the status snapshot is in flight', async () => {
   let notify: ((progress: typeof ready) => void) | undefined;
@@ -137,5 +146,32 @@ it('shows an alert when the install is rejected', async () => {
   await vi.waitFor(() => expect(target.textContent).toContain('Version 0.2.0 ready'));
   [...target.querySelectorAll('button')].find((b) => b.textContent === 'Restart to update')!.click();
   await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('install failed'));
+  unmount(app);
+});
+
+it('keeps notification permission guidance through unrelated saves and shows it once', async () => {
+  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true });
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  requestNotificationPermission.mockResolvedValue(false);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(getRecordingSettings).toHaveBeenCalled());
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'General')!.click();
+  await vi.waitFor(() => expect(target.textContent).toContain('Show summarization complete alert'));
+  const alerts = () => [...target.querySelectorAll('[role="status"]')];
+  const notification = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Show summarization complete alert'))!;
+  notification.checked = true;
+  notification.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(requestNotificationPermission).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(alerts()).toHaveLength(1));
+
+  const animation = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Show background animation'))!;
+  animation.checked = false;
+  animation.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalled());
+  expect(alerts()).toHaveLength(1);
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Session')!.click();
+  await vi.waitFor(() => expect(target.textContent).toContain('Notifications are disabled. Allow them for Scribular in System Settings.'));
   unmount(app);
 });

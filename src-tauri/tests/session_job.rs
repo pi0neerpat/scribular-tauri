@@ -467,6 +467,23 @@ fn quitting_mid_recording_leaves_an_interrupted_session_with_its_audio() {
 }
 
 #[test]
+fn shutdown_is_idempotent_and_preserves_the_recording_for_recovery() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.feed(10);
+    h.wait_chunks(&id, 2);
+
+    h.recorder.shutdown();
+    h.recorder.shutdown();
+
+    assert_eq!(h.get(&id).status, SessionStatus::Recording);
+    assert_eq!(
+        h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+        10 * 16_000
+    );
+}
+
+#[test]
 fn cancelling_transcription_keeps_the_partial_transcript() {
     // The system source transcribes; the mic source waits for the cancel.
     let h = Harness::with(|stt| stt.block_from = 1, |_| {});

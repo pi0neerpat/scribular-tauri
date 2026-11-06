@@ -17,6 +17,10 @@
     getUpdateState,
     installUpdate,
     onUpdateState,
+    getAppSettings,
+    setAppSettings,
+    requestNotificationPermission,
+    openExternalLink,
     getDiagnostics,
     getTelemetrySetting,
     setTelemetrySetting,
@@ -24,6 +28,7 @@
     reportTestError,
     triggerTestPanic,
   } from '../api';
+  import { appSettings } from '../app-settings';
   import LicenseSettings from './LicenseSettings.svelte';
   import NoteStyles from './NoteStyles.svelte';
   import SummaryModel from './SummaryModel.svelte';
@@ -34,6 +39,8 @@
   import type { ModelProgress } from '../types/ModelProgress';
   import type { UpdateState } from '../types/UpdateState';
   import { updateStatus } from './update-status';
+
+  let { navigationLocked = false }: { navigationLocked?: boolean } = $props();
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
@@ -50,16 +57,24 @@
   let speakerModel = $state<ModelProgress | null>(null);
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
+  let notifyWasEnabled = $state(false);
+  let category = $state<'Note styles' | 'Session' | 'General' | 'About' | 'License'>('Session');
+  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
   let sampleNotice = $state<string | null>(null);
   let telemetryOn = $state(false);
   let telemetryKnown = $state(false);
   let telemetrySaving = $state(false);
   let diagnosticsStatus = $state<string | null>(null);
-  let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
     if (noteStyles) noteStyles.requestLeave(action, opener);
     else action();
+  }
+
+  function chooseCategory(next: typeof category, opener: HTMLElement) {
+    if (navigationLocked) return;
+    if (next === category) return;
+    requestLeave(() => (category = next), opener);
   }
 
   // The saved app stays selectable while it isn't playing.
@@ -77,6 +92,11 @@
     let progressVersion = 0;
     let sawUpdate = false;
     void (async () => {
+      try {
+        const app = await getAppSettings();
+        appSettings.set(app);
+        notifyWasEnabled = app.notifySummaryComplete;
+      } catch (e) { error = String(e); }
       try {
         const remove = await onUpdateState((state) => { sawUpdate = true; update = state; });
         if (disposed) remove(); else updateUnlisten = remove;
@@ -119,10 +139,11 @@
   async function refreshApps() {
     try {
       apps = await listAudioApps();
-      denied = null;
+      if (denied !== 'notifications') denied = null;
     } catch (e) {
-      denied = deniedPrivacy(String(e));
-      if (!denied) error = String(e);
+      const pane = deniedPrivacy(String(e));
+      if (pane) denied = pane;
+      else error = String(e);
     }
   }
 
@@ -130,7 +151,7 @@
   async function changeMode() {
     await save();
     if (settings && settings.inputMode !== 'mic') await refreshApps();
-    else denied = null;
+    else if (denied !== 'notifications') denied = null;
   }
 
   async function save() {
@@ -141,6 +162,26 @@
       error = null;
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  async function saveAppSettings() {
+    const next = $appSettings;
+    try {
+      if (next.notifySummaryComplete && !notifyWasEnabled) {
+        if (!(await requestNotificationPermission())) {
+          appSettings.update((s) => ({ ...s, notifySummaryComplete: false }));
+          denied = 'notifications';
+        } else {
+          notifyWasEnabled = true;
+          denied = null;
+        }
+      }
+      if (!next.notifySummaryComplete) notifyWasEnabled = false;
+      await setAppSettings($appSettings);
+    } catch (e) {
+      error = String(e);
+      appSettings.set(await getAppSettings());
     }
   }
 
@@ -185,7 +226,13 @@
 
 <section data-tour="input-mode">
   <h2>Settings</h2>
+  <nav aria-label="Settings categories">
+    {#each ['Note styles', 'Session', 'General', 'About', 'License'] as item}
+      <button aria-pressed={category === item} disabled={navigationLocked} onclick={(e) => chooseCategory(item as typeof category, e.currentTarget)}>{item}</button>
+    {/each}
+  </nav>
   {#if settings}
+  {#if category === 'Session'}
     <fieldset>
       <legend>Record</legend>
       {#each modes as [mode, label] (mode)}
@@ -195,7 +242,9 @@
         </label>
       {/each}
     </fieldset>
+  {/if}
 
+  {#if category === 'Session'}
     <fieldset>
       <legend>Multi-speaker</legend>
       <p>Identify different speakers after recording. The speaker model downloads once and stays on this Mac.</p>
@@ -229,7 +278,9 @@
         {#if !update.installable}<p>Finish your recording or summary first</p>{/if}
       {/if}
     </fieldset>
+  {/if}
 
+  {#if category === 'Session'}
     {#if settings.inputMode !== 'mic'}
       <label>
         App
@@ -246,7 +297,22 @@
       <button onclick={refreshApps}>Refresh</button>
       <p>Only apps playing audio right now are listed.</p>
     {/if}
+  {/if}
 
+  {#if category === 'General'}
+    <fieldset>
+      <legend>General</legend>
+      <label><input type="checkbox" bind:checked={$appSettings.showBackgroundAnimation} onchange={saveAppSettings} /> Show background animation</label>
+      <label><input type="checkbox" bind:checked={$appSettings.notifySummaryComplete} onchange={saveAppSettings} /> Show summarization complete alert</label>
+      {#if denied === 'notifications'}
+        <p role="status">Notifications are disabled. Allow Scribular in System Settings to show summary alerts.
+          <button onclick={() => openPrivacySettings('notifications')}>Open System Settings</button>
+        </p>
+      {/if}
+    </fieldset>
+  {/if}
+
+  {#if category === 'Session'}
     <fieldset>
       <legend>Audio recording</legend>
       <p>
@@ -269,19 +335,30 @@
       {/if}
     </fieldset>
   {/if}
+  {/if}
 
-  <NoteStyles bind:this={noteStyles} />
-  <SummaryModel />
+  {#if category === 'Note styles'}
+    <NoteStyles bind:this={noteStyles} />
+    <SummaryModel />
+  {/if}
 
+  {#if category === 'License'}<LicenseSettings />{/if}
+  {#if category === 'About'}
+    <p>Version: {version || 'Loading…'}</p>
+    <button onclick={() => openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e)))}>Contact support</button>
+    <button onclick={() => openExternalLink('https://www.scribular.com').catch((e) => (error = String(e)))}>Scribular website</button>
+  {/if}
+
+  {#if category === 'General'}
   <section aria-labelledby="sample-session-title">
     <h3 id="sample-session-title">Sample session</h3>
     <p>Restore the example session if you deleted it.</p>
     <button onclick={restoreSample}>Restore sample session</button>
     {#if sampleNotice}<p role="status">{sampleNotice}</p>{/if}
   </section>
+  {/if}
 
-  <LicenseSettings />
-
+  {#if category === 'General'}
   <fieldset>
     <legend>Privacy &amp; diagnostics</legend>
     <label><input type="checkbox" bind:checked={telemetryOn} disabled={!telemetryKnown || telemetrySaving} onchange={changeTelemetry} /> Send usage and error reports</label>
@@ -296,11 +373,18 @@
       <button onclick={() => triggerTestPanic().catch(() => (diagnosticsStatus = 'Failed to trigger test panic'))}>Trigger test panic</button>
     </fieldset>
   {/if}
+  {/if}
 
-  {#if denied}
+  {#if denied && denied !== 'notifications'}
     <p role="alert">
       Scribular needs permission to record app audio.
       <button onclick={() => openPrivacySettings(denied!)}>Open System Settings</button>
+    </p>
+  {/if}
+  {#if denied === 'notifications' && category !== 'General'}
+    <p role="status">
+      Notifications are disabled. Allow them for Scribular in System Settings.
+      <button onclick={() => openPrivacySettings('notifications').catch((e) => (error = String(e)))}>Open System Settings</button>
     </p>
   {/if}
   {#if error}

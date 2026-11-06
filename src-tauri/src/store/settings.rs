@@ -14,12 +14,30 @@ pub const MULTI_SPEAKER: &str = "multi_speaker";
 pub const SUMMARY_MODEL_ID: &str = "summary_model_id";
 pub const PENDING_UPDATE_INSTALL: &str = "pending_update_install";
 pub const SKIPPED_UPDATE_VERSION: &str = "skipped_update_version";
+pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
+pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
 pub(super) const KEEP_AUDIO: &str = "keep_audio";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub notify_summary_complete: bool,
+    pub show_background_animation: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            notify_summary_complete: false,
+            show_background_animation: true,
+        }
+    }
+}
 
 /// What the next recording captures and which prompt summarizes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -52,6 +70,43 @@ pub(super) fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 impl Store {
+    pub fn app_settings(&self) -> Result<AppSettings> {
+        self.with(|c| {
+            Ok(AppSettings {
+                notify_summary_complete: select(c, NOTIFY_SUMMARY_COMPLETE)?.as_deref()
+                    == Some("true"),
+                show_background_animation: select(c, SHOW_BACKGROUND_ANIMATION)?.as_deref()
+                    != Some("false"),
+            })
+        })
+    }
+
+    pub fn set_app_settings(&self, settings: AppSettings) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            insert(
+                &tx,
+                NOTIFY_SUMMARY_COMPLETE,
+                if settings.notify_summary_complete {
+                    "true"
+                } else {
+                    "false"
+                },
+            )?;
+            insert(
+                &tx,
+                SHOW_BACKGROUND_ANIMATION,
+                if settings.show_background_animation {
+                    "true"
+                } else {
+                    "false"
+                },
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         self.with(|c| select(c, key))
     }
