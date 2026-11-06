@@ -5,6 +5,7 @@
 
   let updateState = $state<UpdateState>({ state: 'idle', installable: false });
   let dismissedVersion = $state<string | null>(null);
+  let error = $state<string | null>(null);
 
   function later() {
     if (updateState.state === 'ready') dismissedVersion = updateState.version;
@@ -13,12 +14,17 @@
   onMount(() => {
     let remove: (() => void) | undefined;
     let disposed = false;
+    let sawEvent = false;
     void (async () => {
       try {
-        const unlisten = await onUpdateState((next) => (updateState = next));
+        const unlisten = await onUpdateState((next) => { sawEvent = true; updateState = next; });
         if (disposed) unlisten(); else remove = unlisten;
       } catch { /* The state snapshot still lets the bar render. */ }
-      try { updateState = await getUpdateState(); } catch { /* updater unavailable */ }
+      try {
+        const snapshot = await getUpdateState();
+        // An event that arrived meanwhile is newer than the snapshot.
+        if (!sawEvent) updateState = snapshot;
+      } catch { /* updater unavailable */ }
     })();
     return () => { disposed = true; remove?.(); };
   });
@@ -27,8 +33,9 @@
 {#if updateState.state === 'ready' && updateState.installable && dismissedVersion !== updateState.version}
   <aside role="status" aria-label="Update ready">
     <span>Scribular {updateState.version} is ready</span>
-    <button onclick={() => installUpdate()}>Restart to update</button>
+    <button onclick={() => installUpdate().catch((e) => (error = String(e)))}>Restart to update</button>
     <button onclick={later}>Later</button>
-    <button onclick={() => openExternalLink('https://www.scribular.com/releases')}>What's new</button>
+    <button onclick={() => openExternalLink('https://www.scribular.com/releases').catch((e) => (error = String(e)))}>What's new</button>
+    {#if error}<p role="alert">{error}</p>{/if}
   </aside>
 {/if}

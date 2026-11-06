@@ -63,13 +63,17 @@
     let updateUnlisten: (() => void) | undefined;
     let disposed = false;
     let progressVersion = 0;
+    let sawUpdate = false;
     void (async () => {
       try {
-        const remove = await onUpdateState((state) => (update = state));
+        const remove = await onUpdateState((state) => { sawUpdate = true; update = state; });
         if (disposed) remove(); else updateUnlisten = remove;
+      } catch { /* The snapshot below still supplies the update state. */ }
+      try {
         const [app, current] = await Promise.all([appVersion(), getUpdateState()]);
         version = app.version;
-        update = current;
+        // An event that arrived meanwhile is newer than the snapshot.
+        if (!sawUpdate) update = current;
       } catch { /* Update status is optional while the rest of Settings loads. */ }
       try {
         try {
@@ -156,10 +160,13 @@
       <legend>Updates</legend>
       <p>Current version: {version || 'Loading…'}</p>
       <p role="status">{updateStatus(update)}</p>
-      <button onclick={() => checkForUpdates()}>Check for updates</button>
+      <button
+        onclick={() => checkForUpdates().catch((e) => (error = String(e)))}
+        disabled={update.state === 'checking' || update.state === 'downloading'}
+      >Check for updates</button>
       {#if update.state === 'ready'}
         <button
-          onclick={() => installUpdate()}
+          onclick={() => installUpdate().catch((e) => (error = String(e)))}
           disabled={!update.installable}
           title={!update.installable ? 'Finish your recording or summary first' : undefined}
         >Restart to update</button>

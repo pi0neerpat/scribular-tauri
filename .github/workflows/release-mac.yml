@@ -39,6 +39,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Test release tools
+        run: node --test scripts/release-tools.test.mjs
+
       - name: Bump version
         id: version
         run: |
@@ -61,7 +64,7 @@ jobs:
           if [ -s "$RUNNER_TEMP/tag-check.txt" ]; then echo "Tag $TAG already exists"; exit 1; fi
           gh release list --repo "$RELEASE_REPO" --limit 1000 --json tagName --jq '.[].tagName' > "$RUNNER_TEMP/release-tags.txt"
           if grep -Fxq "$TAG" "$RUNNER_TEMP/release-tags.txt"; then echo "Release $TAG already exists"; exit 1; fi
-          STATUS=$(curl -sS -o "$RUNNER_TEMP/latest.json" -w '%{http_code}' https://github.com/pi0neerpat/scribular-tauri-releases/releases/latest/download/latest.json)
+          STATUS=$(curl -sS -L -o "$RUNNER_TEMP/latest.json" -w '%{http_code}' https://github.com/pi0neerpat/scribular-tauri-releases/releases/latest/download/latest.json)
           if [ "$STATUS" = 200 ]; then
             node -e 'const fs=require("node:fs"); const latest=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const semver=(s)=>s.split(".").map(Number); const a=semver(process.env.VERSION), b=semver(latest.version); if (!(a[0]>b[0] || (a[0]===b[0] && a[1]>b[1]) || (a[0]===b[0] && a[1]===b[1] && a[2]>b[2]))) { console.error(`${process.env.VERSION} must be greater than ${latest.version}`); process.exit(1); }' "$RUNNER_TEMP/latest.json"
           elif [ "$STATUS" != 404 ]; then echo "latest.json request failed with HTTP $STATUS"; exit 1; fi
@@ -155,7 +158,7 @@ jobs:
         if: inputs.publish
         run: |
           set -euo pipefail
-          git diff -- src-tauri/Cargo.toml src-tauri/tauri.conf.json package.json > "$RUNNER_TEMP/version-bump.patch"
+          git diff -- src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json package.json > "$RUNNER_TEMP/version-bump.patch"
           git fetch origin main
           git checkout -B main origin/main
           git apply "$RUNNER_TEMP/version-bump.patch"

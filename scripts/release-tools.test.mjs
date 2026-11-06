@@ -11,8 +11,12 @@ afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true })
 
 test('latest manifest has the Tauri updater fields', () => {
   const json = makeLatestJson({ version: '0.2.0', notes: 'Fixes', signature: 'sig', url: 'https://example.test/app.tar.gz', pubDate: '2026-11-05T00:00:00Z' });
-  assert.deepEqual(Object.keys(json).sort(), ['notes', 'platforms', 'pub_date', 'version']);
-  assert.deepEqual(json.platforms['darwin-aarch64'], { signature: 'sig', url: 'https://example.test/app.tar.gz' });
+  assert.deepEqual(json, {
+    version: '0.2.0',
+    notes: 'Fixes',
+    pub_date: '2026-11-05T00:00:00.000Z',
+    platforms: { 'darwin-aarch64': { signature: 'sig', url: 'https://example.test/app.tar.gz' } },
+  });
 });
 
 test('version bump updates Cargo, Tauri config and package consistently', async () => {

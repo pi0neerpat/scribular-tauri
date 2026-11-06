@@ -128,8 +128,14 @@ pub fn get_update_state(
 }
 
 #[tauri::command]
-pub fn install_update(updates: State<'_, Arc<crate::update::UpdateManager>>) -> Result<(), String> {
-    updates.install()
+pub async fn install_update(
+    updates: State<'_, Arc<crate::update::UpdateManager>>,
+) -> Result<(), String> {
+    // Off the main thread: the install gate can wait on a recording start or stop.
+    let updates = Arc::clone(&updates);
+    tauri::async_runtime::spawn_blocking(move || updates.install())
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // Commands return `Result<_, String>`: the webview only shows the message.

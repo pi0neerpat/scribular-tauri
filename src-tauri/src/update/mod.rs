@@ -207,15 +207,20 @@ impl UpdateManager {
     }
 
     pub fn check(&self) {
-        if matches!(
-            self.state(),
-            UpdateState::Checking { .. }
-                | UpdateState::Downloading { .. }
-                | UpdateState::Ready { .. }
-        ) {
-            return;
+        // Test and set under one lock, so overlapping checks cannot both start.
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if matches!(
+                *state,
+                UpdateState::Checking { .. }
+                    | UpdateState::Downloading { .. }
+                    | UpdateState::Ready { .. }
+            ) {
+                return;
+            }
+            *state = UpdateState::Checking { installable: false };
         }
-        self.publish(UpdateState::Checking { installable: false });
+        (self.emit)(UpdateState::Checking { installable: false });
         match self.source.check() {
             Ok(Some(info)) => {
                 let current = semver::Version::parse(env!("CARGO_PKG_VERSION"));
@@ -568,6 +573,21 @@ mod tests {
                 ..
             }
         ));
+    }
+    #[test]
+    fn concurrent_checks_download_once() {
+        let fake = fake(Some("0.2.0"));
+        let (manager, _, _) = manager(Arc::clone(&fake), Arc::new(AtomicBool::new(false)));
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    start.wait();
+                    manager.check();
+                });
+            }
+        });
+        assert_eq!(fake.downloads.load(Ordering::SeqCst), 1);
     }
     #[test]
     fn same_or_older_update_is_not_downloaded() {

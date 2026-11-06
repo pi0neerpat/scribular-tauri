@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export async function bumpVersion(kind, root = process.cwd()) {
   if (!['patch', 'minor', 'major'].includes(kind)) throw new Error('bump must be patch, minor, or major');
@@ -26,7 +27,7 @@ export async function bumpVersion(kind, root = process.cwd()) {
   return version;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { console.log(await bumpVersion(process.argv[2])); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

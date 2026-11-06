@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Condvar, Mutex,
+        Arc, Condvar, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -94,6 +94,8 @@ pub struct ModelManager {
     pub readiness: Readiness,
     /// The summary model (spec 03 R18); only it downloads with the rest.
     selected_llm: Mutex<String>,
+    /// The recorder's update install gate, shared so downloads cannot start mid-install.
+    install_gate: OnceLock<Arc<Mutex<()>>>,
 }
 
 struct DownloadGuard<'a>(&'a AtomicBool);
@@ -120,7 +122,12 @@ impl ModelManager {
             client: reqwest::Client::new(),
             readiness: Readiness::default(),
             selected_llm: Mutex::new(first_llm),
+            install_gate: OnceLock::new(),
         }
+    }
+
+    pub fn set_install_gate(&self, gate: Arc<Mutex<()>>) {
+        let _ = self.install_gate.set(gate);
     }
 
     pub fn selected_llm(&self) -> String {
@@ -246,7 +253,16 @@ impl ModelManager {
         let _download = self.download_locks[i].lock().await;
         let spec = &self.specs[i];
         let running = &self.running[i];
-        if running.swap(true, Ordering::AcqRel) {
+        // Claimed under the install gate: an update install either sees this
+        // download as busy or restarts before it starts.
+        let claimed = {
+            let _gate = self
+                .install_gate
+                .get()
+                .map(|gate| gate.lock().unwrap_or_else(|p| p.into_inner()));
+            running.swap(true, Ordering::AcqRel)
+        };
+        if claimed {
             return None;
         }
         let _guard = DownloadGuard(running);

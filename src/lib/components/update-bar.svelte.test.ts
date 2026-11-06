@@ -20,7 +20,9 @@ it('shows ready idle updates, hides busy states, and Later dismisses only that v
   await vi.waitFor(() => expect(target.textContent).toContain('Scribular 0.2.0 is ready'));
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Later')!.click();
   await vi.waitFor(() => expect(target.textContent).not.toContain('Scribular 0.2.0 is ready'));
-  emit({ state: 'ready', version: '0.2.0', notes: '', installable: false });
+  emit({ state: 'ready', version: '0.2.0', notes: '', installable: true });
+  await Promise.resolve();
+  expect(target.textContent).not.toContain('Scribular 0.2.0 is ready');
   emit({ state: 'ready', version: '0.2.1', notes: '', installable: false });
   await vi.waitFor(() => expect(target.textContent).not.toContain('Scribular'));
   emit({ state: 'ready', version: '0.2.1', notes: '', installable: true });

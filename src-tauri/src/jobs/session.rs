@@ -265,6 +265,7 @@ impl Recorder {
     }
 
     pub fn set_model_manager(&self, models: Arc<crate::models::ModelManager>) {
+        models.set_install_gate(self.install_gate());
         *lock(&self.models) = Some(models);
     }
 
@@ -633,13 +634,19 @@ impl Inner {
             let Some(recording) = current.take() else {
                 return;
             };
+            // Marked before `recording` unlocks, so `is_busy` covers the teardown.
+            lock(&self.state)
+                .finalizing
+                .insert(id.into(), Arc::clone(&recording.cancel));
             drop(current);
             let error = abandon(recording.sources, &recording.cancel, true);
             let error = error.unwrap_or_else(|| match stopped {
                 AudioSource::Mic => "recording stopped: the microphone was lost".into(),
                 AudioSource::System => "recording stopped: the app's audio ended".into(),
             });
-            return self.end(id, SessionStatus::Failed, &error);
+            self.end(id, SessionStatus::Failed, &error);
+            lock(&self.state).finalizing.remove(id);
+            return;
         }
     }
 
