@@ -10,6 +10,7 @@
   let models = $state<ModelProgress[]>([]);
   let telemetry = $state<boolean | null>(null);
   let telemetryError = $state<string | null>(null);
+  let telemetryChosen = false;
   let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
 
   function update(p: ModelProgress[]) {
@@ -18,6 +19,7 @@
   }
 
   async function chooseTelemetry(enabled: boolean) {
+    telemetryChosen = true;
     try {
       await setTelemetrySetting(enabled);
       telemetry = enabled;
@@ -28,7 +30,7 @@
   }
 
   onMount(() => {
-    getTelemetrySetting().then((value) => (telemetry = value)).catch((e) => (telemetryError = String(e)));
+    getTelemetrySetting().then((value) => { if (!telemetryChosen) telemetry = value; }).catch((e) => (telemetryError = String(e)));
     // Listen before the snapshot and download, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
@@ -58,12 +60,12 @@
       <p>Recording becomes available when the speech model is ready.</p>
     {/if}
     {#if telemetry === null}
-      <section aria-labelledby="telemetry-title">
+      <div aria-labelledby="telemetry-title">
         <h2 id="telemetry-title">Help improve Scribular?</h2>
         <p>Send anonymous usage statistics and error reports. Session content is never sent.</p>
         <button onclick={() => chooseTelemetry(true)}>Allow</button>
         <button onclick={() => chooseTelemetry(false)}>No thanks</button>
-      </section>
+      </div>
     {/if}
     {#if telemetryError}<p role="alert">{telemetryError}</p>{/if}
   </section>

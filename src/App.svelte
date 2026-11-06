@@ -23,6 +23,7 @@
   let view = $state<'record' | 'settings'>('record');
   let speechReady = $state(false);
   let tourOpen = $state(false);
+  let tourRun = $state(0);
   let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
 
   function navigate(next: typeof view, opener?: HTMLElement) {
@@ -40,8 +41,8 @@
             .then((n) => (notice = n))
             .catch((e) => (error = String(e)));
           getOnboardingState()
-            .then((state) => (tourOpen = !state.completed))
-            .catch((e) => { error = String(e); tourOpen = true; });
+            .then((state) => { if (tourRun === 0) tourOpen = !state.completed; })
+            .catch((e) => { error = String(e); if (tourRun === 0) tourOpen = true; });
         }
       })
       .catch((e) => (error = String(e)));
@@ -63,6 +64,12 @@
     } catch (e) {
       error = String(e);
     }
+  }
+
+  function showTour() {
+    navigate('record');
+    tourRun++;
+    tourOpen = true;
   }
 </script>
 
@@ -90,7 +97,7 @@
   <nav>
     <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
     <button data-tour="settings" onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
-    <button onclick={(event) => { navigate('record', event.currentTarget); tourOpen = true; }}>Show tour</button>
+    <button onclick={showTour}>Show tour</button>
     <TrialBadge onclick={() => navigate('settings')} />
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
@@ -103,7 +110,7 @@
   {#if view === 'settings'}
     <Settings bind:this={settings} />
   {/if}
-  {#if tourOpen}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/if}
+  {#if tourOpen}{#key tourRun}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/key}{/if}
   <p>Heartbeat: {beats}</p>
 </main>
 {:else if error}

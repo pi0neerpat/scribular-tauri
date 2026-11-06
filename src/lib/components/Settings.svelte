@@ -138,10 +138,10 @@
   }
 </script>
 
-<section data-tour="input-mode">
+<section>
   <h2>Settings</h2>
   {#if settings}
-    <fieldset>
+    <fieldset data-tour="input-mode">
       <legend>Record</legend>
       {#each modes as [mode, label] (mode)}
         <label>

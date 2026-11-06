@@ -32,7 +32,7 @@
     const rect = anchor.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 32);
     const left = Math.min(window.innerWidth - width - 16, Math.max(16, rect.right + 16));
-    const top = Math.min(window.innerHeight - 220, Math.max(16, rect.top));
+    const top = Math.max(16, Math.min(window.innerHeight - (card?.offsetHeight ?? 0) - 16, rect.top));
     position = `left: ${left}px; top: ${top}px;`;
   }
 
@@ -41,6 +41,7 @@
     index = Math.min(index + 1, steps.length - 1);
     await tick();
     place();
+    card?.querySelector<HTMLElement>('button:not(.close)')?.focus();
   }
 
   function keydown(event: KeyboardEvent) {
@@ -63,10 +64,16 @@
       const sessionStep = steps.find((step) => step.id === 'sessions');
       if (sessionStep) sessionStep.copy = 'Your transcript and summary will show up here after you record. Everything stays on your device.';
     }
-    card?.focus();
-    place();
+    void tick().then(() => {
+      card?.focus();
+      place();
+    });
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
   });
 </script>
 

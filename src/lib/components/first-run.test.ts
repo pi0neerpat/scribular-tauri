@@ -75,11 +75,14 @@ describe('first run components', () => {
   });
 
   it('renders a non-modal tour without a full-screen click shield', () => {
-    const { body } = render(OnboardingTour, { props: { onNavigate: () => {}, onComplete: () => {} } });
-    expect(body).toContain("Let's take a quick tour.");
-    expect(body).toContain('Your permissions and speech model are getting ready below.');
-    expect(body).not.toMatch(/position:\s*fixed;[^"']*inset:\s*0/);
-    expect(body).toContain('pointer-events: none');
+    const tour = render(OnboardingTour, { props: { onNavigate: () => {}, onComplete: () => {} } });
+    const record = render(RecordView, { props: { speechReady: true } });
+    const composed = `<main>${record.body}${tour.body}</main>`;
+    expect(composed).toContain("Let's take a quick tour.");
+    expect(composed).toContain('Your permissions and speech model are getting ready below.');
+    expect(composed).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
+    expect(composed).not.toMatch(/position:\s*fixed;[^"']*inset:\s*0/);
+    expect(composed).toContain('pointer-events: none');
   });
 
   it('provides a labelled sample badge and example banner', () => {
