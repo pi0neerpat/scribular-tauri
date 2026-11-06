@@ -6,8 +6,8 @@
 
 1. Grant Accessibility and Screen Recording access to the terminal or agent host that runs `uitest` in System Settings → Privacy & Security. Restart that host after changing permissions.
 2. Install `ffmpeg` with `brew install ffmpeg`.
-3. Create the local signing identity once with `bash tools/uitest/setup-signing.sh`. It adds a self-signed "Scribular Local Dev" codesigning certificate to the login keychain (nothing is written to the repo). Apps signed with it keep the same identity across rebuilds, so the keychain "Always Allow" and the Screen & System Audio Recording grant survive a rebuild: you answer each prompt once, by hand, on the first signed launch.
-4. Fallback only, not needed with signed builds: if a keychain prompt still appears, `handle-keychain` can answer it with the Mac login password from the environment:
+3. Create the local signing identity once with `bash tools/uitest/setup-signing.sh`. It adds a self-signed "Scribular Local Dev" codesigning certificate to the login keychain (nothing is written to the repo). Apps signed with it keep the same identity across rebuilds, so the Screen & System Audio Recording grant and the keychain ACL survive a rebuild: you answer each prompt once, by hand, on the first signed launch.
+4. Put the Mac login password in the environment. `trust-build.sh` (below) needs it after every build, and `handle-keychain` uses it as a fallback for any prompt that still appears:
 
    ```sh
    export UITEST_KEYCHAIN_PASSWORD='…'
@@ -17,10 +17,11 @@
 
 ## Build and run
 
-Build the signed app separately; `launch` never builds:
+Build the signed app separately; `launch` never builds. After every build, run `trust-build.sh`: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (its partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt.
 
 ```sh
 APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --bundles app
+bash tools/uitest/trust-build.sh /path/to/Scribular.app
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
 ```
 
