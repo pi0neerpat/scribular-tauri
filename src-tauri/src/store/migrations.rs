@@ -14,8 +14,14 @@ const MIGRATIONS: &[Migration] = &[
     v3_queue_restore_status,
     v4_audio_kept,
     v5_diarization,
-    v6_summary_undo,
+    v6_sample_sessions,
+    v7_summary_undo,
 ];
+
+fn v6_sample_sessions(tx: &Transaction) -> Result<()> {
+    tx.execute_batch("ALTER TABLE sessions ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0;")?;
+    Ok(())
+}
 
 fn v2_summary_queue(tx: &Transaction) -> Result<()> {
     tx.execute_batch("CREATE TABLE summary_queue (position INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE, prompt_id TEXT NOT NULL);")?;
@@ -48,7 +54,7 @@ fn v5_diarization(tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
-fn v6_summary_undo(tx: &Transaction) -> Result<()> {
+fn v7_summary_undo(tx: &Transaction) -> Result<()> {
     tx.execute_batch(
         "ALTER TABLE sessions ADD COLUMN previous_summary TEXT;
          ALTER TABLE sessions ADD COLUMN previous_prompt_id TEXT;
@@ -129,4 +135,29 @@ fn v1_initial(tx: &Transaction) -> Result<()> {
     }
     settings::insert(tx, settings::ACTIVE_PROMPT_ID, &defaults.active_prompt_id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::v6_sample_sessions;
+    use rusqlite::Connection;
+
+    #[test]
+    fn v6_marks_existing_sessions_as_non_samples_without_changing_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT); INSERT INTO sessions VALUES ('existing', 'Keep me');").unwrap();
+        let tx = conn.transaction().unwrap();
+        v6_sample_sessions(&tx).unwrap();
+        tx.commit().unwrap();
+
+        let (title, is_sample): (String, bool) = conn
+            .query_row(
+                "SELECT title, is_sample FROM sessions WHERE id = 'existing'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Keep me");
+        assert!(!is_sample);
+    }
 }

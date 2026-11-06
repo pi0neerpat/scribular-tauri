@@ -8,6 +8,11 @@ vi.mock('@tauri-apps/api/event', () => ({ listen }));
 const {
   accessDenied,
   appVersion,
+  completeOnboarding,
+  getOnboardingState,
+  getTelemetrySetting,
+  restoreSampleSessions,
+  setTelemetrySetting,
   checkForUpdates,
   getUpdateState,
   installUpdate,
@@ -30,6 +35,24 @@ describe('api', () => {
     invoke.mockResolvedValue({ name: 'scribular', version: '0.1.0' });
     await expect(appVersion()).resolves.toEqual({ name: 'scribular', version: '0.1.0' });
     expect(invoke).toHaveBeenCalledWith('app_version');
+  });
+
+  it('wraps onboarding, sample restore, and telemetry setting commands', async () => {
+    invoke.mockResolvedValueOnce({ completed: false })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('sample-id')
+      .mockResolvedValueOnce('undecided')
+      .mockResolvedValueOnce(undefined);
+    await expect(getOnboardingState()).resolves.toEqual({ completed: false });
+    await completeOnboarding();
+    await expect(restoreSampleSessions()).resolves.toBe('sample-id');
+    await expect(getTelemetrySetting()).resolves.toBe('undecided');
+    await setTelemetrySetting(false);
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual([
+      'get_onboarding_state', 'complete_onboarding', 'restore_sample_sessions',
+      'get_telemetry_setting', 'set_telemetry_setting',
+    ]);
+    expect(invoke).toHaveBeenLastCalledWith('set_telemetry_setting', { enabled: false });
   });
 
   it('onHeartbeat unwraps the event payload', async () => {

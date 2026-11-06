@@ -17,7 +17,7 @@ const session: Session = {
   id: 'session-1', title: 'Session', createdAt: 1, inputMode: 'mic', status: 'done', error: null,
   promptId: 'prompt-1', modelId: null, transcript: 'transcript text', plainTranscript: null, rawTranscript: null,
   speakerMap: null, diarizationState: 'none', summary: 'saved summary', durationMs: 1000, timings: null,
-  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null,
+  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
 };
 const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, starred: true }], activeId: 'prompt-1', createdId: null };
 

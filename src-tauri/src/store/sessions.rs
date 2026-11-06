@@ -121,6 +121,7 @@ pub struct SessionListItem {
     pub has_audio: bool,
     pub snippet: String,
     pub interrupted: bool,
+    pub is_sample: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -152,6 +153,7 @@ pub struct Session {
     pub previous_summary: Option<String>,
     pub previous_prompt_id: Option<String>,
     pub previous_model_id: Option<String>,
+    pub is_sample: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -223,7 +225,7 @@ const HAS_AUDIO: &str = "(audio_kept = 1 AND EXISTS \
 
 const COLUMNS: &str = "id, title, created_at, input_mode, status, error, prompt_id, model_id, \
                        transcript, summary, duration_ms, timings, plain_transcript, raw_transcript, \
-                       speaker_map, diarization_state, previous_summary, previous_prompt_id, previous_model_id";
+                       speaker_map, diarization_state, previous_summary, previous_prompt_id, previous_model_id, is_sample";
 
 /// What [`Store::kept_audio`] found for a session.
 #[derive(Debug, PartialEq)]
@@ -251,7 +253,8 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
     let mode: String = row.get(3)?;
     let timings: Option<String> = row.get(11)?;
     let created_at: i64 = row.get(2)?;
-    let has_audio: bool = row.get(19)?;
+    let is_sample: bool = row.get(19)?;
+    let has_audio: bool = row.get(20)?;
     let speaker_map: Option<String> = row.get(14)?;
     let diarization_state: String = row.get(15)?;
     Ok(Session {
@@ -287,6 +290,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
         previous_summary: row.get(16)?,
         previous_prompt_id: row.get(17)?,
         previous_model_id: row.get(18)?,
+        is_sample,
     })
 }
 
@@ -461,7 +465,7 @@ impl Store {
                          WHEN length(COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''))) > 100
                          THEN substr(COALESCE(NULLIF(summary, ''), NULLIF(transcript, '')), 1, 100) || '…'
                          ELSE COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''), 'No summary available') END,
-                    (status = 'failed' AND error = 'interrupted')
+                    (status = 'failed' AND error = 'interrupted'), is_sample
                  FROM sessions
                      ORDER BY created_at DESC, rowid DESC"
             ))?;
@@ -475,6 +479,7 @@ impl Store {
                     has_audio: r.get(5)?,
                     snippet: r.get(6)?,
                     interrupted: r.get(7)?,
+                    is_sample: r.get(8)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
