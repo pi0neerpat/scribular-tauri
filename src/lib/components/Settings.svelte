@@ -121,10 +121,11 @@
   async function refreshApps() {
     try {
       apps = await listAudioApps();
-      denied = null;
+      if (denied !== 'notifications') denied = null;
     } catch (e) {
-      denied = deniedPrivacy(String(e));
-      if (!denied) error = String(e);
+      const pane = deniedPrivacy(String(e));
+      if (pane) denied = pane;
+      else error = String(e);
     }
   }
 
@@ -132,7 +133,7 @@
   async function changeMode() {
     await save();
     if (settings && settings.inputMode !== 'mic') await refreshApps();
-    else denied = null;
+    else if (denied !== 'notifications') denied = null;
   }
 
   async function save() {
@@ -149,13 +150,13 @@
   async function saveAppSettings() {
     const next = $appSettings;
     try {
-      denied = null;
       if (next.notifySummaryComplete && !notifyWasEnabled) {
         if (!(await requestNotificationPermission())) {
           appSettings.update((s) => ({ ...s, notifySummaryComplete: false }));
           denied = 'notifications';
         } else {
           notifyWasEnabled = true;
+          denied = null;
         }
       }
       if (!next.notifySummaryComplete) notifyWasEnabled = false;
@@ -298,7 +299,7 @@
       <button onclick={() => openPrivacySettings(denied!)}>Open System Settings</button>
     </p>
   {/if}
-  {#if denied === 'notifications'}
+  {#if denied === 'notifications' && category !== 'General'}
     <p role="status">
       Notifications are disabled. Allow them for Scribular in System Settings.
       <button onclick={() => openPrivacySettings('notifications').catch((e) => (error = String(e)))}>Open System Settings</button>

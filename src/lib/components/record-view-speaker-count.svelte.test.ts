@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import type { SessionProgress } from '../types/SessionProgress';
+import type { Session } from '../types/Session';
 
 const cancelJob = vi.fn();
 const currentRecording = vi.fn();
@@ -135,6 +136,40 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(target.textContent).toContain('new startup failed'));
     expect(sessionStorage.getItem('scribular.inFlightStartAttempt')).toBeNull();
     expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBeNull();
+    unmount(app);
+    target.remove();
+  });
+
+  it('ignores an older fetch after a newer update for the same session', async () => {
+    let resolveOld!: (session: Session) => void;
+    let resolveNew!: (session: Session) => void;
+    const result: Session = {
+      id: recording.id, inputMode: 'mic', status: 'done', title: '', createdAt: 0,
+      error: null, promptId: null, modelId: null,
+      transcript: '', plainTranscript: null, rawTranscript: null, speakerMap: null,
+      diarizationState: 'none', summary: '', durationMs: null, timings: null,
+      hasAudio: false, audioExpiresAt: null,
+    } as const;
+    onSessionProgress.mockImplementation(async (callback) => {
+      emitProgress = callback;
+      return () => {};
+    });
+    getSession
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveNew = resolve; }));
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 1, stepCount: 1, message: 'Done' });
+    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 2, stepCount: 2, message: 'Done' });
+    await vi.waitFor(() => expect(getSession).toHaveBeenCalledTimes(2));
+
+    resolveNew({ ...result, id: recording.id, title: 'new result', summary: 'new summary' });
+    await vi.waitFor(() => expect(target.textContent).toContain('new summary'));
+    resolveOld({ ...result, id: recording.id, title: 'old result', summary: 'old summary' });
+    await Promise.resolve();
+    expect(target.textContent).toContain('new summary');
+    expect(target.textContent).not.toContain('old summary');
     unmount(app);
     target.remove();
   });

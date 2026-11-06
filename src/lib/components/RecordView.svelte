@@ -61,6 +61,7 @@
   let progress = $state<SessionProgress | null>(null);
   // The finished session's result.
   let result = $state<Session | null>(null);
+  let resultFetch = 0;
   let busy = $state(false);
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
@@ -135,21 +136,25 @@
       if (p.sessionId !== sessionId) return;
       progress = p;
       status = p.state;
+      const fetch = ++resultFetch;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
         // Keep the id while awaitingModel, so a reload still finds the session.
         if (finished.includes(p.state)) remember(null);
-        getSession(p.sessionId).then((s) => { if (sessionId === p.sessionId) result = s; });
+        getSession(p.sessionId).then((s) => {
+          if (sessionId === p.sessionId && resultFetch === fetch) result = s;
+        });
       }
     });
     // The window may reload while a session runs.
     currentRecording().then(async (recording) => {
       const id = recording ?? sessionStorage.getItem(IN_FLIGHT_KEY);
       if (!id) return;
+      const fetch = ++resultFetch;
       sessionId = id;
       if (recording) status = 'recording';
       const session = await getSession(id);
       // Start may have begun a new session while this fetch ran.
-      if (sessionId !== id) return;
+      if (sessionId !== id || resultFetch !== fetch) return;
       if (!recording && (!session || finished.includes(session.status))) {
         // It ended while the window reloaded.
         sessionId = null;
@@ -181,6 +186,7 @@
       return;
     }
     busy = true;
+    resultFetch++;
     error = denied = null;
     result = progress = null;
     let attempt: string | null = null;
@@ -193,6 +199,7 @@
       sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, String(settings.multiSpeaker));
       const session = await startRecording(settings.inputMode, app, title);
       if (sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) sessionStorage.removeItem(IN_FLIGHT_START_KEY);
+      resultFetch++;
       sessionId = session.id;
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';

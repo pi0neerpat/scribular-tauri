@@ -151,7 +151,7 @@
     <Settings bind:this={settings} {navigationLocked} />
   {/if}
   <p>Heartbeat: {beats}</p>
-  {#if error}<p role="alert">{error}</p>{/if}
+  {#if error && version}<p role="alert">{error}</p>{/if}
 </main>
 {:else if error}
   <p role="alert">{error}</p>
