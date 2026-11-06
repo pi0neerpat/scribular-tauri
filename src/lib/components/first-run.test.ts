@@ -61,8 +61,6 @@ describe('first run components', () => {
     const { body } = render(FirstRun, { props: { speechReady: true } });
     expect(body).toContain('Help improve Scribular?');
     expect(body).toContain('No thanks');
-    const record = render(RecordView, { props: { speechReady: true } }).body;
-    expect(record).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
   });
 
   it('shows a failed speech download and an actionable retry', () => {

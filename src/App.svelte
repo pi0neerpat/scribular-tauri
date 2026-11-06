@@ -66,8 +66,8 @@
     }
   }
 
-  function showTour() {
-    navigate('record');
+  function showTour(event: MouseEvent) {
+    navigate('record', event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined);
     tourRun++;
     tourOpen = true;
   }
