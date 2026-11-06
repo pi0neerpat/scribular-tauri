@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appVersion, lockedState, onHeartbeat, takeEncryptionNotice } from './lib/api';
+  import { appVersion, completeOnboarding, getOnboardingState, lockedState, onHeartbeat, takeEncryptionNotice } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -8,6 +8,7 @@
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import TrialBadge from './lib/components/TrialBadge.svelte';
   import UpdateBar from './lib/components/UpdateBar.svelte';
+  import OnboardingTour from './lib/components/OnboardingTour.svelte';
   import { followAccessState } from './lib/license';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
@@ -21,6 +22,8 @@
   let beats = $state(0);
   let view = $state<'record' | 'settings'>('record');
   let speechReady = $state(false);
+  let tourOpen = $state(false);
+  let tourRun = $state(0);
   let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
 
   function navigate(next: typeof view, opener?: HTMLElement) {
@@ -33,9 +36,14 @@
     lockedState()
       .then((reason) => {
         gate = reason ? { locked: reason } : 'open';
-        if (!reason) takeEncryptionNotice()
+        if (!reason) {
+          takeEncryptionNotice()
             .then((n) => (notice = n))
             .catch((e) => (error = String(e)));
+          getOnboardingState()
+            .then((state) => { if (tourRun === 0) tourOpen = !state.completed; })
+            .catch((e) => { error = String(e); if (tourRun === 0) tourOpen = true; });
+        }
       })
       .catch((e) => (error = String(e)));
     appVersion()
@@ -48,6 +56,21 @@
       stopLicense();
     };
   });
+
+  async function finishTour() {
+    try {
+      await completeOnboarding();
+      tourOpen = false;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  function showTour(event: MouseEvent) {
+    navigate('record', event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined);
+    tourRun++;
+    tourOpen = true;
+  }
 </script>
 
 {#if typeof gate === 'object'}
@@ -73,7 +96,8 @@
   {/if}
   <nav>
     <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
-    <button onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
+    <button data-tour="settings" onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
+    <button onclick={showTour}>Show tour</button>
     <TrialBadge onclick={() => navigate('settings')} />
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
@@ -86,6 +110,7 @@
   {#if view === 'settings'}
     <Settings bind:this={settings} />
   {/if}
+  {#if tourOpen}{#key tourRun}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/key}{/if}
   <p>Heartbeat: {beats}</p>
 </main>
 {:else if error}

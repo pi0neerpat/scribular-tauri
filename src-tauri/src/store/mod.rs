@@ -7,6 +7,7 @@ pub mod key;
 mod migrations;
 mod plaintext_migration;
 mod prompts;
+mod samples;
 mod sessions;
 mod settings;
 
@@ -23,8 +24,8 @@ pub use sessions::{
     AUDIO_RETENTION_MS,
 };
 pub use settings::{
-    RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION,
-    SUMMARY_MODEL_ID,
+    RecordingSettings, ACTIVE_PROMPT_ID, ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL,
+    SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION, SUMMARY_MODEL_ID,
 };
 
 #[derive(Debug)]
