@@ -1,0 +1,27 @@
+# Records the 12 s fixture through App audio and checks the real transcript and summary.
+# Template for recording tests: App audio + `play`, never the microphone.
+launch
+expect-not "Getting Scribular ready" timeout 900s
+# loop keeps afplay playing so it is listed in the App picker
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "Settings"
+click "App audio" index 1
+click "Refresh"
+# the app list must load before the menu opens; the open menu does not update
+wait 6s
+click "Choose an app…"
+click "afplay"
+# the first click after the menu closes is swallowed
+wait 1s
+click "Record" index 1
+# capture follows the afplay process running at Start, and a loop restart is a new process: start one fresh full clip
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+click "Stop"
+stop-audio
+# phrase seen identically in 4 recordings of this fixture (2026-11-05); assert fixture words, never summary wording
+expect "since we last met" timeout 180s
+# accessibility text joins the header as "Summary· <style> · <model>"
+expect "Summary·" timeout 300s
+quit

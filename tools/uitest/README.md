@@ -39,6 +39,16 @@ swift run --package-path tools/uitest uitest tools/uitest/scenarios/keychain-aft
 
 Clear it with `rm -rf ~/Library/Caches/scribular-uitest` only to free disk space. Do not clear it to "fix" a failing test: a missing model means a 1.85 GB re-download, not a different result.
 
+### Recording tests
+
+Record a fixture file through App audio, never the microphone. `system-audio-smoke.uitest` is the template:
+
+1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
+2. In Settings choose `App audio`, click `Refresh`, `wait 6s`, then open `Choose an app…` and click `afplay`. The open menu does not update, so the list must load first. Add `wait 1s` after picking, because the first click after the menu closes is swallowed.
+3. Go to Record and run `play "fixture.wav"` once more without `loop`, right before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
+4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
+5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists.
+
 The runner uses AVFoundation's `Capture screen 0` device (`0:none`). Check that device with `ffmpeg -f avfoundation -list_devices true -i ""` if screen capture does not start. Keychain typing and the Accessibility labels still need verification in a live desktop session after a rebuild.
 
 ## Script commands
