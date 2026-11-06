@@ -143,7 +143,18 @@ where
             sink.push(&buf);
         },
         move |e| {
-            eprintln!("microphone: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "audio",
+                &format!(
+                    "microphone error ({})",
+                    if is_fatal(&e) {
+                        "device_lost"
+                    } else {
+                        "stream_error"
+                    }
+                ),
+            );
             if is_fatal(&e) {
                 let _ = lost.send(());
             }

@@ -107,8 +107,8 @@ impl Store {
     /// migrations and marks sessions a crash left mid-capture as failed.
     pub fn open(path: &Path, keys: &dyn KeyStore) -> Result<Self> {
         let locked = |reason| {
-            move |e: String| {
-                eprintln!("store locked ({reason:?}): {e}");
+            move |_e: String| {
+                crate::diag::log::log("ERROR", "store", &format!("store locked ({reason:?})"));
                 StoreError::Locked(reason)
             }
         };
@@ -181,7 +181,14 @@ impl Store {
                 }
                 for (from, to) in moved.iter().rev() {
                     if let Err(re) = std::fs::rename(to, from) {
-                        eprintln!("start fresh: undo rename failed: {re}");
+                        crate::diag::log::log(
+                            "ERROR",
+                            "store",
+                            &format!(
+                                "restoring database after start-fresh failed ({})",
+                                crate::diag::log::kind(&re)
+                            ),
+                        );
                     }
                 }
                 Err(e)
@@ -218,8 +225,8 @@ const ENCRYPTION_NOTICE: &str = "encryption_notice";
 
 /// R5 row 1: generate, store, and read back before any DB uses the key.
 fn store_new_key(keys: &dyn KeyStore) -> Result<Key> {
-    let write_failed = |e: String| {
-        eprintln!("store locked (KeychainWriteFailed): {e}");
+    let write_failed = |_e: String| {
+        crate::diag::log::log("ERROR", "store", "store locked (KeychainWriteFailed)");
         StoreError::Locked(LockReason::KeychainWriteFailed)
     };
     let key = new_key().map_err(write_failed)?;
@@ -238,8 +245,8 @@ fn open_keyed(path: &Path, key: &Key) -> Result<Connection> {
     // Before any read: plain SQLite would ignore the key and read plaintext.
     check_sqlcipher(&conn)?;
     // The first read decrypts page 1; a wrong key fails here, before any write.
-    if let Err(e) = conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(())) {
-        eprintln!("store locked (WrongKey): {e}");
+    if let Err(_e) = conn.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(())) {
+        crate::diag::log::log("ERROR", "store", "store locked (WrongKey)");
         return Err(StoreError::Locked(LockReason::WrongKey));
     }
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -270,7 +277,11 @@ fn check_sqlcipher(c: &Connection) -> Result<()> {
     let (version, provider) = cipher_info(c)?;
     let ok = !version.is_empty() && (!cfg!(target_os = "macos") || provider == "commoncrypto");
     if !ok {
-        eprintln!("store locked (NotSqlcipherBuild): version {version:?}, provider {provider:?}");
+        crate::diag::log::log(
+            "ERROR",
+            "store",
+            &format!("store locked (NotSqlcipherBuild): version {version}, provider {provider}"),
+        );
         return Err(StoreError::Locked(LockReason::NotSqlcipherBuild));
     }
     Ok(())

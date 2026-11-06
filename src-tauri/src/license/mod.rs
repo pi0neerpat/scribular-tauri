@@ -352,7 +352,7 @@ impl Licensing {
             keys,
             api,
             clock,
-            Box::new(|m| eprintln!("[license] {m}")),
+            Box::new(|_| crate::diag::log::log("INFO", "license", "licensing state updated")),
         )
     }
 

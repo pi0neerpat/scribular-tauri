@@ -109,7 +109,14 @@ impl JobQueue {
                         prompt_id,
                     }))
             }
-            Err(e) => eprintln!("restoring summary queue failed: {e}"),
+            Err(e) => crate::diag::log::log(
+                "ERROR",
+                "jobs",
+                &format!(
+                    "restoring summary queue failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            ),
         }
         let worker = {
             let shared = Arc::clone(&shared);
@@ -235,7 +242,14 @@ impl JobQueue {
         match &mut state.running {
             Some(r) if r.session_id == session_id => {
                 if let Err(e) = self.shared.store.cancel_running_summary(session_id) {
-                    eprintln!("cancel {session_id}: persisting cancellation failed: {e}");
+                    crate::diag::log::log(
+                        "ERROR",
+                        "jobs",
+                        &format!(
+                            "persisting cancellation for {session_id} failed ({})",
+                            crate::diag::log::kind(&e)
+                        ),
+                    );
                     return false;
                 }
                 r.cancelled_by_user = true;
@@ -252,7 +266,14 @@ impl JobQueue {
             Ok(Some(status)) => status,
             Ok(None) => return,
             Err(e) => {
-                eprintln!("cancel {session_id}: removing queued summary failed: {e}");
+                crate::diag::log::log(
+                    "ERROR",
+                    "jobs",
+                    &format!(
+                        "removing queued summary {session_id} failed ({})",
+                        crate::diag::log::kind(&e)
+                    ),
+                );
                 return;
             }
         };
@@ -323,8 +344,19 @@ fn work(shared: &Shared) {
                     match catch_unwind(AssertUnwindSafe(|| shared.loader.load(&id))) {
                         Ok(Ok(model)) => llm = Some((id, model)),
                         // The job loads it again and reports the error.
-                        Ok(Err(e)) => eprintln!("preloading the summary model failed: {e}"),
-                        Err(_) => eprintln!("preloading the summary model crashed"),
+                        Ok(Err(e)) => crate::diag::log::log(
+                            "ERROR",
+                            "jobs",
+                            &format!(
+                                "preloading summary model failed ({})",
+                                crate::diag::log::kind(&e)
+                            ),
+                        ),
+                        Err(_) => crate::diag::log::log(
+                            "ERROR",
+                            "jobs",
+                            "preloading summary model panicked",
+                        ),
                     }
                 }
                 continue;
@@ -369,16 +401,26 @@ fn work(shared: &Shared) {
                     .store
                     .set_status(&job.session_id, SessionStatus::Summarizing, None)
             {
-                eprintln!(
-                    "queue {}: preserving interrupted job failed: {e}",
-                    job.session_id
+                crate::diag::log::log(
+                    "ERROR",
+                    "jobs",
+                    &format!(
+                        "preserving interrupted job {} failed ({})",
+                        job.session_id,
+                        crate::diag::log::kind(&e)
+                    ),
                 );
             }
         } else if !requeued {
             if let Err(e) = shared.store.dequeue_summary(&job.session_id) {
-                eprintln!(
-                    "queue {}: removing persisted job failed: {e}",
-                    job.session_id
+                crate::diag::log::log(
+                    "ERROR",
+                    "jobs",
+                    &format!(
+                        "removing persisted job {} failed ({})",
+                        job.session_id,
+                        crate::diag::log::kind(&e)
+                    ),
                 );
             }
         }

@@ -16,6 +16,12 @@
     getUpdateState,
     installUpdate,
     onUpdateState,
+    getDiagnostics,
+    getTelemetrySetting,
+    setTelemetrySetting,
+    viewLogs,
+    reportTestError,
+    triggerTestPanic,
   } from '../api';
   import LicenseSettings from './LicenseSettings.svelte';
   import NoteStyles from './NoteStyles.svelte';
@@ -43,6 +49,8 @@
   let speakerModel = $state<ModelProgress | null>(null);
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
+  let telemetryOn = $state(false);
+  let diagnosticsStatus = $state<string | null>(null);
   let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
@@ -75,6 +83,7 @@
         // An event that arrived meanwhile is newer than the snapshot.
         if (!sawUpdate) update = current;
       } catch { /* Update status is optional while the rest of Settings loads. */ }
+      try { telemetryOn = (await getTelemetrySetting()) === 'on'; } catch { /* Privacy controls remain off if the setting cannot be read. */ }
       try {
         try {
           const removeListener = await onModelsProgress((p) => {
@@ -124,6 +133,28 @@
     } catch (e) {
       error = String(e);
     }
+  }
+
+  async function changeTelemetry() {
+    try {
+      await setTelemetrySetting(telemetryOn);
+      diagnosticsStatus = null;
+    } catch (e) {
+      telemetryOn = !telemetryOn;
+      diagnosticsStatus = String(e);
+    }
+  }
+
+  async function copyDiagnostics() {
+    try {
+      await navigator.clipboard.writeText(await getDiagnostics());
+      diagnosticsStatus = 'Diagnostics copied';
+    } catch { diagnosticsStatus = 'Failed to copy diagnostics'; }
+  }
+
+  async function openLogs() {
+    try { await viewLogs(); diagnosticsStatus = null; }
+    catch { diagnosticsStatus = 'Failed to open logs'; }
   }
 </script>
 
@@ -218,6 +249,21 @@
   <SummaryModel />
 
   <LicenseSettings />
+
+  <fieldset>
+    <legend>Privacy &amp; diagnostics</legend>
+    <label><input type="checkbox" bind:checked={telemetryOn} onchange={changeTelemetry} /> Send usage and error reports</label>
+    <button onclick={copyDiagnostics}>Copy diagnostics</button>
+    <button onclick={openLogs}>View logs</button>
+    {#if diagnosticsStatus}<p role="status">{diagnosticsStatus}</p>{/if}
+  </fieldset>
+  {#if import.meta.env.DEV}
+    <fieldset>
+      <legend>Developer</legend>
+      <button onclick={() => reportTestError().catch(() => (diagnosticsStatus = 'Failed to send test error'))}>Send test error</button>
+      <button onclick={() => triggerTestPanic().catch(() => (diagnosticsStatus = 'Failed to trigger test panic'))}>Trigger test panic</button>
+    </fieldset>
+  {/if}
 
   {#if denied}
     <p role="alert">
