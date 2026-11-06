@@ -358,7 +358,7 @@ fn diagnostic_event(event: &str) -> (&'static str, &'static str) {
 
 fn result_event(event: &str, action: &str) -> &'static str {
     let result = event
-        .rsplit_once(": ")
+        .split_once(": ")
         .map(|(_, result)| result)
         .unwrap_or("");
     match (
@@ -757,6 +757,18 @@ mod tests {
 
     #[test]
     fn app_diagnostic_events_are_closed_and_keep_license_outcomes_distinct() {
+        assert_eq!(
+            diagnostic_event(
+                "activation of brav***-042: Valid { expires_at: \"2030-01-01:00:00\" }"
+            ),
+            ("INFO", "activation_valid")
+        );
+        assert_eq!(
+            diagnostic_event(
+                "re-validation of brav***-042: Valid { expires_at: \"2030-01-01:00:00\" }"
+            ),
+            ("INFO", "revalidation_valid")
+        );
         assert_eq!(
             diagnostic_event("activation of brav***-042: InvalidKey"),
             ("INFO", "activation_invalid_key")

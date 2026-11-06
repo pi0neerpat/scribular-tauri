@@ -30,11 +30,13 @@ mod tests {
     #[test]
     fn marks_only_panics_inside_recovery_regions_as_handled() {
         assert!(!HANDLED.with(Cell::get));
+        let handled_inside = Cell::new(false);
         let result = catch_unwind(|| {
-            assert!(HANDLED.with(Cell::get));
+            handled_inside.set(HANDLED.with(Cell::get));
             panic!("recovered");
         });
         assert!(result.is_err());
+        assert!(handled_inside.get());
         assert!(!HANDLED.with(Cell::get));
     }
 }
