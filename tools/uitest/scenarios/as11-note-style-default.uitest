@@ -1,8 +1,8 @@
 launch
 click "Settings"
 expect "Note styles"
-# wait for the first-run section to go (speech model ready) so it cannot shift the layout mid-click
-expect-not "Getting Scribular ready"
+# wait for the first-run section to go (speech model re-downloads each run) so it cannot shift the layout mid-click
+expect-not "Getting Scribular ready" timeout 300s
 click "New style"
 click "Name" index 2
 type "UITest Recap"

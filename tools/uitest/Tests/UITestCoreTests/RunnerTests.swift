@@ -116,3 +116,14 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
                      options: RunOptions(timeout: 0.1, poll: 0.01, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4"),
                      out: { output.append($0) }))
 }
+
+@Test func stepTimeoutOverridesRunTimeout() {
+    let driver = FakeDriver()
+    driver.results = Array(repeating: .failure(.retryable("not found")), count: 40)
+    var output = [String]()
+    let passed = runSteps([Step(line: 1, source: "expect \"X\" timeout 0.1s", command: .expect("X"), timeout: 0.1)], driver: driver,
+                          options: RunOptions(timeout: 0.02, poll: 0.01, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4"),
+                          out: { output.append($0) })
+    #expect(!passed)
+    #expect(output[0] == "✗ 1 expect \"X\" timeout 0.1s: not found after 0.1s")
+}

@@ -49,6 +49,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `expect "text"` | Wait until visible text contains the value. |
 | `expect-not "text"` | Wait until visible text no longer contains the value. |
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
+| `<step> timeout 300s` | End any step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
 | `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Button, link, menu and similar actionable labels are printed in full; values and other text are cut at 80 characters; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |

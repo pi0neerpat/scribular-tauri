@@ -9,7 +9,7 @@ final class AXDriver: Driver {
     private let runDir: URL
     private let keychainPassword: String?
     private var application: NSRunningApplication?
-    private var keychainHandled = false  // the runner retries .launch; handle the prompt once per launch
+    private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?) {
         self.lifecycle = lifecycle
@@ -23,7 +23,9 @@ final class AXDriver: Driver {
         case .launch(let keepData):
             let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
             // a rebuilt (re-signed) app blocks on a keychain prompt before its window opens
-            if !keychainHandled && keychainWindow() != nil {
+            // re-arm once a prompt closes: setup reads two keychain items, so a second prompt can follow
+            if keychainWindow() == nil { keychainHandled = false }
+            else if !keychainHandled {
                 keychainHandled = true
                 if keychainPassword != nil { _ = try handleKeychain() }
                 else {

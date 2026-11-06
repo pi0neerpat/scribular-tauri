@@ -60,6 +60,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
 
     for step in steps {
         var started: Date?  // the wait window opens at the first retryable failure, not before the first attempt
+        let limit = step.timeout ?? options.timeout
         let detail: String?
         while true {
             do {
@@ -73,11 +74,11 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                     return false
                 case .retryable(let message):
                     if started == nil { started = Date() }
-                    let remaining = options.timeout - Date().timeIntervalSince(started ?? Date())
+                    let remaining = limit - Date().timeIntervalSince(started ?? Date())
                     if remaining <= 0 {
-                        let timeout = options.timeout == floor(options.timeout)
-                            ? String(Int(options.timeout))
-                            : String(format: "%.2f", options.timeout).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+                        let timeout = limit == floor(limit)
+                            ? String(Int(limit))
+                            : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
                         fail(step, "\(message) after \(timeout)s")
                         emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
                         return false
