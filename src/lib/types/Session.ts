@@ -4,7 +4,7 @@ import type { InputMode } from "./InputMode";
 import type { SessionStatus } from "./SessionStatus";
 import type { Timings } from "./Timings";
 
-export type Session = { id: string, title: string,
+export type Session = { id: string, title: string, 
 /**
  * Milliseconds since the Unix epoch.
  */
