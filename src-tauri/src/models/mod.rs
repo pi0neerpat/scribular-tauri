@@ -123,7 +123,10 @@ impl ModelManager {
             .unwrap_or_default();
         Self {
             dir,
-            running: specs.iter().map(|_| Arc::new(AtomicBool::new(false))).collect(),
+            running: specs
+                .iter()
+                .map(|_| Arc::new(AtomicBool::new(false)))
+                .collect(),
             download_locks: specs.iter().map(|_| AsyncMutex::new(())).collect(),
             specs,
             client: reqwest::Client::new(),

@@ -7,6 +7,7 @@ import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
+import type { ClearSessionsResult } from './types/ClearSessionsResult';
 import type { Heartbeat } from './types/Heartbeat';
 import type { InputMode } from './types/InputMode';
 import type { LockReason } from './types/LockReason';
@@ -87,6 +88,18 @@ export function takeEncryptionNotice(): Promise<boolean> {
 /** Resolves to whether the session existed. */
 export function deleteSession(id: string): Promise<boolean> {
   return invoke<boolean>('delete_session', { id });
+}
+
+export function clearAllSessions(): Promise<ClearSessionsResult> {
+  return invoke<ClearSessionsResult>('clear_all_sessions');
+}
+
+export function undoSummary(id: string): Promise<Session> {
+  return invoke<Session>('undo_summary', { id });
+}
+
+export function copyText(text: string): Promise<void> {
+  return invoke<void>('copy_text', { text });
 }
 
 export function listPrompts(): Promise<Prompt[]> {
@@ -178,6 +191,10 @@ export function regenerateSummary(sessionId: string, promptId: string): Promise<
 /** Stops the session's transcription or summary; resolves to whether it had either. */
 export function cancelJob(sessionId: string): Promise<boolean> {
   return invoke<boolean>('cancel_job', { sessionId });
+}
+
+export function recoverSession(id: string): Promise<void> {
+  return invoke<void>('recover_session', { id });
 }
 
 /** Development only: transcribes a 16-bit, 16 kHz mono WAV file. */

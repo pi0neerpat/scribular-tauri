@@ -14,6 +14,7 @@ const MIGRATIONS: &[Migration] = &[
     v3_queue_restore_status,
     v4_audio_kept,
     v5_diarization,
+    v6_summary_undo,
 ];
 
 fn v2_summary_queue(tx: &Transaction) -> Result<()> {
@@ -43,6 +44,15 @@ fn v5_diarization(tx: &Transaction) -> Result<()> {
          ALTER TABLE sessions ADD COLUMN raw_transcript TEXT;
          ALTER TABLE sessions ADD COLUMN speaker_map TEXT;
          ALTER TABLE sessions ADD COLUMN diarization_state TEXT NOT NULL DEFAULT 'none';",
+    )?;
+    Ok(())
+}
+
+fn v6_summary_undo(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE sessions ADD COLUMN previous_summary TEXT;
+         ALTER TABLE sessions ADD COLUMN previous_prompt_id TEXT;
+         ALTER TABLE sessions ADD COLUMN previous_model_id TEXT;",
     )?;
     Ok(())
 }

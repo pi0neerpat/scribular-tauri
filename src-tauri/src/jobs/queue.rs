@@ -246,6 +246,39 @@ impl JobQueue {
         }
     }
 
+    pub fn delete_session_safe(&self, session_id: &str) -> Result<bool, JobError> {
+        let Some(session) = self.shared.store.get_session(session_id)? else {
+            return Ok(false);
+        };
+        if matches!(
+            session.status,
+            SessionStatus::Recording | SessionStatus::Finalizing
+        ) {
+            return Err(JobError::Busy(session.status));
+        }
+        self.cancel(session_id);
+        Ok(self.shared.store.delete_session(session_id)?)
+    }
+
+    pub fn clear_all_sessions(&self) -> Result<(usize, usize), JobError> {
+        let sessions = self.shared.store.list_sessions()?;
+        let mut deleted = 0;
+        let mut skipped = 0;
+        for session in sessions {
+            if matches!(
+                session.status,
+                SessionStatus::Recording | SessionStatus::Finalizing
+            ) {
+                skipped += 1;
+                continue;
+            }
+            self.cancel(&session.id);
+            deleted += usize::from(self.shared.store.delete_session(&session.id)?);
+        }
+        self.shared.store.vacuum()?;
+        Ok((deleted, skipped))
+    }
+
     fn cancel_finalizing(&self, session_id: &str) {
         let store = &self.shared.store;
         let status = match store.cancel_queued_summary(session_id) {

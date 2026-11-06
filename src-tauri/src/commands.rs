@@ -84,6 +84,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Heartbeat::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
     Session::export_all(cfg)?;
+    ClearSessionsResult::export_all(cfg)?;
     SessionPatch::export_all(cfg)?;
     Prompt::export_all(cfg)?;
     PromptList::export_all(cfg)?;
@@ -160,8 +161,47 @@ pub fn update_session(
 }
 
 #[tauri::command]
-pub fn delete_session(store: State<Arc<Store>>, id: String) -> Result<bool, String> {
-    store.delete_session(&id).map_err(|e| e.to_string())
+pub fn delete_session(jobs: State<Arc<JobQueue>>, id: String) -> Result<bool, String> {
+    jobs.delete_session_safe(&id).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearSessionsResult {
+    pub deleted: usize,
+    pub skipped: usize,
+}
+
+#[tauri::command]
+pub fn clear_all_sessions(jobs: State<Arc<JobQueue>>) -> Result<ClearSessionsResult, String> {
+    let (deleted, skipped) = jobs.clear_all_sessions().map_err(|e| e.to_string())?;
+    Ok(ClearSessionsResult { deleted, skipped })
+}
+
+#[tauri::command]
+pub fn undo_summary(store: State<Arc<Store>>, id: String) -> Result<Session, String> {
+    store.undo_summary(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn copy_text(text: String) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("/usr/bin/pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("start clipboard: {e}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or("clipboard input unavailable")?
+        .write_all(text.as_bytes())
+        .map_err(|e| format!("write clipboard: {e}"))?;
+    let status = child.wait().map_err(|e| format!("finish clipboard: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("clipboard command failed".into())
+    }
 }
 
 #[tauri::command]
@@ -426,6 +466,11 @@ pub fn regenerate_summary(
 #[tauri::command]
 pub fn cancel_job(recorder: State<Arc<Recorder>>, session_id: String) -> bool {
     recorder.cancel(&session_id)
+}
+
+#[tauri::command]
+pub fn recover_session(recorder: State<Arc<Recorder>>, id: String) -> Result<(), String> {
+    recorder.recover(&id)
 }
 
 #[tauri::command]

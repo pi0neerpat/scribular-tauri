@@ -20,7 +20,7 @@ pub use prompts::Prompt;
 pub use sessions::{
     now_ms, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, Session,
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
-    AUDIO_RETENTION_MS,
+    AUDIO_RETENTION_MS, INTERRUPTED,
 };
 pub use settings::{
     RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION,
@@ -32,6 +32,7 @@ pub enum StoreError {
     Sqlite(rusqlite::Error),
     Json(serde_json::Error),
     NotFound(String),
+    Busy,
     /// The database was written by a newer build with more migrations.
     SchemaTooNew {
         found: u32,
@@ -54,6 +55,7 @@ impl fmt::Display for StoreError {
             Self::Sqlite(e) => write!(f, "database error: {e}"),
             Self::Json(e) => write!(f, "stored JSON is invalid: {e}"),
             Self::NotFound(what) => write!(f, "{what} not found"),
+            Self::Busy => f.write_str("session is busy"),
             Self::SchemaTooNew { found, known } => write!(
                 f,
                 "database schema version {found} is newer than this app supports ({known})"

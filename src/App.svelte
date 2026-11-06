@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appVersion, lockedState, onHeartbeat, takeEncryptionNotice } from './lib/api';
+  import { appVersion, listSessions, lockedState, onHeartbeat, onSessionProgress, takeEncryptionNotice } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -8,6 +8,7 @@
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import TrialBadge from './lib/components/TrialBadge.svelte';
   import UpdateBar from './lib/components/UpdateBar.svelte';
+  import SessionHistory from './lib/components/SessionHistory.svelte';
   import { followAccessState } from './lib/license';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
@@ -19,7 +20,8 @@
   let version = $state<AppVersion | null>(null);
   let error = $state<string | null>(null);
   let beats = $state(0);
-  let view = $state<'record' | 'settings'>('record');
+  let interrupted = $state(0);
+  let view = $state<'record' | 'history' | 'settings'>('record');
   let speechReady = $state(false);
   let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
 
@@ -41,10 +43,14 @@
     appVersion()
       .then((v) => (version = v))
       .catch((e) => (error = String(e)));
+    const refreshInterrupted = () => listSessions().then((sessions) => (interrupted = sessions.filter((s) => s.interrupted).length));
+    refreshInterrupted().catch(() => {});
+    const progress = onSessionProgress(() => { refreshInterrupted().catch(() => {}); });
     const unlisten = onHeartbeat((beat) => (beats = beat.seq));
     const stopLicense = followAccessState();
     return () => {
       unlisten.then((fn) => fn());
+      progress.then((fn) => fn());
       stopLicense();
     };
   });
@@ -62,6 +68,11 @@
       <button onclick={() => (notice = false)}>Dismiss</button>
     </p>
   {/if}
+  {#if interrupted}
+    <p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'} — recover?
+      <button onclick={() => navigate('history')}>Recover</button>
+    </p>
+  {/if}
   <FirstRun bind:speechReady />
   <ModelStatus />
   {#if version}
@@ -73,6 +84,7 @@
   {/if}
   <nav>
     <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
+    <button onclick={(event) => navigate('history', event.currentTarget)} aria-pressed={view === 'history'}>History</button>
     <button onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
     <TrialBadge onclick={() => navigate('settings')} />
   </nav>
@@ -83,6 +95,7 @@
       onEnterLicense={() => navigate('settings')}
     />
   </div>
+  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} /></div>
   {#if view === 'settings'}
     <Settings bind:this={settings} />
   {/if}

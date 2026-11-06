@@ -89,6 +89,70 @@ fn sessions_persist_across_reopen() {
 }
 
 #[test]
+fn history_snippets_are_capped_and_fall_back_to_transcript_or_empty_copy() {
+    let db = TempDb::new();
+    let store = db.open();
+    let long = store.create_session(&new_session("long")).unwrap();
+    let transcript = store.create_session(&new_session("transcript")).unwrap();
+    let empty = store.create_session(&new_session("empty")).unwrap();
+    store
+        .save_transcript(&transcript.id, "spoken words", 1000)
+        .unwrap();
+    store
+        .finish_summary(
+            &long.id,
+            &"x".repeat(101),
+            "style",
+            "model",
+            &Timings::default(),
+        )
+        .unwrap();
+    let rows = store.list_sessions().unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        [empty.id.as_str(), transcript.id.as_str(), long.id.as_str()]
+    );
+    assert_eq!(rows[0].snippet, "No summary available");
+    assert_eq!(rows[1].snippet, "spoken words");
+    assert_eq!(rows[2].snippet, format!("{}…", "x".repeat(100)));
+}
+
+#[test]
+fn successful_regeneration_keeps_one_undo_snapshot_and_undo_restores_provenance() {
+    let db = TempDb::new();
+    let store = db.open();
+    let session = store.create_session(&new_session("undo")).unwrap();
+    store
+        .finish_summary(
+            &session.id,
+            "first",
+            "style-a",
+            "model-a",
+            &Timings::default(),
+        )
+        .unwrap();
+    store
+        .finish_summary(
+            &session.id,
+            "second",
+            "style-b",
+            "model-b",
+            &Timings::default(),
+        )
+        .unwrap();
+    let updated = store.get_session(&session.id).unwrap().unwrap();
+    assert_eq!(updated.previous_summary.as_deref(), Some("first"));
+    assert_eq!(updated.previous_prompt_id.as_deref(), Some("style-a"));
+    assert_eq!(updated.previous_model_id.as_deref(), Some("model-a"));
+    let restored = store.undo_summary(&session.id).unwrap();
+    assert_eq!(restored.summary, "first");
+    assert_eq!(restored.prompt_id.as_deref(), Some("style-a"));
+    assert_eq!(restored.model_id.as_deref(), Some("model-a"));
+    assert_eq!(restored.previous_summary, None);
+    assert!(store.undo_summary(&session.id).is_err());
+}
+
+#[test]
 fn diarization_confirm_skip_rename_and_summary_substitution_persist() {
     let db = TempDb::new();
     let mut store = db.open();
@@ -685,8 +749,18 @@ fn reopening_fails_in_flight_sessions_and_keeps_their_audio() {
         let s = store.get_session(id).unwrap().unwrap();
         assert_eq!(s.status, SessionStatus::Failed);
         assert_eq!(s.error.as_deref(), Some("interrupted"));
+        assert!(s.has_audio);
         assert_eq!(store.audio_samples(id, AudioSource::Mic).unwrap(), [7; 8]);
     }
+    assert!(
+        store
+            .list_sessions()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == recording)
+            .unwrap()
+            .interrupted
+    );
     // Summarizing jobs are re-queued by U10, not failed here.
     let s = store.get_session(&summarizing).unwrap().unwrap();
     assert_eq!(s.status, SessionStatus::Summarizing);

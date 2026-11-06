@@ -16,7 +16,7 @@ const session: Session = {
   promptId: null, modelId: null, transcript: '', plainTranscript: 'plain',
   rawTranscript: Object.keys(names).map((id, i) => `${id}: quote ${i + 1}`).join('\n'), speakerMap: names,
   diarizationState: 'pending', summary: '', durationMs: 1000, timings: null, hasAudio: false,
-  audioExpiresAt: null,
+  audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null,
 };
 
 describe('speaker assignment card', () => {

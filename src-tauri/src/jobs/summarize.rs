@@ -76,7 +76,7 @@ impl Reporter<'_> {
 
     /// Records the end state; the stored summary is left as it was.
     fn stop(&mut self, stop: Stop) {
-        let (status, error, message) = match &stop {
+        let (mut status, error, mut message) = match &stop {
             Stop::Cancelled => (SessionStatus::Cancelled, None, "Summarization stopped."),
             Stop::Failed(e) => (SessionStatus::Failed, Some(e.as_str()), e.as_str()),
         };
@@ -85,6 +85,17 @@ impl Reporter<'_> {
                 "summarize {}: saving {status:?} failed: {e}",
                 self.session_id
             );
+        }
+        if self
+            .shared
+            .store
+            .get_session(self.session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.error.as_deref() == Some(crate::store::INTERRUPTED))
+        {
+            status = SessionStatus::Failed;
+            message = "Recovery stopped; saved audio is available to try again.";
         }
         let (step_index, step_count) = (self.step_index, self.step_count);
         self.emit(status, step_index, step_count, message);

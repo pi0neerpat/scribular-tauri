@@ -145,7 +145,7 @@ fn plaintext_fixture(dir: &TempDir) -> String {
         KEY.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ))
     .unwrap();
-    // Undo the v4 and v5 additions to make a genuine v3 plaintext database.
+    // Undo the v4 through v6 additions to make a genuine v3 plaintext database.
     conn.execute_batch(
         "DROP INDEX sessions_audio_kept;
          ALTER TABLE sessions DROP COLUMN audio_kept;
@@ -153,6 +153,9 @@ fn plaintext_fixture(dir: &TempDir) -> String {
          ALTER TABLE sessions DROP COLUMN speaker_map;
          ALTER TABLE sessions DROP COLUMN raw_transcript;
          ALTER TABLE sessions DROP COLUMN plain_transcript;
+         ALTER TABLE sessions DROP COLUMN previous_summary;
+         ALTER TABLE sessions DROP COLUMN previous_prompt_id;
+         ALTER TABLE sessions DROP COLUMN previous_model_id;
          PRAGMA user_version = 3;",
     )
     .unwrap();
@@ -255,7 +258,7 @@ fn as9_migrates_a_plaintext_database_once() {
     assert_eq!(keys.sets.load(Ordering::Relaxed), 1);
     let s = store.get_session(&id).unwrap().unwrap();
     assert!(s.transcript.contains(CANARY));
-    assert_eq!(store.schema_version().unwrap(), 5, "v3 → latest");
+    assert_eq!(store.schema_version().unwrap(), 6, "v3 → latest");
     assert_eq!(store.segments(&id, AudioSource::Mic).unwrap().len(), 1);
     let items = store.list_sessions().unwrap();
     assert_eq!(items.len(), 2);

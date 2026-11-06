@@ -119,6 +119,8 @@ pub struct SessionListItem {
     pub status: SessionStatus,
     pub duration_ms: Option<u32>,
     pub has_audio: bool,
+    pub snippet: String,
+    pub interrupted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -147,6 +149,9 @@ pub struct Session {
     /// When the sweep deletes the kept audio, in ms since the Unix epoch.
     #[ts(type = "number | null")]
     pub audio_expires_at: Option<i64>,
+    pub previous_summary: Option<String>,
+    pub previous_prompt_id: Option<String>,
+    pub previous_model_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -218,7 +223,7 @@ const HAS_AUDIO: &str = "(audio_kept = 1 AND EXISTS \
 
 const COLUMNS: &str = "id, title, created_at, input_mode, status, error, prompt_id, model_id, \
                        transcript, summary, duration_ms, timings, plain_transcript, raw_transcript, \
-                       speaker_map, diarization_state";
+                       speaker_map, diarization_state, previous_summary, previous_prompt_id, previous_model_id";
 
 /// What [`Store::kept_audio`] found for a session.
 #[derive(Debug, PartialEq)]
@@ -246,7 +251,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
     let mode: String = row.get(3)?;
     let timings: Option<String> = row.get(11)?;
     let created_at: i64 = row.get(2)?;
-    let has_audio: bool = row.get(16)?;
+    let has_audio: bool = row.get(19)?;
     let speaker_map: Option<String> = row.get(14)?;
     let diarization_state: String = row.get(15)?;
     Ok(Session {
@@ -279,6 +284,9 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
             })?,
         has_audio,
         audio_expires_at: has_audio.then_some(created_at + AUDIO_RETENTION_MS),
+        previous_summary: row.get(16)?,
+        previous_prompt_id: row.get(17)?,
+        previous_model_id: row.get(18)?,
     })
 }
 
@@ -378,7 +386,8 @@ impl Store {
             let tx = c.transaction()?;
             tx.execute("DELETE FROM summary_queue WHERE session_id = ?1", [id])?;
             tx.execute(
-                "UPDATE sessions SET status = 'cancelled', error = NULL
+                "UPDATE sessions SET status = CASE WHEN error = 'interrupted' THEN 'failed' ELSE 'cancelled' END,
+                    error = CASE WHEN error = 'interrupted' THEN error ELSE NULL END
                  WHERE id = ?1 AND status IN ('finalizing', 'awaitingModel', 'summarizing')",
                 [id],
             )?;
@@ -447,7 +456,13 @@ impl Store {
     pub fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO} FROM sessions
+                "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO},
+                    CASE WHEN status = 'summarizing' THEN 'Summarizing…'
+                         WHEN length(COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''))) > 100
+                         THEN substr(COALESCE(NULLIF(summary, ''), NULLIF(transcript, '')), 1, 100) || '…'
+                         ELSE COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''), 'No summary available') END,
+                    (status = 'failed' AND error = 'interrupted')
+                 FROM sessions
                      ORDER BY created_at DESC, rowid DESC"
             ))?;
             let rows = stmt.query_map([], |r| {
@@ -458,6 +473,8 @@ impl Store {
                     status: status_at(r, 3)?,
                     duration_ms: r.get(4)?,
                     has_audio: r.get(5)?,
+                    snippet: r.get(6)?,
+                    interrupted: r.get(7)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -495,12 +512,13 @@ impl Store {
 
     /// Moves a session to `status`, recording `error` (cleared when `None`).
     pub fn set_status(&self, id: &str, status: SessionStatus, error: Option<&str>) -> Result<()> {
-        let changed = self.with(|c| {
-            Ok(c.execute(
-                "UPDATE sessions SET status = ?2, error = ?3 WHERE id = ?1",
+        let changed = self.with(|c| Ok(c.execute(
+                "UPDATE sessions SET
+                    status = CASE WHEN error = 'interrupted' AND ?2 = 'cancelled' THEN 'failed' ELSE ?2 END,
+                    error = CASE WHEN error = 'interrupted' THEN error ELSE ?3 END
+                 WHERE id = ?1",
                 params![id, status.as_str(), error],
-            )?)
-        })?;
+            )?))?;
         if changed == 0 {
             return Err(session_not_found(id));
         }
@@ -533,9 +551,22 @@ impl Store {
         timings: &Timings,
     ) -> Result<()> {
         let timings = serde_json::to_string(timings)?;
-        let changed = self.with(|c| {
-            Ok(c.execute(
-                "UPDATE sessions SET summary = ?2, prompt_id = ?3, model_id = ?4, timings = ?5,
+        self.with(|c| {
+            let tx = c.transaction()?;
+            let recovering: bool = tx
+                .query_row(
+                    "SELECT COALESCE(error = 'interrupted', 0) FROM sessions WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            let changed = tx.execute(
+                "UPDATE sessions SET
+                     previous_summary = CASE WHEN summary <> '' THEN summary ELSE NULL END,
+                     previous_prompt_id = CASE WHEN summary <> '' THEN prompt_id ELSE NULL END,
+                     previous_model_id = CASE WHEN summary <> '' THEN model_id ELSE NULL END,
+                     summary = ?2, prompt_id = ?3, model_id = ?4, timings = ?5,
                      status = ?6, error = NULL
                  WHERE id = ?1",
                 params![
@@ -546,6 +577,109 @@ impl Store {
                     timings,
                     SessionStatus::Done.as_str()
                 ],
+            )?;
+            if changed == 0 {
+                return Err(session_not_found(id));
+            }
+            if recovering {
+                retain_or_delete_audio(&tx, id)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    pub fn undo_summary(&self, id: &str) -> Result<Session> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET summary = previous_summary,
+                 prompt_id = COALESCE(previous_prompt_id, prompt_id), model_id = previous_model_id,
+                 previous_summary = NULL, previous_prompt_id = NULL, previous_model_id = NULL
+             WHERE id = ?1 AND previous_summary IS NOT NULL
+                 AND status NOT IN ('recording', 'finalizing', 'awaitingModel', 'summarizing')",
+                [id],
+            )?)
+        })?;
+        if changed == 0 {
+            let Some(session) = self.get_session(id)? else {
+                return Err(session_not_found(id));
+            };
+            if matches!(
+                session.status,
+                SessionStatus::Recording
+                    | SessionStatus::Finalizing
+                    | SessionStatus::AwaitingModel
+                    | SessionStatus::Summarizing
+            ) {
+                return Err(super::StoreError::Busy);
+            }
+            return Err(StoreError::NotFound(format!(
+                "previous summary for session {id}"
+            )));
+        }
+        self.get_session(id)?.ok_or_else(|| session_not_found(id))
+    }
+
+    pub fn clear_segments(&self, id: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("DELETE FROM segments WHERE session_id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
+    pub fn save_recovered_transcript(
+        &self,
+        id: &str,
+        transcript: &str,
+        duration_ms: u32,
+        diarization: Option<(&str, &BTreeMap<String, String>)>,
+    ) -> Result<()> {
+        let map = diarization
+            .map(|(_, map)| serde_json::to_string(map))
+            .transpose()?;
+        let raw = diarization.map(|(raw, _)| raw);
+        self.with(|c| {
+            let changed = c.execute(
+                "UPDATE sessions SET transcript = ?2, plain_transcript = ?2, raw_transcript = ?3,
+                    speaker_map = ?4, diarization_state = CASE WHEN ?3 IS NULL THEN 'none' ELSE 'pending' END,
+                    duration_ms = ?5, status = 'failed', error = 'interrupted' WHERE id = ?1",
+                params![id, transcript, raw, map, duration_ms],
+            )?;
+            if changed == 0 { return Err(session_not_found(id)); }
+            Ok(())
+        })
+    }
+
+    pub fn set_recovery_status(&self, id: &str, status: SessionStatus) -> Result<()> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET status = ?2, error = 'interrupted' WHERE id = ?1",
+                params![id, status.as_str()],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(session_not_found(id));
+        }
+        Ok(())
+    }
+
+    pub fn claim_recovery(&self, id: &str) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET status = 'finalizing'
+             WHERE id = ?1 AND status = 'failed' AND error = 'interrupted'
+             AND EXISTS (SELECT 1 FROM audio_chunks a WHERE a.session_id = sessions.id)",
+                [id],
+            )? > 0)
+        })
+    }
+
+    pub fn fail_recovery(&self, id: &str, error: &str) -> Result<()> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET status = 'failed', error = ?2 WHERE id = ?1",
+                params![id, error],
             )?)
         })?;
         if changed == 0 {
@@ -727,6 +861,13 @@ impl Store {
         self.with(|c| Ok(c.execute("DELETE FROM sessions WHERE id = ?1", [id])? > 0))
     }
 
+    pub fn vacuum(&self) -> Result<()> {
+        self.with(|c| {
+            c.execute_batch("VACUUM")?;
+            Ok(())
+        })
+    }
+
     pub fn add_segment(
         &self,
         id: &str,
@@ -841,7 +982,8 @@ impl Store {
                 ],
             )?;
             let interrupted = tx.execute(
-                "UPDATE sessions SET status = ?1, error = ?2
+                "UPDATE sessions SET status = ?1, error = ?2,
+                    audio_kept = CASE WHEN EXISTS (SELECT 1 FROM audio_chunks a WHERE a.session_id = sessions.id) THEN 1 ELSE audio_kept END
                  WHERE status IN (?3, ?4)
                  AND (status = ?3 OR id NOT IN (SELECT session_id FROM summary_queue))",
                 params![
