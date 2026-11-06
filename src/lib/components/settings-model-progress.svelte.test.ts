@@ -8,7 +8,13 @@ const listAudioApps = vi.fn();
 const modelsStatus = vi.fn();
 const onModelsProgress = vi.fn();
 const setRecordingSettings = vi.fn();
+const appVersion = vi.fn().mockResolvedValue({ version: '0.1.0' });
+const checkForUpdates = vi.fn();
+const getUpdateState = vi.fn().mockResolvedValue({ state: 'idle', installable: false });
+const installUpdate = vi.fn();
+const onUpdateState = vi.fn().mockResolvedValue(() => {});
 vi.mock('../api', () => ({
+  appVersion, checkForUpdates, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), setRecordingSettings,
 }));
@@ -82,5 +88,20 @@ it('loads core settings and the model status snapshot when progress listener set
   await vi.waitFor(() => expect(target.textContent).toContain('Identify speakers'));
   expect(getRecordingSettings).toHaveBeenCalledOnce();
   expect(modelsStatus).toHaveBeenCalledOnce();
+  unmount(app);
+});
+
+it('shows updater state and disables restart while busy with the reason', async () => {
+  onUpdateState.mockResolvedValue(() => {});
+  getUpdateState.mockResolvedValue({ state: 'ready', version: '0.2.0', notes: '', installable: false });
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('Version 0.2.0 ready'));
+  const restart = [...target.querySelectorAll('button')].find((button) => button.textContent === 'Restart to update')!;
+  expect((restart as HTMLButtonElement).disabled).toBe(true);
+  expect(restart.getAttribute('title')).toBe('Finish your recording or summary first');
+  expect(target.textContent).toContain('Finish your recording or summary first');
   unmount(app);
 });

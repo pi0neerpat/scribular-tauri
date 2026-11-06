@@ -24,11 +24,19 @@ import type { SessionSegments } from './types/SessionSegments';
 import type { SummaryDelta } from './types/SummaryDelta';
 import type { SummaryModel } from './types/SummaryModel';
 import type { TranscriptSegment } from './types/TranscriptSegment';
+import type { UpdateState } from './types/UpdateState';
 
 type SpeakerMap = Record<string, string>;
 
 export function appVersion(): Promise<AppVersion> {
   return invoke<AppVersion>('app_version');
+}
+
+export function checkForUpdates(): Promise<void> { return invoke<void>('check_for_updates'); }
+export function getUpdateState(): Promise<UpdateState> { return invoke<UpdateState>('get_update_state'); }
+export function installUpdate(): Promise<void> { return invoke<void>('install_update'); }
+export function onUpdateState(handler: (state: UpdateState) => void): Promise<UnlistenFn> {
+  return listen<UpdateState>('update://state', (event) => handler(event.payload));
 }
 
 export function onHeartbeat(handler: (beat: Heartbeat) => void): Promise<UnlistenFn> {
