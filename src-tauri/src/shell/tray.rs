@@ -213,4 +213,16 @@ mod tests {
         assert_eq!(tray_model(true, false)[2], TrayItem::Stop);
         assert_eq!(tray_model(true, true)[2], TrayItem::SpeakerSubmenu);
     }
+
+    #[test]
+    fn tray_icons_have_visible_pixels() {
+        // A fully transparent template icon installs fine but draws nothing in the menu bar.
+        for bytes in [
+            include_bytes!("../../icons/tray-idle.png").as_slice(),
+            include_bytes!("../../icons/tray-recording.png").as_slice(),
+        ] {
+            let icon = Image::from_bytes(bytes).unwrap();
+            assert!(icon.rgba().chunks(4).any(|px| px[3] > 0));
+        }
+    }
 }
