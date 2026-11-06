@@ -7,12 +7,14 @@ import UITestCore
 private final class Cleanup {
     private let lifecycle: AppLifecycle
     private let recorder: Recorder
+    private let player: Player
     private let lock = NSLock()
     private var finished = false
 
-    init(lifecycle: AppLifecycle, recorder: Recorder) {
+    init(lifecycle: AppLifecycle, recorder: Recorder, player: Player) {
         self.lifecycle = lifecycle
         self.recorder = recorder
+        self.player = player
     }
 
     func run() {
@@ -20,6 +22,7 @@ private final class Cleanup {
         defer { lock.unlock() }  // a concurrent caller blocks until the first finishes cleaning
         guard !finished else { return }
         finished = true
+        player.stop()  // runs at run end (pass or fail) and on SIGINT/SIGTERM, so afplay never outlives uitest
         lifecycle.quit()
         recorder.stop()
     }
@@ -78,7 +81,8 @@ private func runCLI() -> Int32 {
     }
 
     let lifecycle = AppLifecycle(appPath: appPath)
-    let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder)
+    let player = Player()
+    let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder, player: player)
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let signals = [SIGINT, SIGTERM].map { value -> DispatchSourceSignal in
@@ -95,7 +99,7 @@ private func runCLI() -> Int32 {
         cleanup.run()
     }
 
-    let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"])
+    let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"], player: player)
     let passed = runSteps(steps, driver: driver,
                           options: RunOptions(runDir: runDir, recordingPath: "runs/\(runName)/recording.mp4",
                                               secrets: [ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"]].compactMap { $0 }),

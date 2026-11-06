@@ -26,6 +26,8 @@ public enum Command: Equatable {
     case handleKeychain
     case labels
     case screenshot(name: String?)
+    case play(path: String, loop: Bool)
+    case stopAudio
     case quit
 }
 
@@ -142,6 +144,15 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("duplicate screenshot name: \(name)")
             }
             command = .screenshot(name: name)
+        case "play":
+            guard let path = quoted(args.first), !path.isEmpty,
+                  args.count == 1 || (args.count == 2 && !args[1].quoted && args[1].text == "loop") else {
+                throw fail("usage: play \"file\" [loop]")
+            }
+            command = .play(path: path, loop: args.count == 2)
+        case "stop-audio":
+            guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
+            command = .stopAudio
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit

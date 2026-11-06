@@ -8,11 +8,13 @@ final class AXDriver: Driver {
     private let lifecycle: AppLifecycle
     private let runDir: URL
     private let keychainPassword: String?
+    private let player: Player
     private var application: NSRunningApplication?
     private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
-    init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?) {
+    init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?, player: Player) {
         self.lifecycle = lifecycle
+        self.player = player
         self.runDir = runDir
         self.keychainPassword = keychainPassword
         self.application = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first
@@ -39,7 +41,16 @@ final class AXDriver: Driver {
                 throw .retryable("app window not ready")
             }
             return detail
+        case .play(let path, let loop):
+            let file = try resolvePlayPath(path, cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+            do { try player.start(file, loop: loop) }
+            catch { throw .fatal("play: could not start afplay: \(error.localizedDescription)") }
+            return file.path
+        case .stopAudio:
+            player.stop()
+            return nil
         case .quit:
+            player.stop()
             lifecycle.quit()
             application = nil
             keychainHandled = false

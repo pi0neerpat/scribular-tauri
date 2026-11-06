@@ -101,3 +101,18 @@ import Testing
     #expect(throws: ScriptError.self) { try parseScript("expect \"X\" timeout infs") }
     #expect(throws: ScriptError.self) { try parseScript("wait 5s timeout 300s") }
 }
+
+@Test func parsesPlayAndStopAudio() throws {
+    let steps = try parseScript("play \"a.wav\"\nplay \"a.wav\" loop\nstop-audio")
+    #expect(steps[0].command == .play(path: "a.wav", loop: false))
+    #expect(steps[1].command == .play(path: "a.wav", loop: true))
+    #expect(steps[2].command == .stopAudio)
+}
+
+@Test func rejectsBadPlay() throws {
+    for line in ["play", "play a.wav", "play \"a.wav\" forever", "play \"a.wav\" loop loop"] {
+        #expect(throws: ScriptError(line: 1, message: "usage: play \"file\" [loop]")) { try parseScript(line) }
+    }
+    #expect(throws: ScriptError.self) { try parseScript("play \"a.wav\" timeout 5s") }
+    #expect(throws: ScriptError.self) { try parseScript("stop-audio now") }
+}

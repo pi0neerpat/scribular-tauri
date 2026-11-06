@@ -60,7 +60,9 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
 | `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Button, link, menu and similar actionable labels are printed in full; values and other text are cut at 80 characters; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
 | `screenshot ["name"]` | Save the app window to `runs/<timestamp>/<name>.png` (default `step-<line>.png`) for checking layout. The step prints the path. |
-| `quit` | Quit the app. |
+| `play "file.wav" [loop]` | Play the file through `/usr/bin/afplay` in the background, so the app can record it in App-audio mode (`afplay` in the App picker). Relative paths resolve against the directory uitest runs from; a missing file fails the step. `loop` restarts it when it ends. Stops at `stop-audio`, `quit`, or the end of the run (pass or fail). |
+| `stop-audio` | Stop `play` playback. |
+| `quit` | Quit the app and stop `play` playback. |
 
 To explore a screen, write a short script that navigates there and ends with `labels` and `screenshot`. Put an `expect` before `labels`: right after `launch` the web content is not loaded yet, and `labels` lists only the window and menu bar.
 
