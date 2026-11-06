@@ -327,7 +327,15 @@ impl Recorder {
                     // Not waiting: a streamer may be loading whisper.
                     abandon(started, &cancel, false);
                     if let Err(e) = inner.store.delete_session(&session.id) {
-                        eprintln!("record {}: deleting failed start: {e}", session.id);
+                        crate::diag::log::log(
+                            "ERROR",
+                            "recording",
+                            &format!(
+                                "deleting failed recording {} ({})",
+                                session.id,
+                                crate::diag::log::kind(&e)
+                            ),
+                        );
                     }
                     return Err(e);
                 }
@@ -344,7 +352,15 @@ impl Recorder {
         if let Err(e) = watchdog {
             abandon(started, &cancel, false);
             if let Err(e) = inner.store.delete_session(&session.id) {
-                eprintln!("record {}: deleting failed start: {e}", session.id);
+                crate::diag::log::log(
+                    "ERROR",
+                    "recording",
+                    &format!(
+                        "deleting failed recording {} ({})",
+                        session.id,
+                        crate::diag::log::kind(&e)
+                    ),
+                );
             }
             return Err(e.into());
         }
@@ -535,7 +551,7 @@ impl Inner {
                 store::INTERRUPTED
             };
             if let Err(e) = inner.store.fail_recovery(id, persisted) {
-                eprintln!("recover {id}: {e}");
+                crate::diag::log::log("ERROR", "recover", &format!("recover {id} ({})", crate::diag::log::kind(&e)));
             }
             inner.emit(id, SessionStatus::Failed, message);
         };
@@ -609,9 +625,9 @@ impl Inner {
                             cancel,
                         ) {
                             Ok(value) => Some(value),
-                            Err(e) => {
+                            Err(_) => {
                                 if !cancel.load(Ordering::Relaxed) {
-                                    eprintln!("recover {id}: diarization unavailable: {e}");
+                                    crate::diag::log::log("WARN", "recover", &format!("recover {id}: diarization unavailable (diarization_error)"));
                                     self.emit(id, SessionStatus::Finalizing, "Speaker labels unavailable; continuing with the transcript.");
                                 }
                                 None
@@ -619,7 +635,7 @@ impl Inner {
                         }
                     }
                     Err(e) => {
-                        eprintln!("recover {id}: diarization data unavailable: {e}");
+                        crate::diag::log::log("WARN", "recover", &format!("recover {id}: diarization data unavailable ({})", crate::diag::log::kind(&e)));
                         self.emit(
                             id,
                             SessionStatus::Finalizing,
@@ -643,7 +659,7 @@ impl Inner {
             return failed(self, &e.to_string());
         }
         if let Err(e) = self.store.set_timings(id, &Timings::default()) {
-            eprintln!("recover {id}: saving timings failed: {e}");
+            crate::diag::log::log("WARN", "recover", &format!("recover {id}: saving timings failed ({})", crate::diag::log::kind(&e)));
         }
         if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
             lock(&self.model).take();
@@ -851,9 +867,19 @@ impl Inner {
 
     /// Writes the status row, then emits the matching event.
     fn end(&self, id: &str, status: SessionStatus, error: &str) {
+        if status == SessionStatus::Failed {
+            crate::diag::telemetry::report(Arc::clone(&self.store), "recording");
+        }
         let error = (status == SessionStatus::Failed).then_some(error);
         if let Err(e) = self.store.set_status(id, status, error) {
-            eprintln!("record {id}: saving {status:?} failed: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "recording",
+                &format!(
+                    "saving {status:?} for {id} failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
         }
         self.emit(id, status, error.unwrap_or("Transcription stopped."));
     }
@@ -916,9 +942,16 @@ impl Inner {
                         cancel,
                     ) {
                         Ok(value) => Some(value),
-                        Err(e) => {
+                        Err(_e) => {
                             if !cancel.load(Ordering::Relaxed) {
-                                eprintln!("record {id}: diarization unavailable: {e}");
+                                crate::diag::log::log(
+                                    "WARN",
+                                    "diarization",
+                                    &format!(
+                                        "speaker identification for {id} failed ({})",
+                                        "engine_error"
+                                    ),
+                                );
                                 self.emit(
                                     id,
                                     SessionStatus::Finalizing,
@@ -930,7 +963,14 @@ impl Inner {
                     }
                 }
                 Err(e) => {
-                    eprintln!("record {id}: diarization data unavailable: {e}");
+                    crate::diag::log::log(
+                        "WARN",
+                        "diarization",
+                        &format!(
+                            "speaker data for {id} unavailable ({})",
+                            crate::diag::log::kind(&e)
+                        ),
+                    );
                     None
                 }
             }
@@ -947,12 +987,20 @@ impl Inner {
         if let Err(e) = saved {
             return self.end(id, SessionStatus::Failed, &e.to_string());
         }
+        crate::diag::telemetry::record_session(Arc::clone(&self.store), duration_ms);
         let timings = Timings {
             tail_transcription_ms: Some(ms(started)),
             ..Timings::default()
         };
         if let Err(e) = self.store.set_timings(id, &timings) {
-            eprintln!("record {id}: saving timings failed: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "recording",
+                &format!(
+                    "saving recording timings for {id} failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
         }
 
         // Under the state lock, so a cancel lands either on the flag or on

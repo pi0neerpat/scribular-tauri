@@ -13,6 +13,26 @@ use std::{
     },
 };
 
+unsafe extern "C" fn ggml_log(
+    level: u32,
+    _text: *const std::ffi::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+    match level {
+        3 => crate::diag::log::log("WARN", "whisper", "speech engine warning"),
+        4 => crate::diag::log::log("ERROR", "whisper", "speech engine error"),
+        _ => {}
+    }
+}
+
+fn install_engine_logs() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| unsafe {
+        whisper_rs::set_log_callback(Some(ggml_log), std::ptr::null_mut());
+        whisper_rs_sys::ggml_log_set(Some(ggml_log), std::ptr::null_mut());
+    });
+}
+
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use super::{Result, SttError, Transcriber, TranscriberLoader, TranscriptSegment};
@@ -58,9 +78,7 @@ pub struct WhisperTranscriber {
 impl WhisperTranscriber {
     /// Loads a ggml whisper model on the GPU.
     pub fn load(path: &Path) -> Result<Self> {
-        // Without a `log` backend feature this drops whisper.cpp's and its
-        // ggml's logs instead of printing them to stderr.
-        whisper_rs::install_logging_hooks();
+        install_engine_logs();
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .map_err(engine)?;
         Ok(Self { ctx })

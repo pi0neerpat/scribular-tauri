@@ -76,6 +76,9 @@ impl Reporter<'_> {
 
     /// Records the end state; the stored summary is left as it was.
     fn stop(&mut self, stop: Stop) {
+        if matches!(&stop, Stop::Failed(_)) {
+            crate::diag::telemetry::report(Arc::clone(&self.shared.store), "summarize");
+        }
         let (mut status, error, mut message) = match &stop {
             Stop::Cancelled => (SessionStatus::Cancelled, None, "Summarization stopped."),
             Stop::Failed(e) => (SessionStatus::Failed, Some(e.as_str()), e.as_str()),
@@ -97,9 +100,14 @@ impl Reporter<'_> {
             .store
             .set_status(self.session_id, status, stored_error)
         {
-            eprintln!(
-                "summarize {}: saving {status:?} failed: {e}",
-                self.session_id
+            crate::diag::log::log(
+                "ERROR",
+                "summarize",
+                &format!(
+                    "saving {status:?} for {} failed ({})",
+                    self.session_id,
+                    crate::diag::log::kind(&e)
+                ),
             );
         }
         if recovering {
@@ -285,7 +293,15 @@ fn summarize(
         .map_err(stop)?;
     timings.save_ms = Some(ms(started));
     if let Err(e) = store.set_timings(&job.session_id, &timings) {
-        eprintln!("summarize {}: saving timings failed: {e}", job.session_id);
+        crate::diag::log::log(
+            "ERROR",
+            "summarize",
+            &format!(
+                "saving timings for {} failed ({})",
+                job.session_id,
+                crate::diag::log::kind(&e)
+            ),
+        );
     }
     let (step, count) = (r.step_count, r.step_count);
     r.emit(SessionStatus::Done, step, count, "Session ready.");

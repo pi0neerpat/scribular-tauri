@@ -13,6 +13,18 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+unsafe extern "C" fn ggml_log(
+    level: u32,
+    _text: *const std::ffi::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+    match level {
+        3 => crate::diag::log::log("WARN", "llama", "llama engine warning"),
+        4 => crate::diag::log::log("ERROR", "llama", "llama engine error"),
+        _ => {}
+    }
+}
+
 use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
@@ -71,8 +83,9 @@ fn backend() -> Result<&'static LlamaBackend> {
     BACKEND
         .get_or_init(|| {
             LlamaBackend::init()
-                .map(|mut b| {
-                    b.void_logs();
+                .map(|b| {
+                    // Engine text can contain prompts, so retain only fixed WARN+ labels.
+                    unsafe { llama_cpp_sys_2::llama_log_set(Some(ggml_log), std::ptr::null_mut()) };
                     b
                 })
                 .map_err(|e| e.to_string())

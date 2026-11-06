@@ -22,7 +22,14 @@ pub fn spawn_retention(
     std::thread::spawn(move || loop {
         let Some(s) = store.upgrade() else { return };
         if let Err(e) = s.sweep_expired_audio(clock()) {
-            eprintln!("audio retention sweep failed: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "retention",
+                &format!(
+                    "audio retention sweep failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
         }
         drop(s);
         std::thread::sleep(every);
