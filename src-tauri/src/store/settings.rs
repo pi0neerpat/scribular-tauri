@@ -10,6 +10,8 @@ use super::{InputMode, Result, Store};
 /// `activePromptId`.
 pub const ACTIVE_PROMPT_ID: &str = "active_prompt_id";
 pub const MULTI_SPEAKER: &str = "multi_speaker";
+/// The manifest id of the summary model (parity spec 03 R18).
+pub const SUMMARY_MODEL_ID: &str = "summary_model_id";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
@@ -76,7 +78,9 @@ impl Store {
         })
     }
 
-    /// Saves them all at once; an absent app or prompt clears it.
+    /// Saves them all at once; an absent app clears it, an absent prompt
+    /// keeps the active one. Unknown ids are rejected and unstarred styles
+    /// are starred, matching `set_active_prompt`.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
@@ -87,16 +91,16 @@ impl Store {
                 MULTI_SPEAKER,
                 if settings.multi_speaker { "1" } else { "0" },
             )?;
-            for (key, value) in [
-                (TARGET_APP, &settings.target_app),
-                (ACTIVE_PROMPT_ID, &settings.prompt_id),
-            ] {
-                match value {
-                    Some(v) => insert(&tx, key, v)?,
-                    None => {
-                        tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
-                    }
+            match &settings.target_app {
+                Some(app) => insert(&tx, TARGET_APP, app)?,
+                None => {
+                    tx.execute("DELETE FROM settings WHERE key = ?1", [TARGET_APP])?;
                 }
+            }
+            // One validated writer for the active style (spec 03 R7); an
+            // absent id keeps it, since some style is always active (R6).
+            if let Some(id) = &settings.prompt_id {
+                super::prompts::set_active(&tx, id)?;
             }
             tx.commit()?;
             Ok(())

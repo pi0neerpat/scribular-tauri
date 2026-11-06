@@ -1,5 +1,5 @@
 <script lang="ts">
-  // What the next recording captures and which prompt summarizes it.
+  // What the next recording captures and how it is summarized.
   // Every change saves immediately.
   import { onMount } from 'svelte';
   import {
@@ -7,17 +7,17 @@
     downloadModel,
     getRecordingSettings,
     listAudioApps,
-    listPrompts,
     modelsStatus,
     onModelsProgress,
     openPrivacySettings,
     setRecordingSettings,
   } from '../api';
   import LicenseSettings from './LicenseSettings.svelte';
+  import NoteStyles from './NoteStyles.svelte';
+  import SummaryModel from './SummaryModel.svelte';
   import type { AudioApp } from '../types/AudioApp';
   import type { InputMode } from '../types/InputMode';
   import type { Privacy } from '../types/Privacy';
-  import type { Prompt } from '../types/Prompt';
   import type { RecordingSettings } from '../types/RecordingSettings';
   import type { ModelProgress } from '../types/ModelProgress';
 
@@ -30,11 +30,16 @@
   ];
 
   let settings = $state<RecordingSettings | null>(null);
-  let prompts = $state<Prompt[]>([]);
   let apps = $state<AudioApp[]>([]);
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let speakerModel = $state<ModelProgress | null>(null);
+  let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
+
+  export function requestLeave(action: () => void, opener?: HTMLElement) {
+    if (noteStyles) noteStyles.requestLeave(action, opener);
+    else action();
+  }
 
   // The saved app stays selectable while it isn't playing.
   let appNames = $derived.by(() => {
@@ -61,7 +66,6 @@
           else unlisten = removeListener;
         } catch { /* The status snapshot still supplies model state. */ }
         settings = await getRecordingSettings();
-        prompts = await listPrompts();
         const version = progressVersion;
         const status = await modelsStatus();
         if (version === progressVersion) speakerModel = status.find((m) => m.modelId === SPEAKER_MODEL) ?? null;
@@ -93,7 +97,8 @@
   async function save() {
     if (!settings) return;
     try {
-      await setRecordingSettings(settings);
+      // This settings save leaves the active style unchanged.
+      await setRecordingSettings({ ...settings, promptId: null });
       error = null;
     } catch (e) {
       error = String(e);
@@ -168,16 +173,10 @@
         <p>Existing recordings are deleted on their own schedule.</p>
       {/if}
     </fieldset>
-
-    <label>
-      Summary prompt
-      <select bind:value={settings.promptId} onchange={save}>
-        {#each prompts as prompt (prompt.id)}
-          <option value={prompt.id}>{prompt.name}</option>
-        {/each}
-      </select>
-    </label>
   {/if}
+
+  <NoteStyles bind:this={noteStyles} />
+  <SummaryModel />
 
   <LicenseSettings />
 

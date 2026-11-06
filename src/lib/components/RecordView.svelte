@@ -7,19 +7,24 @@
     cancelJob,
     currentRecording,
     deniedPrivacy,
+    getPromptList,
     getRecordingSettings,
     getSession,
+    listSummaryModels,
     onSessionProgress,
+    setActivePrompt,
     startRecording,
     stopRecording,
   } from '../api';
   import type { Privacy } from '../types/Privacy';
+  import type { PromptList } from '../types/PromptList';
   import type { Session } from '../types/Session';
   import type { SessionProgress } from '../types/SessionProgress';
   import type { SessionStatus } from '../types/SessionStatus';
   import LiveTranscript from './LiveTranscript.svelte';
   import Timings from './Timings.svelte';
   import SummaryPanel from './SummaryPanel.svelte';
+  import StylePicker from './StylePicker.svelte';
   import PermissionNotice from './PermissionNotice.svelte';
   import { isWorking } from './record-status';
   import LicenseGate from './LicenseGate.svelte';
@@ -62,6 +67,28 @@
   let labeled = $state(false);
   let now = $state(Date.now());
   let askSpeakerCount = $state(false);
+  let styles = $state<PromptList | null>(null);
+  let modelNames = $state<Record<string, string>>({});
+
+  // Re-read when shown, since Settings may have changed styles or the model.
+  $effect(() => {
+    if (!active) return;
+    let current = true;
+    getPromptList().then((l) => { if (current) styles = l; }).catch(() => {});
+    listSummaryModels()
+      .then((ms) => { if (current) modelNames = Object.fromEntries(ms.map((m) => [m.spec.id, m.spec.displayName])); })
+      .catch(() => {});
+    return () => { current = false; };
+  });
+
+  async function chooseStyle(id: string) {
+    try {
+      styles = await setActivePrompt(id);
+    } catch (e) {
+      error = String(e);
+      try { styles = await getPromptList(); } catch {}
+    }
+  }
   let stopButton = $state<HTMLButtonElement | undefined>();
   let speakerDialog = $state<HTMLDivElement | undefined>();
   let returnFocus = $state<HTMLElement | null>(null);
@@ -224,6 +251,9 @@
     <button onclick={cancel}>Cancel</button>
   {:else}
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
+    {#if styles}
+      <StylePicker prompts={styles.prompts} selectedId={styles.activeId} onSelect={chooseStyle} />
+    {/if}
     <button onclick={start} disabled={busy || !speechReady || !allows($accessState)}>
       Start recording
     </button>
@@ -252,7 +282,10 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel {session} {active} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />
+    <SummaryPanel {session} {active} byline={[
+      styles?.prompts.find((p) => p.id === session.promptId)?.name,
+      session.modelId && (modelNames[session.modelId] ?? session.modelId),
+    ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>

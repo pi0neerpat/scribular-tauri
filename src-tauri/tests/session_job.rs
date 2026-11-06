@@ -877,3 +877,26 @@ fn a_lapse_mid_recording_still_saves_and_summarizes() {
     assert_eq!(s.transcript, TRANSCRIPT);
     assert!(!s.summary.is_empty());
 }
+
+/// Parity spec 03 AS9: changing the active style mid-recording does not
+/// change the style of the recording in progress.
+#[test]
+fn as9_a_recording_keeps_the_style_active_at_start() {
+    let h = Harness::new();
+    let at_start = h.store.get_active_prompt_id().unwrap().unwrap();
+    let id = h.start(InputMode::Mic);
+    assert!(matches!(
+        h.recorder.while_idle(|| ()),
+        Err(RecordError::AlreadyRecording)
+    ));
+    h.feed(2);
+    h.store
+        .set_active_prompt("default-narrative-therapy")
+        .unwrap();
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+
+    assert_eq!(h.get(&id).prompt_id, Some(at_start));
+}

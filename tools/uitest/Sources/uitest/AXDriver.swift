@@ -9,6 +9,7 @@ final class AXDriver: Driver {
     private let runDir: URL
     private let keychainPassword: String?
     private var application: NSRunningApplication?
+    private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?) {
         self.lifecycle = lifecycle
@@ -21,6 +22,18 @@ final class AXDriver: Driver {
         switch command {
         case .launch(let keepData):
             let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
+            // a rebuilt (re-signed) app blocks on a keychain prompt before its window opens
+            // re-arm once a prompt closes: setup reads two keychain items, so a second prompt can follow
+            if keychainWindow() == nil { keychainHandled = false }
+            else if !keychainHandled {
+                keychainHandled = true
+                if keychainPassword != nil { _ = try handleKeychain() }
+                else {
+                    // no password: give a person 2 minutes to approve the prompt by hand
+                    let deadline = Date().addingTimeInterval(120)
+                    while keychainWindow() != nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
+                }
+            }
             guard let app = appElement(),
                   let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
                 throw .retryable("app window not ready")
@@ -29,6 +42,7 @@ final class AXDriver: Driver {
         case .quit:
             lifecycle.quit()
             application = nil
+            keychainHandled = false
             return nil
         case .click(let label, let index, let within):
             let element = try resolve(label, index: index, within: within)
@@ -239,12 +253,17 @@ final class AXDriver: Driver {
         }
     }
 
+    /// SecurityAgent can linger after a prompt closes, so only an open window counts as a prompt.
+    private func keychainWindow() -> AXUIElement? {
+        guard let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first else { return nil }
+        return (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first
+    }
+
     private func handleKeychain() throws(DriverError) -> String? {
         // the prompt can appear a moment after the app touches the keychain; wait up to 5s before concluding there is none
         var found: (AXUIElement)?
         for attempt in 0..<20 {
-            if let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first,
-               let first = (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first {
+            if let first = keychainWindow() {
                 found = first
                 break
             }

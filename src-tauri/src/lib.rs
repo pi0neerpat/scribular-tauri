@@ -52,7 +52,12 @@ fn summarizer_loader(models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
 #[cfg(feature = "fake-engines")]
 fn transcriber_loader(_models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> {
     Arc::new(engines::fake::FakeTranscriberLoader(Arc::new(
-        engines::fake::FakeTranscriber::new(Vec::new()),
+        // A canned line so recordings in the fake-engines app reach the summary (uitest AS11).
+        engines::fake::FakeTranscriber::new(vec![stt::TranscriptSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: "The client talked about sleep and work stress this week.".into(),
+        }]),
     )))
 }
 
@@ -97,6 +102,15 @@ pub fn run() {
             commands::update_session,
             commands::delete_session,
             commands::list_prompts,
+            commands::get_prompt_list,
+            commands::create_prompt,
+            commands::duplicate_prompt,
+            commands::update_prompt,
+            commands::delete_prompt,
+            commands::set_prompt_starred,
+            commands::set_active_prompt,
+            commands::list_summary_models,
+            commands::set_summary_model,
             commands::list_models,
             commands::models_status,
             commands::download_models,
@@ -146,6 +160,8 @@ pub fn run() {
                 return Ok(());
             }
             let store = Arc::new(opened?);
+            // Parity spec 03 R9: built-in styles follow the shipped JSON.
+            store.sync_builtins()?;
             app.manage(Arc::clone(&store));
             jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
 
@@ -165,6 +181,16 @@ pub fn run() {
                 data_dir.join("models"),
                 models::manifest(),
             ));
+            // An id no longer in the manifest keeps the default.
+            match store.get_setting(store::SUMMARY_MODEL_ID) {
+                Ok(Some(id)) => {
+                    if let Err(e) = models.select_llm(&id) {
+                        eprintln!("{e}; using the default summary model");
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("reading the selected summary model failed: {e}"),
+            }
             app.manage(Arc::clone(&models));
             let stt = transcriber_loader(&models);
             app.manage(Arc::clone(&stt));

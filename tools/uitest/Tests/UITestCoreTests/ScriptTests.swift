@@ -90,3 +90,14 @@ import Testing
     #expect(throws: ScriptError.self) { try parseScript("") }
     #expect(throws: ScriptError.self) { try parseScript("# only a comment\n\n") }
 }
+
+@Test func parsesStepTimeout() throws {
+    let steps = try parseScript("expect-not \"Getting ready\" timeout 300s\nclick \"timeout\" index 2\nexpect \"X\"")
+    #expect(steps[0].command == .expectNot("Getting ready"))
+    #expect(steps[0].timeout == 300)
+    #expect(steps[1].command == .click(label: "timeout", index: 2, within: nil))
+    #expect(steps[2].timeout == nil)
+    #expect(throws: ScriptError.self) { try parseScript("expect \"X\" timeout soon") }
+    #expect(throws: ScriptError.self) { try parseScript("expect \"X\" timeout infs") }
+    #expect(throws: ScriptError.self) { try parseScript("wait 5s timeout 300s") }
+}

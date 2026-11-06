@@ -12,9 +12,14 @@ use std::{
     },
 };
 
-use scribular_lib::models::{
-    ensure, DownloadError, ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState,
+use scribular_lib::commands::{
+    revert_summary_model, summary_models, switch_summary_model, MODEL_SWITCH_BUSY,
 };
+use scribular_lib::models::{
+    ensure, manifest, DownloadError, ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState,
+    DEFAULT_LLM,
+};
+use scribular_lib::store::{key::MemoryKeyStore, Store, SUMMARY_MODEL_ID};
 use sha2::{Digest, Sha256};
 
 /// One request as the server saw it: path and `Range` header.
@@ -142,6 +147,8 @@ fn spec(server: &Server, id: &str, kind: ModelKind, data: &[u8]) -> ModelSpec {
         license: "test".into(),
         license_url: "https://example.invalid".into(),
         optional: false,
+        description: String::new(),
+        caution: None,
     }
 }
 
@@ -430,4 +437,231 @@ fn speech_retry_finishes_while_llm_download_is_still_running() {
     );
     assert_eq!(std::fs::read(dir.0.join("speech.bin")).unwrap(), speech);
     assert_eq!(std::fs::read(dir.0.join("llm.bin")).unwrap(), llm);
+}
+
+/// Two LLMs, the first selected; the second is never served (404).
+fn two_llms(server: &Server, speech: &[u8], small: &[u8]) -> Vec<ModelSpec> {
+    vec![
+        spec(server, "speech", ModelKind::Speech, speech),
+        spec(server, "small", ModelKind::Llm, small),
+        spec(server, "big", ModelKind::Llm, &body(MB / 8, 9)),
+    ]
+}
+
+fn store_in(dir: &TempDir) -> Store {
+    std::fs::create_dir_all(&dir.0).unwrap();
+    Store::open(&dir.0.join("test.db"), &MemoryKeyStore::with_key([7; 32])).unwrap()
+}
+
+#[test]
+fn manager_prefers_the_default_llm_over_an_earlier_manifest_entry() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let llms = vec![
+        spec(&server, "other", ModelKind::Llm, b"other"),
+        spec(&server, DEFAULT_LLM, ModelKind::Llm, b"default"),
+    ];
+    let manager = ModelManager::new(dir.0.clone(), llms);
+    assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+}
+
+#[test]
+fn concurrent_ensure_one_waits_for_the_download_owner_to_finish() {
+    let expected = body(MB + 123, 7);
+    let corrupted = body(MB + 123, 8);
+    let server = Server::start(
+        HashMap::from([("shared.bin".into(), corrupted)]),
+        HashMap::from([("shared.bin".into(), MB + 1)]),
+    );
+    let dir = TempDir::new();
+    let small = body(10, 9);
+    let manager = Arc::new(ModelManager::new(
+        dir.0.clone(),
+        vec![
+            spec(&server, "small", ModelKind::Llm, &small),
+            spec(&server, "shared", ModelKind::Llm, &expected),
+        ],
+    ));
+    manager.select_llm("small").unwrap();
+    manager.readiness.set("small", ModelState::Ready);
+    let store = store_in(&dir);
+    let previous = switch_summary_model(&store, &manager, false, "shared").unwrap();
+    assert_eq!(previous, "small");
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Mutex::new(release_rx);
+    let (second_started_tx, second_started_rx) = std::sync::mpsc::channel();
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let timeout = std::time::Duration::from_secs(5);
+
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| {
+            run(manager.ensure_one("shared", &|progress| {
+                if progress.state == ModelState::Downloading && progress.downloaded_bytes == 0 {
+                    started_tx.send(()).unwrap();
+                    release_rx.lock().unwrap().recv_timeout(timeout).unwrap();
+                }
+            }))
+        });
+        started_rx.recv_timeout(timeout).unwrap();
+
+        let second_manager = Arc::clone(&manager);
+        let second = scope.spawn(move || {
+            second_started_tx.send(()).unwrap();
+            let result = run(second_manager.ensure_one("shared", &|_| {}));
+            finished_tx.send(result).unwrap();
+        });
+        second_started_rx.recv_timeout(timeout).unwrap();
+        let finished_while_owned = finished_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_ok();
+        release_tx.send(()).unwrap();
+        assert!(first.join().unwrap().is_err());
+        assert!(finished_rx.recv_timeout(timeout).unwrap().is_err());
+        second.join().unwrap();
+        assert!(
+            !finished_while_owned,
+            "the second call must await its owner"
+        );
+    });
+    assert_eq!(
+        server.seen().len(),
+        2,
+        "the waiter retries after the owner's failed download"
+    );
+    assert!(revert_summary_model(&store, &manager, "shared", &previous));
+    assert_eq!(manager.selected_llm(), "small");
+    assert_eq!(
+        store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
+        Some("small")
+    );
+}
+
+/// Parity spec 03 AS18: the first run fetches speech plus the selected LLM.
+#[test]
+fn as18_first_run_downloads_only_the_selected_llm() {
+    let (speech, small) = (body(MB / 8, 1), body(MB / 8, 2));
+    let server = Server::start(
+        HashMap::from([
+            ("speech.bin".into(), speech.clone()),
+            ("small.bin".into(), small.clone()),
+        ]),
+        HashMap::new(),
+    );
+    let dir = TempDir::new();
+    let manager = ModelManager::new(dir.0.clone(), two_llms(&server, &speech, &small));
+    assert_eq!(manager.selected_llm(), "small");
+
+    run(manager.ensure_all(&|_| {}));
+
+    let paths: Vec<_> = server.seen().into_iter().map(|(p, _)| p).collect();
+    assert_eq!(paths, ["speech.bin", "small.bin"]);
+    assert_eq!(manager.readiness.get("small"), ModelState::Ready);
+}
+
+#[test]
+fn ensure_all_uses_the_current_selection_for_each_llm() {
+    let (speech, small, big) = (body(MB / 8, 1), body(MB / 8, 2), body(MB / 8, 9));
+    let server = Server::start(
+        HashMap::from([
+            ("speech.bin".into(), speech.clone()),
+            ("big.bin".into(), big.clone()),
+        ]),
+        HashMap::new(),
+    );
+    let dir = TempDir::new();
+    let manager = ModelManager::new(
+        dir.0.clone(),
+        vec![
+            spec(&server, "speech", ModelKind::Speech, &speech),
+            spec(&server, "small", ModelKind::Llm, &small),
+            spec(&server, "big", ModelKind::Llm, &big),
+        ],
+    );
+    let (_, sink) = recorder();
+    let on_progress = |p: ModelProgress| {
+        sink(p.clone());
+        if p.model_id == "speech" && p.state == ModelState::Ready {
+            manager.select_llm("big").unwrap();
+        }
+    };
+
+    run(manager.ensure_all(&on_progress));
+
+    let paths: Vec<_> = server.seen().into_iter().map(|(p, _)| p).collect();
+    assert_eq!(paths, ["speech.bin", "big.bin"]);
+}
+
+/// Parity spec 03 AS17: a busy app refuses the switch and keeps the key.
+#[test]
+fn as17_switching_while_busy_is_refused_and_keeps_the_key() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let store = store_in(&dir);
+    let manager = ModelManager::new(dir.0.clone(), two_llms(&server, b"s", b"m"));
+
+    assert_eq!(
+        switch_summary_model(&store, &manager, true, "big"),
+        Err(MODEL_SWITCH_BUSY.to_string())
+    );
+    assert_eq!(manager.selected_llm(), "small");
+    assert_eq!(store.get_setting(SUMMARY_MODEL_ID).unwrap(), None);
+    assert!(switch_summary_model(&store, &manager, false, "speech").is_err());
+}
+
+/// Parity spec 03 AS16: a model that fails to download reverts the
+/// selection to the previous one.
+#[test]
+fn as16_a_failed_download_reverts_to_the_previous_model() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let store = store_in(&dir);
+    let manager = ModelManager::new(dir.0.clone(), two_llms(&server, b"s", b"m"));
+    manager.readiness.set("small", ModelState::Ready);
+
+    let previous = switch_summary_model(&store, &manager, false, "big").unwrap();
+    assert_eq!(previous, "small");
+    assert_eq!(manager.selected_llm(), "big");
+    assert_eq!(
+        store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
+        Some("big")
+    );
+    assert!(summary_models(&manager)
+        .iter()
+        .any(|m| m.spec.id == "big" && m.selected));
+
+    let (events, sink) = recorder();
+    assert!(run(manager.ensure_one("big", &sink)).is_err());
+    assert!(events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|p| p.model_id == "big" && p.state == ModelState::Failed && p.error.is_some()));
+    assert!(revert_summary_model(&store, &manager, "big", &previous));
+
+    assert_eq!(manager.selected_llm(), "small");
+    assert_eq!(
+        store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
+        Some("small")
+    );
+}
+
+#[test]
+fn bundled_manifest_keeps_the_declared_default_even_if_order_changes() {
+    let dir = TempDir::new();
+    let manager = ModelManager::new(dir.0.clone(), manifest());
+    assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+}
+
+#[test]
+fn failed_model_does_not_revert_to_a_previous_model_that_is_not_ready() {
+    let server = Server::start(HashMap::new(), HashMap::new());
+    let dir = TempDir::new();
+    let store = store_in(&dir);
+    let manager = ModelManager::new(dir.0.clone(), two_llms(&server, b"s", b"m"));
+    let previous = switch_summary_model(&store, &manager, false, "big").unwrap();
+    manager.readiness.set("big", ModelState::Failed);
+
+    assert!(!revert_summary_model(&store, &manager, "big", &previous));
+    assert_eq!(manager.selected_llm(), "big");
 }

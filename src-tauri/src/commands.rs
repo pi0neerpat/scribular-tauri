@@ -16,11 +16,13 @@ use ts_rs::TS;
 use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
 use crate::license::{AccessState, ActivationResult, Licensing};
-use crate::models::{ModelManager, ModelProgress, ModelSpec, ModelState, SPEAKER_CAMPPLUS};
+use crate::models::{
+    ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState, SPEAKER_CAMPPLUS,
+};
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
     now_ms, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
-    SessionPatch, Store,
+    SessionPatch, Store, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -31,6 +33,7 @@ pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
     MODELS_PROGRESS_EVENT,
+    SUMMARY_MODEL_CHANGED_EVENT,
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
@@ -43,6 +46,9 @@ pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
+
+/// The selected summary model changed or reverted after a failed download.
+pub const SUMMARY_MODEL_CHANGED_EVENT: &str = "summary-model://changed";
 
 /// Job progress, one [`SessionProgress`] per step or state change.
 pub const SESSION_PROGRESS_EVENT: &str = "session://progress";
@@ -77,6 +83,8 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Session::export_all(cfg)?;
     SessionPatch::export_all(cfg)?;
     Prompt::export_all(cfg)?;
+    PromptList::export_all(cfg)?;
+    SummaryModel::export_all(cfg)?;
     ModelSpec::export_all(cfg)?;
     ModelProgress::export_all(cfg)?;
     SessionProgress::export_all(cfg)?;
@@ -131,6 +139,202 @@ pub fn delete_session(store: State<Arc<Store>>, id: String) -> Result<bool, Stri
 #[tauri::command]
 pub fn list_prompts(store: State<Arc<Store>>) -> Result<Vec<Prompt>, String> {
     store.list_prompts().map_err(|e| e.to_string())
+}
+
+/// Every style after a change, so the UI never merges client-side
+/// (parity spec 03 R14).
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptList {
+    pub prompts: Vec<Prompt>,
+    pub active_id: Option<String>,
+    /// The style the call created, for create and duplicate.
+    pub created_id: Option<String>,
+}
+
+fn prompt_list(store: &Store, created_id: Option<String>) -> Result<PromptList, String> {
+    Ok(PromptList {
+        prompts: store.list_prompts().map_err(|e| e.to_string())?,
+        active_id: store.get_active_prompt_id().map_err(|e| e.to_string())?,
+        created_id,
+    })
+}
+
+#[tauri::command]
+pub fn get_prompt_list(store: State<Arc<Store>>) -> Result<PromptList, String> {
+    prompt_list(&store, None)
+}
+
+#[tauri::command]
+pub fn create_prompt(
+    store: State<Arc<Store>>,
+    name: String,
+    text: String,
+) -> Result<PromptList, String> {
+    let p = store
+        .create_prompt(&name, &text)
+        .map_err(|e| e.to_string())?;
+    prompt_list(&store, Some(p.id))
+}
+
+#[tauri::command]
+pub fn duplicate_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList, String> {
+    let p = store.duplicate_prompt(&id).map_err(|e| e.to_string())?;
+    prompt_list(&store, Some(p.id))
+}
+
+#[tauri::command]
+pub fn update_prompt(
+    store: State<Arc<Store>>,
+    id: String,
+    name: String,
+    text: String,
+) -> Result<PromptList, String> {
+    store
+        .update_prompt(&id, &name, &text)
+        .map_err(|e| e.to_string())?;
+    prompt_list(&store, None)
+}
+
+#[tauri::command]
+pub fn delete_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList, String> {
+    store.delete_prompt(&id).map_err(|e| e.to_string())?;
+    prompt_list(&store, None)
+}
+
+#[tauri::command]
+pub fn set_prompt_starred(
+    store: State<Arc<Store>>,
+    id: String,
+    starred: bool,
+) -> Result<PromptList, String> {
+    store
+        .set_prompt_starred(&id, starred)
+        .map_err(|e| e.to_string())?;
+    prompt_list(&store, None)
+}
+
+#[tauri::command]
+pub fn set_active_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList, String> {
+    store.set_active_prompt(&id).map_err(|e| e.to_string())?;
+    prompt_list(&store, None)
+}
+
+/// One summary model for the picker (parity spec 03 R18, R23).
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryModel {
+    pub spec: ModelSpec,
+    pub selected: bool,
+    pub state: ModelState,
+}
+
+#[tauri::command]
+pub fn list_summary_models(models: State<Arc<ModelManager>>) -> Vec<SummaryModel> {
+    summary_models(&models)
+}
+
+pub fn summary_models(models: &ModelManager) -> Vec<SummaryModel> {
+    let selected = models.selected_llm();
+    models
+        .specs()
+        .iter()
+        .filter(|s| s.kind == ModelKind::Llm)
+        .map(|s| SummaryModel {
+            spec: s.clone(),
+            selected: s.id == selected,
+            state: models.readiness.get(&s.id),
+        })
+        .collect()
+}
+
+/// R20: refused while a summary runs or a recording is active.
+pub const MODEL_SWITCH_BUSY: &str =
+    "Wait for the current summary or recording to finish before changing the model.";
+
+/// Saves and applies a new summary model. Returns the previous one, to
+/// revert to if the new one fails to download.
+pub fn switch_summary_model(
+    store: &Store,
+    models: &ModelManager,
+    busy: bool,
+    model_id: &str,
+) -> Result<String, String> {
+    if busy {
+        return Err(MODEL_SWITCH_BUSY.into());
+    }
+    let previous = models.selected_llm();
+    models.select_llm(model_id)?;
+    if let Err(e) = store.set_setting(SUMMARY_MODEL_ID, model_id) {
+        let _ = models.select_llm(&previous);
+        return Err(e.to_string());
+    }
+    Ok(previous)
+}
+
+/// R19: after `failed` could not download, goes back to `previous`, unless
+/// the user already picked something else or another download of it is
+/// still running.
+pub fn revert_summary_model(
+    store: &Store,
+    models: &ModelManager,
+    failed: &str,
+    previous: &str,
+) -> bool {
+    if models.selected_llm() != failed
+        || !matches!(
+            models.readiness.get(failed),
+            ModelState::Failed | ModelState::Missing
+        )
+        || models.is_downloading(failed)
+        || models.readiness.get(previous) != ModelState::Ready
+        || models.select_llm(previous).is_err()
+    {
+        return false;
+    }
+    if let Err(e) = store.set_setting(SUMMARY_MODEL_ID, previous) {
+        let _ = models.select_llm(failed);
+        eprintln!("reverting the summary model failed: {e}");
+        return false;
+    }
+    true
+}
+
+/// Switches the summary model without a relaunch; a model not yet on disk
+/// downloads in the background, with progress on [`MODELS_PROGRESS_EVENT`].
+#[tauri::command]
+pub fn set_summary_model(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    models: State<Arc<ModelManager>>,
+    jobs: State<Arc<JobQueue>>,
+    recorder: State<Arc<Recorder>>,
+    model_id: String,
+) -> Result<(), String> {
+    let switched = recorder
+        .while_idle(|| jobs.while_idle(|| switch_summary_model(&store, &models, false, &model_id)))
+        .map_err(|_| MODEL_SWITCH_BUSY.to_owned())?
+        .ok_or_else(|| MODEL_SWITCH_BUSY.to_owned())?;
+    let previous = switched?;
+    let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &model_id);
+    if models.readiness.get(&model_id) == ModelState::Ready {
+        return Ok(());
+    }
+    let (store, models) = (Arc::clone(&store), Arc::clone(&models));
+    tauri::async_runtime::spawn(async move {
+        let result = models
+            .ensure_one(&model_id, &|p| {
+                let _ = app.emit(MODELS_PROGRESS_EVENT, p);
+            })
+            .await;
+        if let Err(e) = result {
+            eprintln!("summary model {model_id}: {e}");
+            if revert_summary_model(&store, &models, &model_id, &previous) {
+                let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &previous);
+            }
+        }
+    });
+    Ok(())
 }
 
 /// The pinned models with their license terms, in download order.

@@ -29,11 +29,17 @@ pub struct ModelSpec {
     pub license: String,
     pub license_url: String,
     pub optional: bool,
+    /// One line for the model picker.
+    pub description: String,
+    /// Shown under the description, e.g. a memory warning.
+    pub caution: Option<String>,
 }
 
 pub const WHISPER_BASE: &str = "whisper-base";
 pub const GEMMA_2_2B: &str = "gemma-2-2b-it-q4km";
 pub const SPEAKER_CAMPPLUS: &str = "speaker-campplus";
+/// The summary model used until the user picks another (spec 03 R18).
+pub const DEFAULT_LLM: &str = GEMMA_2_2B;
 
 /// Download order: the speech model first, so recording works as soon as
 /// possible while the larger LLM is still arriving.
@@ -52,6 +58,8 @@ pub fn manifest() -> Vec<ModelSpec> {
             license: "MIT".into(),
             license_url: "https://github.com/openai/whisper/blob/main/LICENSE".into(),
             optional: false,
+            description: "Transcribes speech on this Mac.".into(),
+            caution: None,
         },
         ModelSpec {
             id: GEMMA_2_2B.into(),
@@ -66,6 +74,8 @@ pub fn manifest() -> Vec<ModelSpec> {
             license: "Gemma Terms of Use".into(),
             license_url: "https://ai.google.dev/gemma/terms".into(),
             optional: false,
+            description: "Fast and small. The default summary model.".into(),
+            caution: None,
         },
         ModelSpec {
             id: SPEAKER_CAMPPLUS.into(),
@@ -80,6 +90,8 @@ pub fn manifest() -> Vec<ModelSpec> {
             license: "Apache-2.0".into(),
             license_url: "https://www.apache.org/licenses/LICENSE-2.0".into(),
             optional: true,
+            description: "Tells speakers apart in multi-speaker sessions.".into(),
+            caution: None,
         },
     ]
 }
@@ -107,6 +119,22 @@ mod tests {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         }
+    }
+
+    #[test]
+    fn llm_ids_are_unique_and_the_default_is_listed_once() {
+        let llms: Vec<_> = manifest()
+            .into_iter()
+            .filter(|m| m.kind == ModelKind::Llm)
+            .collect();
+        let mut ids: Vec<_> = llms.iter().map(|m| m.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), llms.len());
+        assert_eq!(llms.iter().filter(|m| m.id == DEFAULT_LLM).count(), 1);
+        assert!(llms
+            .iter()
+            .all(|m| !m.optional && !m.description.is_empty()));
     }
 
     #[test]

@@ -45,8 +45,8 @@ Most bugs here sit on these seams:
 - Scale, multi-user, concurrency beyond one recording at a time, backward
   compatibility with external consumers (there are none).
 - Windows and Linux behaviour (later milestone).
-- Dependency versions: they are pinned on purpose under the two-week rule in
-  `plans/DEPENDENCY_REVIEW_*.md`.
+- Dependency choices: reviewed only for being commonly used and released within
+  the last 12 months (see `plans/DEPENDENCY_REVIEW_03_note_styles_model_choice.md`).
 - `plans/` and `docs/` prose, unless the PR changes their meaning.
 
 ## Review economy

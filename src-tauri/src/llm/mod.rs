@@ -76,13 +76,15 @@ pub trait Summarizer: Send + Sync {
 /// Loads the summarizer on demand, so the model only takes memory once a
 /// job needs it (KTD5).
 pub trait SummarizerLoader: Send + Sync {
-    /// The model id stored on sessions summarized with this engine.
-    fn model_id(&self) -> &str;
+    /// The model selected for new jobs and recorded on their sessions.
+    /// The queue snapshots this id and reloads when it changes.
+    fn model_id(&self) -> String;
 
-    /// Whether the model has downloaded and passed verification.
+    /// Whether the selected model has downloaded and passed verification.
     fn ready(&self) -> bool {
         true
     }
 
-    fn load(&self) -> Result<Arc<dyn Summarizer>>;
+    /// Loads this id, returning [`LlmError::NotReady`] unless it is verified.
+    fn load(&self, model_id: &str) -> Result<Arc<dyn Summarizer>>;
 }

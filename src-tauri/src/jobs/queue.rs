@@ -185,6 +185,22 @@ impl JobQueue {
         Ok(())
     }
 
+    /// Whether a summary is running now; queued jobs don't count.
+    pub fn summarizing(&self) -> bool {
+        self.shared.lock().running.is_some()
+    }
+
+    /// Serializes model changes with summary admission and start. Returns
+    /// `None` while a summary is running. The closure runs under the queue
+    /// lock and must not call back into this queue.
+    pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let state = self.shared.lock();
+        if state.running.is_some() {
+            return None;
+        }
+        Some(operation())
+    }
+
     /// Starts loading the summary model in the background, so a recording's
     /// summary doesn't wait for it after the transcript is done (M5b).
     pub fn preload(&self) {
@@ -279,8 +295,9 @@ impl Drop for JobQueue {
 }
 
 fn work(shared: &Shared) {
-    // The model stays loaded between jobs (KTD5).
-    let mut llm: Option<Arc<dyn Summarizer>> = None;
+    // The model stays loaded between jobs (KTD5), keyed by its id so a
+    // switch of summary model loads the new one (spec 03 R20).
+    let mut llm: Option<(String, Arc<dyn Summarizer>)> = None;
     loop {
         let (job, cancel) = {
             let state = shared.lock();
@@ -295,9 +312,11 @@ fn work(shared: &Shared) {
             }
             if std::mem::take(&mut state.preload) {
                 drop(state);
-                if llm.is_none() && shared.loader.ready() {
-                    match catch_unwind(AssertUnwindSafe(|| shared.loader.load())) {
-                        Ok(Ok(model)) => llm = Some(model),
+                let id = shared.loader.model_id();
+                if llm.as_ref().is_none_or(|(loaded, _)| *loaded != id) && shared.loader.ready() {
+                    llm = None;
+                    match catch_unwind(AssertUnwindSafe(|| shared.loader.load(&id))) {
+                        Ok(Ok(model)) => llm = Some((id, model)),
                         // The job loads it again and reports the error.
                         Ok(Err(e)) => eprintln!("preloading the summary model failed: {e}"),
                         Err(_) => eprintln!("preloading the summary model crashed"),

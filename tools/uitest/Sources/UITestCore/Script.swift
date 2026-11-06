@@ -33,11 +33,14 @@ public struct Step: Equatable {
     public let line: Int
     public let source: String
     public let command: Command
+    /// Overrides the run's retry window for this step (`... timeout 300s`).
+    public let timeout: Double?
 
-    public init(line: Int, source: String, command: Command) {
+    public init(line: Int, source: String, command: Command, timeout: Double? = nil) {
         self.line = line
         self.source = source
         self.command = command
+        self.timeout = timeout
     }
 }
 
@@ -64,10 +67,22 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         guard !source.isEmpty else { continue }
         let tokens = try tokenize(source, line: lineNumber)
         guard let first = tokens.first else { continue }
-        let args = Array(tokens.dropFirst())
+        var args = Array(tokens.dropFirst())
 
         func fail(_ message: String) -> ScriptError { ScriptError(line: lineNumber, message: message) }
         func quoted(_ token: Token?) -> String? { token?.quoted == true ? token?.text : nil }
+        func seconds(_ token: Token) throws(ScriptError) -> Double {
+            let duration = token.text
+            if !token.quoted, duration.hasSuffix("ms"), let value = Double(duration.dropLast(2)), value.isFinite, value >= 0 { return value / 1000 }
+            if !token.quoted, duration.hasSuffix("s"), let value = Double(duration.dropLast()), value.isFinite, value >= 0 { return value }
+            throw fail("invalid duration: \(duration)")
+        }
+
+        var timeout: Double?
+        if args.count >= 2, args[args.count - 2].text == "timeout", !args[args.count - 2].quoted {
+            timeout = try seconds(args[args.count - 1])
+            args.removeLast(2)
+        }
 
         let command: Command
         switch first.text {
@@ -112,17 +127,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
         case "wait":
             guard args.count == 1, !args[0].quoted else { throw fail("usage: wait 30s or wait 500ms") }
-            let duration = args[0].text
-            let seconds: Double?
-            if duration.hasSuffix("ms"), let value = Double(duration.dropLast(2)), value >= 0 {
-                seconds = value / 1000
-            } else if duration.hasSuffix("s"), let value = Double(duration.dropLast()), value >= 0 {
-                seconds = value
-            } else {
-                seconds = nil
-            }
-            guard let seconds else { throw fail("invalid duration: \(duration)") }
-            command = .wait(seconds: seconds)
+            command = .wait(seconds: try seconds(args[0]))
         case "labels":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = .labels
@@ -143,7 +148,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         default:
             throw fail("unknown command: \(first.text)")
         }
-        steps.append(Step(line: lineNumber, source: source, command: command))
+        // only these commands retry; a timeout anywhere else would be silently ignored
+        if timeout != nil, !["launch", "click", "expect", "expect-not", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, expect, expect-not and close-window")
+        }
+        steps.append(Step(line: lineNumber, source: source, command: command, timeout: timeout))
     }
     guard !steps.isEmpty else { throw ScriptError(line: 0, message: "script has no steps") }
     return steps

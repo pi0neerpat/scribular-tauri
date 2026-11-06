@@ -20,6 +20,13 @@
   let beats = $state(0);
   let view = $state<'record' | 'settings'>('record');
   let speechReady = $state(false);
+  let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
+
+  function navigate(next: typeof view, opener?: HTMLElement) {
+    const action = () => (view = next);
+    if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action, opener);
+    else action();
+  }
 
   onMount(() => {
     lockedState()
@@ -63,19 +70,19 @@
     <p>Loading…</p>
   {/if}
   <nav>
-    <button onclick={() => (view = 'record')} aria-pressed={view === 'record'}>Record</button>
-    <button onclick={() => (view = 'settings')} aria-pressed={view === 'settings'}>Settings</button>
-    <TrialBadge onclick={() => (view = 'settings')} />
+    <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
+    <button onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'}>Settings</button>
+    <TrialBadge onclick={() => navigate('settings')} />
   </nav>
   <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
   <div hidden={view !== 'record'}><RecordView
       {speechReady}
       active={view === 'record'}
-      onEnterLicense={() => (view = 'settings')}
+      onEnterLicense={() => navigate('settings')}
     />
   </div>
   {#if view === 'settings'}
-    <Settings />
+    <Settings bind:this={settings} />
   {/if}
   <p>Heartbeat: {beats}</p>
 </main>

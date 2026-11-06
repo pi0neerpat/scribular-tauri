@@ -99,7 +99,7 @@ pub(super) fn run(
     shared: &Shared,
     job: &Job,
     cancel: &AtomicBool,
-    llm: &mut Option<Arc<dyn Summarizer>>,
+    llm: &mut Option<(String, Arc<dyn Summarizer>)>,
 ) {
     let mut reporter = Reporter {
         shared,
@@ -129,7 +129,7 @@ fn summarize(
     r: &mut Reporter<'_>,
     job: &Job,
     cancel: &AtomicBool,
-    llm: &mut Option<Arc<dyn Summarizer>>,
+    llm: &mut Option<(String, Arc<dyn Summarizer>)>,
 ) -> Result<(), Option<Stop>> {
     let store = &r.shared.store;
     let Some(session) = store.get_session(&job.session_id).map_err(stop)? else {
@@ -167,16 +167,19 @@ fn summarize(
         ..Timings::default()
     };
     r.step(1, 1, "Loading summary model...");
+    let model_id = r.shared.loader.model_id();
     let model = match llm {
-        Some(model) => {
+        Some((id, model)) if *id == model_id => {
             timings.model_load_ms = Some(0);
             Arc::clone(model)
         }
-        None => {
+        _ => {
+            // Free the old model before loading its replacement.
+            *llm = None;
             let started = Instant::now();
-            let model = r.shared.loader.load().map_err(stop)?;
+            let model = r.shared.loader.load(&model_id).map_err(stop)?;
             timings.model_load_ms = Some(ms(started));
-            *llm = Some(Arc::clone(&model));
+            *llm = Some((model_id.clone(), Arc::clone(&model)));
             model
         }
     };
@@ -250,13 +253,7 @@ fn summarize(
 
     let started = Instant::now();
     store
-        .finish_summary(
-            &job.session_id,
-            &summary,
-            &prompt.id,
-            r.shared.loader.model_id(),
-            &timings,
-        )
+        .finish_summary(&job.session_id, &summary, &prompt.id, &model_id, &timings)
         .map_err(stop)?;
     timings.save_ms = Some(ms(started));
     if let Err(e) = store.set_timings(&job.session_id, &timings) {

@@ -13,7 +13,9 @@ use std::{
 };
 
 use scribular_lib::engines::fake::{FakeLoader, FakeSummarizer, TEMPLATE_TOKENS};
-use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta};
+use scribular_lib::jobs::{
+    JobError, JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta,
+};
 use scribular_lib::llm::prompt::{chunk_prompt, combine_prompt, CHUNK_NOTE_TOKENS};
 use scribular_lib::llm::{Generation, LlmError};
 use scribular_lib::store::key::MemoryKeyStore;
@@ -371,11 +373,15 @@ fn under_ten_words_fails_without_touching_the_model() {
 
 #[test]
 fn a_second_regenerate_waits_for_the_first() {
-    let h = Harness::with_budget(100, |f| f.token_delay = Duration::from_millis(2));
+    let h = Harness::with_budget(100, |f| f.token_delay = Duration::from_millis(20));
     let a = h.session(&words(250), "");
     let b = h.session(&words(250), "");
 
+    assert_eq!(h.queue.while_idle(|| 7), Some(7));
     h.queue.regenerate(&a, PROMPT_ID).unwrap();
+    h.events
+        .wait_for(|p| p.session_id == a && p.state == SessionStatus::Summarizing);
+    assert!(h.queue.while_idle(|| ()).is_none());
     h.queue.regenerate(&b, PROMPT_ID).unwrap();
     h.wait_idle();
 
@@ -472,4 +478,66 @@ fn regenerate_rejects_a_session_still_recording_or_missing() {
         .queue
         .regenerate(&h.session(&words(20), ""), "no-such-prompt")
         .is_err());
+}
+
+/// Parity spec 03 AS8: a deleted style cannot be picked for a regenerate,
+/// and a job queued with it falls back to the active style.
+#[test]
+fn as8_a_deleted_style_is_refused_then_falls_back_to_active() {
+    let h = Harness::with_budget(100, |_| {});
+    let x = h.store.create_prompt("X", "Summarize briefly.").unwrap();
+    let id = h.session(&words(50), "old");
+
+    h.queue.regenerate(&id, &x.id).unwrap();
+    h.wait_idle();
+    assert_eq!(h.get(&id).prompt_id.as_deref(), Some(x.id.as_str()));
+
+    // Queued while the model is "downloading", deleted before it runs.
+    h.loader.ready.store(false, Ordering::SeqCst);
+    h.queue.regenerate(&id, &x.id).unwrap();
+    h.store.delete_prompt(&x.id).unwrap();
+    assert!(matches!(
+        h.queue.regenerate(&id, &x.id),
+        Err(JobError::PromptNotFound(p)) if p == x.id
+    ));
+    h.loader.ready.store(true, Ordering::SeqCst);
+    h.wait_idle();
+
+    let s = h.get(&id);
+    assert_eq!(s.status, SessionStatus::Done);
+    assert_eq!(s.prompt_id.as_deref(), Some(PROMPT_ID));
+}
+
+/// Parity spec 03 AS15: a changed summary model is loaded once, replaces
+/// the cached one, and is recorded on the session.
+#[test]
+fn as15_switching_the_model_reloads_once_and_records_the_new_id() {
+    let h = Harness::with_budget(100, |_| {});
+    let id = h.session(&words(50), "");
+
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.wait_idle();
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.wait_idle();
+    assert_eq!(
+        h.loader.loads.load(Ordering::SeqCst),
+        1,
+        "cached model reused"
+    );
+    assert_eq!(h.get(&id).model_id.as_deref(), Some("fake-llm"));
+
+    *h.loader.model.lock().unwrap() = "other-llm".into();
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.wait_idle();
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.wait_idle();
+
+    assert_eq!(h.loader.loads.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *h.loader.loaded_model_ids.lock().unwrap(),
+        ["fake-llm", "other-llm"]
+    );
+    let s = h.get(&id);
+    assert_eq!(s.status, SessionStatus::Done);
+    assert_eq!(s.model_id.as_deref(), Some("other-llm"));
 }
