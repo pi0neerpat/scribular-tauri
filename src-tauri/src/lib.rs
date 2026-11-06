@@ -146,9 +146,28 @@ pub fn run() {
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
-            let db_path = data_dir.join("scribular.db");
-            let keys = key_store(&app.config().identifier, DB_KEY_ACCOUNT);
+            // Each checkout's dev build gets its own database: branches add
+            // different migrations, so a shared file breaks the older ones.
+            // Release builds (uitest included) keep the plain path; models stay shared.
+            // The keychain account follows, so Start fresh in one checkout
+            // doesn't lock the others' databases.
+            #[cfg(dev)]
+            let (db_dir, key_account) = {
+                let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                (
+                    data_dir.join("dev").join(&*checkout),
+                    format!("{DB_KEY_ACCOUNT}-{checkout}"),
+                )
+            };
+            #[cfg(not(dev))]
+            let (db_dir, key_account) = (data_dir.clone(), DB_KEY_ACCOUNT.to_string());
+            std::fs::create_dir_all(&db_dir)?;
+            let db_path = db_dir.join("scribular.db");
+            let keys = key_store(&app.config().identifier, &key_account);
             let opened = Store::open(&db_path, keys.as_ref());
             let reason = match &opened {
                 Err(StoreError::Locked(reason)) => Some(*reason),
