@@ -16,7 +16,6 @@ pub const PENDING_UPDATE_INSTALL: &str = "pending_update_install";
 pub const SKIPPED_UPDATE_VERSION: &str = "skipped_update_version";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
-pub const TELEMETRY_ENABLED: &str = "telemetry_enabled";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
@@ -74,19 +73,6 @@ impl Store {
 
     pub fn onboarding_completed(&self) -> Result<bool> {
         Ok(self.get_setting(ONBOARDING_COMPLETED)?.as_deref() == Some("1"))
-    }
-
-    pub fn telemetry_setting(&self) -> Result<Option<bool>> {
-        match self.get_setting(TELEMETRY_ENABLED)?.as_deref() {
-            None => Ok(None),
-            Some("1") => Ok(Some(true)),
-            Some("0") => Ok(Some(false)),
-            Some(_) => Err(super::StoreError::InvalidSetting(TELEMETRY_ENABLED.into())),
-        }
-    }
-
-    pub fn set_telemetry_setting(&self, enabled: bool) -> Result<()> {
-        self.set_setting(TELEMETRY_ENABLED, if enabled { "1" } else { "0" })
     }
 
     /// Reads them all under one lock, so a concurrent save is seen whole.
@@ -149,15 +135,10 @@ mod tests {
     }
 
     #[test]
-    fn onboarding_and_telemetry_choices_persist_with_undecided_telemetry_off_by_default() {
+    fn onboarding_choice_persists() {
         let store = store();
         assert!(!store.onboarding_completed().unwrap());
-        assert_eq!(store.telemetry_setting().unwrap(), None);
         store.complete_onboarding().unwrap();
         assert!(store.onboarding_completed().unwrap());
-        store.set_telemetry_setting(false).unwrap();
-        assert_eq!(store.telemetry_setting().unwrap(), Some(false));
-        store.set_telemetry_setting(true).unwrap();
-        assert_eq!(store.telemetry_setting().unwrap(), Some(true));
     }
 }

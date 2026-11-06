@@ -41,12 +41,12 @@ describe('api', () => {
     invoke.mockResolvedValueOnce({ completed: false })
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce('sample-id')
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('undecided')
       .mockResolvedValueOnce(undefined);
     await expect(getOnboardingState()).resolves.toEqual({ completed: false });
     await completeOnboarding();
     await expect(restoreSampleSessions()).resolves.toBe('sample-id');
-    await expect(getTelemetrySetting()).resolves.toBeNull();
+    await expect(getTelemetrySetting()).resolves.toBe('undecided');
     await setTelemetrySetting(false);
     expect(invoke.mock.calls.map(([name]) => name)).toEqual([
       'get_onboarding_state', 'complete_onboarding', 'restore_sample_sessions',

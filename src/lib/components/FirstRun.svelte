@@ -30,7 +30,7 @@
   }
 
   onMount(() => {
-    getTelemetrySetting().then((value) => { if (!telemetryChosen) telemetry = value; }).catch((e) => (telemetryError = String(e)));
+    getTelemetrySetting().then((value) => { if (!telemetryChosen) telemetry = value === 'undecided' ? null : value === 'on'; }).catch((e) => (telemetryError = String(e)));
     // Listen before the snapshot and download, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));

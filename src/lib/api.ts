@@ -45,13 +45,13 @@ export function restoreSampleSessions(): Promise<string> {
   return invoke<string>('restore_sample_sessions');
 }
 
-export function getTelemetrySetting(): Promise<boolean | null> {
-  return invoke<boolean | null>('get_telemetry_setting');
-}
-
-export function setTelemetrySetting(enabled: boolean): Promise<void> {
-  return invoke<void>('set_telemetry_setting', { enabled });
-}
+export function getDiagnostics(): Promise<string> { return invoke<string>('get_diagnostics'); }
+export function viewLogs(): Promise<void> { return invoke<void>('view_logs'); }
+export function getTelemetrySetting(): Promise<'on' | 'off' | 'undecided'> { return invoke<'on' | 'off' | 'undecided'>('get_telemetry_setting'); }
+export function setTelemetrySetting(enabled: boolean): Promise<void> { return invoke<void>('set_telemetry_setting', { enabled }); }
+export function reportFrontendError(kind: string, frames: string[]): Promise<void> { return invoke<void>('report_frontend_error', { kind, frames }); }
+export function reportTestError(): Promise<void> { return invoke<void>('report_test_error'); }
+export function triggerTestPanic(): Promise<void> { return invoke<void>('trigger_test_panic'); }
 
 export function checkForUpdates(): Promise<void> { return invoke<void>('check_for_updates'); }
 export function getUpdateState(): Promise<UpdateState> { return invoke<UpdateState>('get_update_state'); }

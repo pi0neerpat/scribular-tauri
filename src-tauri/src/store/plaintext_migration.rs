@@ -160,11 +160,14 @@ pub(super) fn scrub(path: &Path) -> Result<(), String> {
     };
     let overwritten = overwrite();
     let removed = fs::remove_file(path);
-    eprintln!(
-        "plaintext scrub {}: overwrite {}, unlink {}",
-        path.file_name().unwrap_or_default().to_string_lossy(),
-        if overwritten.is_ok() { "ok" } else { "failed" },
-        if removed.is_ok() { "ok" } else { "failed" },
+    crate::diag::log::log(
+        "INFO",
+        "store",
+        &format!(
+            "plaintext scrub: overwrite {}, unlink {}",
+            if overwritten.is_ok() { "ok" } else { "failed" },
+            if removed.is_ok() { "ok" } else { "failed" }
+        ),
     );
     removed.map_err(|e| format!("remove plaintext copy: {e}"))
 }
