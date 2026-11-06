@@ -9,6 +9,7 @@ final class AXDriver: Driver {
     private let runDir: URL
     private let keychainPassword: String?
     private var application: NSRunningApplication?
+    private var keychainHandled = false  // the runner retries .launch; handle the prompt once per launch
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?) {
         self.lifecycle = lifecycle
@@ -22,7 +23,8 @@ final class AXDriver: Driver {
         case .launch(let keepData):
             let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
             // a rebuilt (re-signed) app blocks on a keychain prompt before its window opens
-            if keychainWindow() != nil {
+            if !keychainHandled && keychainWindow() != nil {
+                keychainHandled = true
                 if keychainPassword != nil { _ = try handleKeychain() }
                 else {
                     // no password: give a person 2 minutes to approve the prompt by hand
@@ -38,6 +40,7 @@ final class AXDriver: Driver {
         case .quit:
             lifecycle.quit()
             application = nil
+            keychainHandled = false
             return nil
         case .click(let label, let index, let within):
             let element = try resolve(label, index: index, within: within)
