@@ -1,5 +1,9 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { installFrontendErrorHandlers } from './lib/frontend-errors';
+
+installFrontendErrorHandlers();
+
 import { openExternalLink } from './lib/api';
 
 document.addEventListener('click', (event) => {

@@ -16,11 +16,12 @@ const installUpdate = vi.fn();
 const onUpdateState = vi.fn().mockResolvedValue(() => {});
 const requestNotificationPermission = vi.fn();
 const setAppSettings = vi.fn();
+const getTelemetrySetting = vi.fn().mockResolvedValue('off');
 vi.mock('../api', () => ({
   appVersion, checkForUpdates, getAppSettings, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
-  setAppSettings, setRecordingSettings,
+  setAppSettings, setRecordingSettings, getTelemetrySetting,
 }));
 import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.

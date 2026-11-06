@@ -361,17 +361,11 @@ mod tests {
             player.0.try_wait().unwrap().is_none(),
             "playback ended early"
         );
-        let format = capture.format();
         drop(capture);
         consumer.drain(&mut samples);
         assert!(!samples.is_empty(), "helper delivered no PCM");
         assert!(samples.iter().all(|x| x.is_finite()), "invalid PCM");
         let rms = (samples.iter().map(|x| x * x).sum::<f32>() / samples.len() as f32).sqrt();
-        eprintln!(
-            "real helper: {} samples, {:?}, RMS {rms}",
-            samples.len(),
-            format
-        );
         assert!(rms > 0.002, "helper delivered silence: RMS {rms}");
         assert!(consumer.drain(&mut Vec::new()).closed);
     }

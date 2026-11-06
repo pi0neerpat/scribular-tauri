@@ -77,7 +77,7 @@ fn stop(app: &AppHandle, speakers: Option<u8>) {
                 Ok(Err(e)) => e.to_string(),
                 Err(e) => e.to_string(),
             };
-            eprintln!("tray stop failed: {error}");
+            crate::diag::log::log("ERROR", "shell", "tray stop failed");
             if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
                 refresh(&app, recorder.is_recording());
             }
