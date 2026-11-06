@@ -18,7 +18,7 @@ enum Preflight {
         }
         guard executable("ffmpeg") != nil else { throw PreflightError(message: "install ffmpeg and ensure it is on PATH") }
         guard FileManager.default.fileExists(atPath: appPath.path) else {
-            throw PreflightError(message: "build first: npm run tauri -- build --features fake-engines --bundles app")
+            throw PreflightError(message: "build first: APPLE_SIGNING_IDENTITY=\"Scribular Local Dev\" npm run tauri -- build --bundles app")
         }
         let session = CGSessionCopyCurrentDictionary() as? [String: Any]
         let locked = session?["CGSSessionScreenIsLocked"] as? Bool ?? false
