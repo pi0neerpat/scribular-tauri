@@ -6,5 +6,13 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
         println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path");
     }
+    // tauri.conf.json bundles those dylibs from src-tauri/target/release; with
+    // CARGO_TARGET_DIR elsewhere, a fresh checkout lacks that path, so link it.
+    #[cfg(unix)]
+    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+        if std::fs::symlink_metadata("target").is_err() {
+            let _ = std::os::unix::fs::symlink(dir, "target");
+        }
+    }
     tauri_build::build()
 }

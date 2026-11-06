@@ -146,8 +146,21 @@ pub fn run() {
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&data_dir)?;
-            let db_path = data_dir.join("scribular.db");
+            // Each checkout's dev build gets its own database: branches add
+            // different migrations, so a shared file breaks the older ones.
+            // Release builds (uitest included) keep the plain path; models stay shared.
+            #[cfg(dev)]
+            let db_dir = {
+                let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .unwrap_or_default();
+                data_dir.join("dev").join(checkout)
+            };
+            #[cfg(not(dev))]
+            let db_dir = data_dir.clone();
+            std::fs::create_dir_all(&db_dir)?;
+            let db_path = db_dir.join("scribular.db");
             let keys = key_store(&app.config().identifier, DB_KEY_ACCOUNT);
             let opened = Store::open(&db_path, keys.as_ref());
             let reason = match &opened {
