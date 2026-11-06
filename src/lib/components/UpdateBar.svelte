@@ -7,6 +7,12 @@
   let dismissedVersion = $state<string | null>(null);
   let error = $state<string | null>(null);
 
+  // A new state or version retires the old error; a same-version error stays for retry.
+  function apply(next: UpdateState) {
+    if (next.state !== 'ready' || updateState.state !== 'ready' || next.version !== updateState.version) error = null;
+    updateState = next;
+  }
+
   function later() {
     if (updateState.state === 'ready') dismissedVersion = updateState.version;
   }
@@ -17,13 +23,13 @@
     let sawEvent = false;
     void (async () => {
       try {
-        const unlisten = await onUpdateState((next) => { sawEvent = true; updateState = next; });
+        const unlisten = await onUpdateState((next) => { sawEvent = true; apply(next); });
         if (disposed) unlisten(); else remove = unlisten;
       } catch { /* The state snapshot still lets the bar render. */ }
       try {
         const snapshot = await getUpdateState();
         // An event that arrived meanwhile is newer than the snapshot.
-        if (!sawEvent) updateState = snapshot;
+        if (!sawEvent) apply(snapshot);
       } catch { /* updater unavailable */ }
     })();
     return () => { disposed = true; remove?.(); };

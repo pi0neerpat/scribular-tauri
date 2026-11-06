@@ -29,3 +29,22 @@ it('shows ready idle updates, hides busy states, and Later dismisses only that v
   await vi.waitFor(() => expect(target.textContent).toContain('Scribular 0.2.1 is ready'));
   unmount(app);
 });
+
+it('keeps a same-version install error and clears it when a new version arrives', async () => {
+  let emit!: (state: unknown) => void;
+  onUpdateState.mockImplementation(async (handler) => { emit = handler; return () => {}; });
+  getUpdateState.mockResolvedValue({ state: 'ready', version: '0.2.0', notes: '', installable: true });
+  installUpdate.mockRejectedValue('install failed');
+  const target = document.createElement('div');
+  const app = mount(UpdateBar, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('Scribular 0.2.0 is ready'));
+  [...target.querySelectorAll('button')].find((b) => b.textContent === 'Restart to update')!.click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toBe('install failed'));
+  emit({ state: 'ready', version: '0.2.0', notes: '', installable: true });
+  await Promise.resolve();
+  expect(target.querySelector('[role="alert"]')?.textContent).toBe('install failed');
+  emit({ state: 'ready', version: '0.2.1', notes: '', installable: true });
+  await vi.waitFor(() => expect(target.textContent).toContain('Scribular 0.2.1 is ready'));
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+  unmount(app);
+});

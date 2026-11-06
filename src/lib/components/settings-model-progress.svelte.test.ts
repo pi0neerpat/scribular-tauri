@@ -105,3 +105,37 @@ it('shows updater state and disables restart while busy with the reason', async 
   expect(target.textContent).toContain('Finish your recording or summary first');
   unmount(app);
 });
+
+it('keeps an update event that arrives while the update snapshot is pending', async () => {
+  let emit!: (state: unknown) => void;
+  let resolveSnapshot!: (state: unknown) => void;
+  onUpdateState.mockImplementation(async (handler) => { emit = handler; return () => {}; });
+  getUpdateState.mockReturnValue(new Promise((resolve) => { resolveSnapshot = resolve; }));
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(emit).toBeDefined());
+  emit({ state: 'downloading', installable: false });
+  resolveSnapshot({ state: 'idle', installable: false });
+  const check = () => [...target.querySelectorAll('button')].find((b) => b.textContent === 'Check for updates') as HTMLButtonElement;
+  await vi.waitFor(() => expect(check().disabled).toBe(true));
+  await new Promise((r) => setTimeout(r));
+  expect(check().disabled).toBe(true);
+  unmount(app);
+  getUpdateState.mockResolvedValue({ state: 'idle', installable: false });
+});
+
+it('shows an alert when the install is rejected', async () => {
+  onUpdateState.mockResolvedValue(() => {});
+  getUpdateState.mockResolvedValue({ state: 'ready', version: '0.2.0', notes: '', installable: true });
+  installUpdate.mockRejectedValue('install failed');
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('Version 0.2.0 ready'));
+  [...target.querySelectorAll('button')].find((b) => b.textContent === 'Restart to update')!.click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('install failed'));
+  unmount(app);
+});

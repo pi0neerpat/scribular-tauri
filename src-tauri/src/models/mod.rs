@@ -88,7 +88,7 @@ pub struct ModelManager {
     specs: Vec<ModelSpec>,
     client: reqwest::Client,
     /// One guard per model: retries can proceed while a later model downloads.
-    running: Vec<AtomicBool>,
+    running: Vec<Arc<AtomicBool>>,
     /// Serializes requests so concurrent callers see an owner's result before retrying.
     download_locks: Vec<AsyncMutex<()>>,
     pub readiness: Readiness,
@@ -116,7 +116,7 @@ impl ModelManager {
             .unwrap_or_default();
         Self {
             dir,
-            running: specs.iter().map(|_| AtomicBool::new(false)).collect(),
+            running: specs.iter().map(|_| Arc::new(AtomicBool::new(false))).collect(),
             download_locks: specs.iter().map(|_| AsyncMutex::new(())).collect(),
             specs,
             client: reqwest::Client::new(),
@@ -255,12 +255,20 @@ impl ModelManager {
         let running = &self.running[i];
         // Claimed under the install gate: an update install either sees this
         // download as busy or restarts before it starts.
-        let claimed = {
-            let _gate = self
-                .install_gate
-                .get()
-                .map(|gate| gate.lock().unwrap_or_else(|p| p.into_inner()));
-            running.swap(true, Ordering::AcqRel)
+        // The gate is a std Mutex an install can hold for a while; wait for it
+        // off the async workers.
+        let claimed = match self.install_gate.get().cloned() {
+            Some(gate) => {
+                let flag = Arc::clone(running);
+                tauri::async_runtime::spawn_blocking(move || {
+                    let _gate = gate.lock().unwrap_or_else(|p| p.into_inner());
+                    flag.swap(true, Ordering::AcqRel)
+                })
+                .await
+                // The closure cannot panic; treat a join failure as busy.
+                .unwrap_or(true)
+            }
+            None => running.swap(true, Ordering::AcqRel),
         };
         if claimed {
             return None;
