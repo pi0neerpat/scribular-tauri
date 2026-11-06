@@ -29,7 +29,8 @@
     }
     const anchor = document.querySelector<HTMLElement>(`[data-tour="${current.anchor}"]`);
     if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
+    const target = current.anchor === 'input-mode' ? anchor.querySelector<HTMLElement>('fieldset') ?? anchor : anchor;
+    const rect = target.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 32);
     const left = Math.min(window.innerWidth - width - 16, Math.max(16, rect.right + 16));
     const top = Math.max(16, Math.min(window.innerHeight - (card?.offsetHeight ?? 0) - 16, rect.top));
@@ -70,9 +71,12 @@
     });
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
+    const observer = new MutationObserver(place);
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
+      observer.disconnect();
     };
   });
 </script>

@@ -42,6 +42,26 @@ describe('onboarding tour', () => {
     expect(target.textContent).toContain('1 of 3');
   });
 
+  it('repositions the audio step from the stable Settings wrapper to its Record controls when they load', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<section data-tour="input-mode"></section>');
+    const target = document.createElement('div');
+    document.body.append(target);
+    instance = mount(OnboardingTour, {
+      target,
+      props: { onNavigate: vi.fn(), onComplete: vi.fn() },
+    });
+    flushSync();
+
+    target.querySelector<HTMLButtonElement>('button:not(.close)')!.click();
+    flushSync();
+    const record = document.createElement('fieldset');
+    record.getBoundingClientRect = () => ({ x: 200, y: 100, top: 100, right: 300, bottom: 200, left: 200, width: 100, height: 100, toJSON: () => ({}) });
+    document.querySelector('[data-tour="input-mode"]')!.append(record);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(target.querySelector('aside')!.getAttribute('style')).toContain('left: 316px');
+  });
+
   it.each([
     [true, 'Everything stays on your device.'],
     [false, 'After you finish a recording, the transcript and summary appear here.'],
