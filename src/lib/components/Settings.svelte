@@ -50,6 +50,8 @@
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
   let telemetryOn = $state(false);
+  let telemetryKnown = $state(false);
+  let telemetrySaving = $state(false);
   let diagnosticsStatus = $state<string | null>(null);
   let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
@@ -83,7 +85,12 @@
         // An event that arrived meanwhile is newer than the snapshot.
         if (!sawUpdate) update = current;
       } catch { /* Update status is optional while the rest of Settings loads. */ }
-      try { telemetryOn = (await getTelemetrySetting()) === 'on'; } catch { /* Privacy controls remain off if the setting cannot be read. */ }
+      try {
+        telemetryOn = (await getTelemetrySetting()) === 'on';
+        telemetryKnown = true;
+      } catch {
+        diagnosticsStatus = 'Could not read telemetry setting';
+      }
       try {
         try {
           const removeListener = await onModelsProgress((p) => {
@@ -136,12 +143,19 @@
   }
 
   async function changeTelemetry() {
+    if (telemetrySaving) return;
+    telemetrySaving = true;
     try {
       await setTelemetrySetting(telemetryOn);
+      telemetryKnown = true;
       diagnosticsStatus = null;
     } catch (e) {
-      telemetryOn = !telemetryOn;
+      const setting = await getTelemetrySetting().catch(() => 'unknown');
+      telemetryKnown = setting !== 'unknown';
+      telemetryOn = setting === 'on';
       diagnosticsStatus = String(e);
+    } finally {
+      telemetrySaving = false;
     }
   }
 
@@ -252,7 +266,7 @@
 
   <fieldset>
     <legend>Privacy &amp; diagnostics</legend>
-    <label><input type="checkbox" bind:checked={telemetryOn} onchange={changeTelemetry} /> Send usage and error reports</label>
+    <label><input type="checkbox" bind:checked={telemetryOn} disabled={!telemetryKnown || telemetrySaving} onchange={changeTelemetry} /> Send usage and error reports</label>
     <button onclick={copyDiagnostics}>Copy diagnostics</button>
     <button onclick={openLogs}>View logs</button>
     {#if diagnosticsStatus}<p role="status">{diagnosticsStatus}</p>{/if}

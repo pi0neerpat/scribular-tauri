@@ -306,7 +306,7 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 app.state::<Arc<update::UpdateManager>>().install_on_quit();
                 if let Some(store) = app.try_state::<Arc<Store>>() {
-                    diag::telemetry::send_usage(Arc::clone(&store));
+                    diag::telemetry::send_usage_on_quit(Arc::clone(&store));
                 }
             }
         });
@@ -436,6 +436,7 @@ mod tests {
                     let macros = [
                         "eprintln",
                         "println",
+                        "print",
                         "dbg",
                         "log::error",
                         "log::warn",

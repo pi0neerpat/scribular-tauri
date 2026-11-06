@@ -4,7 +4,6 @@
 use std::{
     collections::VecDeque,
     fmt,
-    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex, MutexGuard,
@@ -341,7 +340,7 @@ fn work(shared: &Shared) {
                 let id = shared.loader.model_id();
                 if llm.as_ref().is_none_or(|(loaded, _)| *loaded != id) && shared.loader.ready() {
                     llm = None;
-                    match catch_unwind(AssertUnwindSafe(|| shared.loader.load(&id))) {
+                    match crate::diag::panic::catch_unwind(|| shared.loader.load(&id)) {
                         Ok(Ok(model)) => llm = Some((id, model)),
                         // The job loads it again and reports the error.
                         Ok(Err(e)) => crate::diag::log::log(
@@ -376,9 +375,8 @@ fn work(shared: &Shared) {
             });
             (job, cancel)
         };
-        let ran = catch_unwind(AssertUnwindSafe(|| {
-            summarize::run(shared, &job, &cancel, &mut llm)
-        }));
+        let ran =
+            crate::diag::panic::catch_unwind(|| summarize::run(shared, &job, &cancel, &mut llm));
         if ran.is_err() {
             // The engine may be in a bad state; load it again next time.
             llm = None;

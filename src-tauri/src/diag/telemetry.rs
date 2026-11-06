@@ -203,28 +203,38 @@ pub fn record_session(store: Arc<Store>, duration_ms: u32) {
     if ensure_week(&store).is_err() {
         return;
     }
+    let first_session = parse_counter(&store, SESSIONS) == 0;
     increment(&store, SESSIONS, 1);
     increment(&store, SECONDS, u64::from(duration_ms / 1000));
     drop(_guard);
-    send_usage(store);
+    if first_session {
+        send_usage(store);
+    }
 }
 
 pub fn send_usage(store: Arc<Store>) {
+    send_usage_with_timeout(store, Duration::from_secs(10), false);
+}
+
+pub fn send_usage_on_quit(store: Arc<Store>) {
+    send_usage_with_timeout(store, Duration::from_secs(2), true);
+}
+
+fn send_usage_with_timeout(store: Arc<Store>, timeout: Duration, wait: bool) {
     let Some(payload) = usage(&store) else {
         return;
     };
     let Ok(body) = serde_json::to_value(payload) else {
         return;
     };
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
     tauri::async_runtime::spawn(async move {
         if !send_allowed(&store) {
+            let _ = done_tx.send(());
             return;
         }
         if let Some(root) = api_root() {
-            if let Ok(client) = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-            {
+            if let Ok(client) = reqwest::Client::builder().timeout(timeout).build() {
                 let _ = client
                     .post(format!("{root}/api/usage"))
                     .json(&body)
@@ -232,7 +242,11 @@ pub fn send_usage(store: Arc<Store>) {
                     .await;
             }
         }
+        let _ = done_tx.send(());
     });
+    if wait {
+        let _ = done_rx.recv_timeout(timeout);
+    }
 }
 
 fn api_root() -> Option<String> {
@@ -331,12 +345,10 @@ fn send_pending(store: Arc<Store>) {
     if !send_allowed(&store) {
         return;
     }
-    let Some(body) = store
-        .get_setting(PENDING)
-        .ok()
-        .flatten()
-        .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
-    else {
+    let Some(body) = store.get_setting(PENDING).ok().flatten() else {
+        return;
+    };
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(&body) else {
         return;
     };
     tauri::async_runtime::spawn(async move {
@@ -350,17 +362,27 @@ fn send_pending(store: Arc<Store>) {
             {
                 if client
                     .post(format!("{root}/api/errors"))
-                    .json(&body)
+                    .json(&payload)
                     .send()
                     .await
                     .is_ok_and(|response| response.status().is_success())
                     && send_allowed(&store)
                 {
-                    let _ = store.delete_setting(PENDING);
+                    delete_pending_if_matches(&store, &body);
                 }
             }
         }
     });
+}
+
+fn delete_pending_if_matches(store: &Store, sent: &str) {
+    let _guard = COUNTERS
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    if store.get_setting(PENDING).ok().flatten().as_deref() == Some(sent) {
+        let _ = store.delete_setting(PENDING);
+    }
 }
 
 fn timestamp() -> String {
@@ -401,6 +423,18 @@ mod tests {
         )
         .unwrap();
         (Arc::new(store), dir)
+    }
+
+    #[test]
+    fn old_pending_send_cannot_delete_a_newer_report() {
+        let (store, dir) = store();
+        store.set_setting(PENDING, "newer").unwrap();
+        delete_pending_if_matches(&store, "older");
+        assert_eq!(
+            store.get_setting(PENDING).unwrap().as_deref(),
+            Some("newer")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

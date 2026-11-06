@@ -204,17 +204,48 @@ pub fn report_frontend_error(kind: String, frames: Vec<String>, store: State<'_,
     }
     let safe_frames = frames
         .into_iter()
-        .filter(|f| {
-            !f.is_empty()
-                && f.len() <= 240
-                && f.bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"_./:-".contains(&b))
-        })
+        .filter(|f| safe_frontend_frame(f))
         .take(8)
         .collect::<Vec<_>>();
     let detail = safe_frames.join(",");
     crate::diag::log::log("ERROR", "webview", &format!("{code} {detail}"));
     crate::diag::telemetry::report(Arc::clone(&store), code);
+}
+
+fn safe_frontend_frame(frame: &str) -> bool {
+    let Some((file, location)) = frame.rsplit_once(':') else {
+        return false;
+    };
+    let Some((file, line)) = file.rsplit_once(':') else {
+        return false;
+    };
+    !file.is_empty()
+        && frame.len() <= 240
+        && (file.starts_with("src/") || file.starts_with("assets/") || file == "index.html")
+        && !file.starts_with('/')
+        && !file.starts_with('~')
+        && !file.contains('\\')
+        && file
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && file
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
+        && line.parse::<u32>().is_ok()
+        && location.parse::<u32>().is_ok()
+}
+
+#[cfg(test)]
+mod frontend_frame_tests {
+    use super::safe_frontend_frame;
+
+    #[test]
+    fn frontend_frames_must_be_relative_file_line_column_values() {
+        assert!(safe_frontend_frame("src/app.js:12:4"));
+        assert!(!safe_frontend_frame("/Users/jane/app.js:12:4"));
+        assert!(!safe_frontend_frame("Users/jane/app.js:12:4"));
+        assert!(!safe_frontend_frame("src/../private.js:12:4"));
+    }
 }
 
 #[cfg(debug_assertions)]

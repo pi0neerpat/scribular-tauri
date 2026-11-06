@@ -24,4 +24,16 @@ describe('frontend error reporting', () => {
     });
     expect(JSON.stringify(invoke.mock.calls)).not.toContain('CANARY');
   });
+
+  it('reports Safari rejection frames without error content', async () => {
+    const error = new Error('CANARY-MESSAGE');
+    error.name = 'CANARY-NAME';
+    error.stack = 'Error: CANARY-MESSAGE\n    call@tauri://localhost/src/app.js:12:4';
+    window.onunhandledrejection?.({ reason: error } as PromiseRejectionEvent);
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledWith('report_frontend_error', {
+      kind: 'unhandled_rejection', frames: ['src/app.js:12:4'],
+    });
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('CANARY');
+  });
 });

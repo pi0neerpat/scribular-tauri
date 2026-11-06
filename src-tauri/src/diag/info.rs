@@ -49,15 +49,18 @@ pub fn diagnostics(store: &Store, models: &ModelManager, log_dir: &Path) -> Resu
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let dir = std::env::var_os("HOME")
-        .and_then(|home| {
-            log_dir
-                .strip_prefix(home)
-                .ok()
-                .map(|rest| format!("~/{}", rest.display()))
-        })
-        .unwrap_or_else(|| log_dir.display().to_string());
+    let dir = log_dir_label(log_dir, std::env::var_os("HOME"));
     Ok(format!("Scribular {version}{build}\nmacOS {os} ({arch})\nTauri {}\nDB schema v{schema}\nModels: {models}\nTelemetry: {telemetry}\nLog dir: {dir}", tauri::VERSION))
+}
+
+fn log_dir_label(log_dir: &Path, home: Option<std::ffi::OsString>) -> String {
+    home.and_then(|home| {
+        log_dir
+            .strip_prefix(home)
+            .ok()
+            .map(|rest| format!("~/{}", rest.display()))
+    })
+    .unwrap_or_else(|| "[redacted]".into())
 }
 
 #[cfg(test)]
@@ -87,5 +90,15 @@ mod tests {
         );
         assert!(!text.contains(&home));
         std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn diagnostics_redact_log_paths_outside_home() {
+        let path = Path::new("/private/var/folders/jane/logs");
+        assert_eq!(
+            log_dir_label(path, Some("/Users/other".into())),
+            "[redacted]"
+        );
+        assert_eq!(log_dir_label(path, None), "[redacted]");
     }
 }

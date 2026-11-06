@@ -144,16 +144,9 @@ where
         },
         move |e| {
             crate::diag::log::log(
-                "ERROR",
+                if is_fatal(&e) { "ERROR" } else { "WARN" },
                 "audio",
-                &format!(
-                    "microphone error ({})",
-                    if is_fatal(&e) {
-                        "device_lost"
-                    } else {
-                        "stream_error"
-                    }
-                ),
+                &format!("microphone error ({:?})", e.kind()),
             );
             if is_fatal(&e) {
                 let _ = lost.send(());

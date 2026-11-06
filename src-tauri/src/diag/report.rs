@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 pub struct FrontendRateLimit {
     start: Instant,
     count: u8,
-    suppressed: u32,
+    suppressed: bool,
 }
 
 impl Default for FrontendRateLimit {
@@ -11,7 +11,7 @@ impl Default for FrontendRateLimit {
         Self {
             start: Instant::now(),
             count: 0,
-            suppressed: 0,
+            suppressed: false,
         }
     }
 }
@@ -22,11 +22,12 @@ impl FrontendRateLimit {
         if self.start.elapsed() >= Duration::from_secs(60) {
             self.start = Instant::now();
             self.count = 0;
-            self.suppressed = 0;
+            self.suppressed = false;
         }
         if self.count >= 20 {
-            self.suppressed = self.suppressed.saturating_add(1);
-            return (false, self.suppressed == 1);
+            let first = !self.suppressed;
+            self.suppressed = true;
+            return (false, first);
         }
         self.count += 1;
         (true, false)

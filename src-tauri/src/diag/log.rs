@@ -160,19 +160,23 @@ pub fn log(level: &str, module: &str, message: &str) {
 
 /// Returns a closed, content-free error category.
 pub fn kind(error: &(dyn Error + 'static)) -> &'static str {
-    if let Some(e) = error.downcast_ref::<std::io::Error>() {
-        return match e.kind() {
-            std::io::ErrorKind::NotFound => "io_not_found",
-            std::io::ErrorKind::PermissionDenied => "io_permission_denied",
-            std::io::ErrorKind::TimedOut => "io_timeout",
-            _ => "io_error",
-        };
-    }
-    if error.is::<rusqlite::Error>() {
-        return "database_error";
-    }
-    if error.is::<reqwest::Error>() {
-        return "network_error";
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(e) = error.downcast_ref::<std::io::Error>() {
+            return match e.kind() {
+                std::io::ErrorKind::NotFound => "io_not_found",
+                std::io::ErrorKind::PermissionDenied => "io_permission_denied",
+                std::io::ErrorKind::TimedOut => "io_timeout",
+                _ => "io_error",
+            };
+        }
+        if error.is::<rusqlite::Error>() {
+            return "database_error";
+        }
+        if error.is::<reqwest::Error>() {
+            return "network_error";
+        }
+        current = error.source();
     }
     "error"
 }
@@ -206,5 +210,14 @@ mod tests {
     fn error_kind_never_returns_display_text() {
         let error = std::io::Error::other("CANARY-CLIENT-JANE");
         assert_eq!(kind(&error), "io_error");
+    }
+
+    #[test]
+    fn error_kind_follows_store_error_sources() {
+        let error =
+            crate::store::StoreError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert_eq!(kind(&error), "io_not_found");
+        let error = crate::store::StoreError::Sqlite(rusqlite::Error::InvalidQuery);
+        assert_eq!(kind(&error), "database_error");
     }
 }

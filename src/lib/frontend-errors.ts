@@ -3,7 +3,7 @@ import { reportFrontendError } from './api';
 export function framesFromStack(stack?: string): string[] {
   if (!stack) return [];
   return stack.split('\n').flatMap((line) => {
-    const match = line.match(/(?:\(|\s)(https?:\/\/[^\s)]+|tauri:\/\/[^\s)]+|[^\s()]+):(\d+):(\d+)\)?$/);
+    const match = line.match(/(?:\(|\s|@)(https?:\/\/[^\s)]+|tauri:\/\/[^\s)]+|[^@\s()]+):(\d+):(\d+)\)?$/);
     if (!match) return [];
     try {
       const url = new URL(match[1]);

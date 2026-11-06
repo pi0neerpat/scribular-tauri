@@ -74,7 +74,46 @@ impl fmt::Display for StoreError {
     }
 }
 
-impl std::error::Error for StoreError {}
+impl std::error::Error for StoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Sqlite(e) => Some(e),
+            Self::Json(e) => Some(e),
+            Self::Io(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+fn store_failure_kind(error: &str) -> &'static str {
+    if error.starts_with("open ") {
+        "migration_open_failed"
+    } else if error.starts_with("read ") {
+        "migration_read_failed"
+    } else if error.starts_with("rename ") || error.starts_with("restore plaintext") {
+        "migration_rename_failed"
+    } else if error.starts_with("remove ") {
+        "migration_remove_failed"
+    } else if error.starts_with("create ") {
+        "migration_create_failed"
+    } else if error.starts_with("fsync ") {
+        "migration_sync_failed"
+    } else if error.starts_with("integrity_check") || error.starts_with("copy does not match") {
+        "migration_integrity_failed"
+    } else if error.starts_with("user_version") {
+        "migration_version_invalid"
+    } else if error == "get refused" || error.starts_with("Keychain read failed") {
+        "keychain_read_failed"
+    } else if error == "set refused" || error.starts_with("Keychain write failed") {
+        "keychain_write_failed"
+    } else if error.starts_with("stored key has ") || error.starts_with("item has ") {
+        "keychain_item_invalid"
+    } else if error.starts_with("SecRandomCopyBytes") || error.starts_with("/dev/urandom") {
+        "random_source_failed"
+    } else {
+        "store_operation_failed"
+    }
+}
 
 impl From<rusqlite::Error> for StoreError {
     fn from(e: rusqlite::Error) -> Self {
@@ -107,8 +146,12 @@ impl Store {
     /// migrations and marks sessions a crash left mid-capture as failed.
     pub fn open(path: &Path, keys: &dyn KeyStore) -> Result<Self> {
         let locked = |reason| {
-            move |_e: String| {
-                crate::diag::log::log("ERROR", "store", &format!("store locked ({reason:?})"));
+            move |e: String| {
+                crate::diag::log::log(
+                    "ERROR",
+                    "store",
+                    &format!("store locked ({reason:?}; {})", store_failure_kind(&e)),
+                );
                 StoreError::Locked(reason)
             }
         };
@@ -225,8 +268,15 @@ const ENCRYPTION_NOTICE: &str = "encryption_notice";
 
 /// R5 row 1: generate, store, and read back before any DB uses the key.
 fn store_new_key(keys: &dyn KeyStore) -> Result<Key> {
-    let write_failed = |_e: String| {
-        crate::diag::log::log("ERROR", "store", "store locked (KeychainWriteFailed)");
+    let write_failed = |e: String| {
+        crate::diag::log::log(
+            "ERROR",
+            "store",
+            &format!(
+                "store locked (KeychainWriteFailed; {})",
+                store_failure_kind(&e)
+            ),
+        );
         StoreError::Locked(LockReason::KeychainWriteFailed)
     };
     let key = new_key().map_err(write_failed)?;
@@ -269,6 +319,27 @@ fn cipher_info(c: &Connection) -> Result<(String, String)> {
         Ok(v.unwrap_or_default())
     };
     Ok((get("cipher_version")?, get("cipher_provider")?))
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use super::store_failure_kind;
+
+    #[test]
+    fn store_failure_logs_keep_only_closed_causes() {
+        assert_eq!(
+            store_failure_kind("rename plaintext DB: /Users/jane/db"),
+            "migration_rename_failed"
+        );
+        assert_eq!(
+            store_failure_kind("Keychain read failed (code 9)"),
+            "keychain_read_failed"
+        );
+        assert_eq!(
+            store_failure_kind("private detail"),
+            "store_operation_failed"
+        );
+    }
 }
 
 /// R4: plain SQLite ignores `PRAGMA key` and would write plaintext. On macOS
