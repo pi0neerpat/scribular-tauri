@@ -13,8 +13,14 @@
     "windows": [
       {
         "title": "Scribular",
-        "width": 900,
-        "height": 640
+        "width": 670,
+        "height": 552,
+        "minWidth": 670,
+        "minHeight": 552,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 9, "y": 8 }
       }
     ],
     "security": {

@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
+import type { AppSettings } from './types/AppSettings';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { ClearSessionsResult } from './types/ClearSessionsResult';
@@ -99,6 +100,20 @@ export function startFresh(confirmation: string): Promise<void> {
 
 export function quitApp(): Promise<void> {
   return invoke<void>('quit_app');
+}
+export function confirmQuit(): Promise<void> { return invoke<void>('confirm_quit'); }
+export function notifyTrayStartFailure(message: string): Promise<void> { return invoke<void>('notify_tray_start_failure', { message }); }
+export function onTrayStartRecording(handler: () => void): Promise<UnlistenFn> {
+  return listen('tray-start-recording', () => handler());
+}
+export function onQuitRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen('quit-requested', () => handler());
+}
+export function onWindowCloseRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen('window-close-requested', () => handler());
+}
+export function onTrayStopFailed(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>('tray-stop-failed', (event) => handler(event.payload));
 }
 
 /** True once, after the prototype database was encrypted. */
@@ -226,6 +241,10 @@ export function transcribeFile(path: string): Promise<TranscriptSegment[]> {
 export function getRecordingSettings(): Promise<RecordingSettings> {
   return invoke<RecordingSettings>('get_recording_settings');
 }
+
+export function getAppSettings(): Promise<AppSettings> { return invoke<AppSettings>('get_app_settings'); }
+export function setAppSettings(settings: AppSettings): Promise<void> { return invoke<void>('set_app_settings', { settings }); }
+export function requestNotificationPermission(): Promise<boolean> { return invoke<boolean>('request_notification_permission'); }
 
 export function setRecordingSettings(settings: RecordingSettings): Promise<void> {
   return invoke<void>('set_recording_settings', { settings });
