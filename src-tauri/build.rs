@@ -10,8 +10,17 @@ fn main() {
     // CARGO_TARGET_DIR elsewhere, a fresh checkout lacks that path, so link it.
     #[cfg(unix)]
     if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
-        if std::fs::symlink_metadata("target").is_err() {
-            let _ = std::os::unix::fs::symlink(dir, "target");
+        let link = std::path::Path::new("target");
+        let current = std::fs::read_link(link).ok();
+        if current.as_deref() != Some(dir.as_ref()) {
+            // A stale link from an older CARGO_TARGET_DIR is replaced; a real
+            // directory is left alone and surfaces as the warning below.
+            if current.is_some() {
+                let _ = std::fs::remove_file(link);
+            }
+            if let Err(e) = std::os::unix::fs::symlink(&dir, link) {
+                println!("cargo:warning=could not link src-tauri/target -> {dir}: {e}; remove src-tauri/target or bundling misses the llama dylibs");
+            }
         }
     }
     tauri_build::build()
