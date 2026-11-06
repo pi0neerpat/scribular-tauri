@@ -15,7 +15,9 @@
     setActivePrompt,
     startRecording,
     stopRecording,
+    notifyTrayStartFailure,
   } from '../api';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { Privacy } from '../types/Privacy';
   import type { PromptList } from '../types/PromptList';
   import type { Session } from '../types/Session';
@@ -63,6 +65,7 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let startedAt = $state(0);
+  let trayStart = false;
   // Two sources show speaker labels.
   let labeled = $state(false);
   let now = $state(Date.now());
@@ -126,6 +129,8 @@
   });
 
   onMount(() => {
+    const startFromTray = () => { trayStart = true; void start(); };
+    window.addEventListener('tray-start-recording', startFromTray);
     const unlisten = onSessionProgress((p) => {
       if (p.sessionId !== sessionId) return;
       progress = p;
@@ -159,11 +164,22 @@
       startedAt = session?.createdAt ?? Date.now();
     });
     return () => {
+      window.removeEventListener('tray-start-recording', startFromTray);
       unlisten.then((fn) => fn());
     };
   });
 
   async function start() {
+    if (!speechReady) {
+      const message = "The speech model isn't downloaded yet.";
+      error = message;
+      if (trayStart) {
+        window.dispatchEvent(new Event('tray-start-failed'));
+        try { await notifyTrayStartFailure(message); } catch (e) { error = `${message} (notification failed: ${String(e)})`; }
+        trayStart = false;
+      }
+      return;
+    }
     busy = true;
     error = denied = null;
     result = progress = null;
@@ -182,6 +198,7 @@
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
       startedAt = Date.now();
+      trayStart = false;
     } catch (e) {
       if (attempt && sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) {
         sessionStorage.removeItem(IN_FLIGHT_START_KEY);
@@ -193,6 +210,14 @@
       else {
         denied = deniedPrivacy(String(e));
         error = String(e);
+        if (trayStart) {
+          window.dispatchEvent(new Event('tray-start-failed'));
+          try {
+            await getCurrentWindow().show();
+            await notifyTrayStartFailure(String(e));
+          } catch (noticeError) { error = `${String(e)} (notification failed: ${String(noticeError)})`; }
+          trayStart = false;
+        }
       }
     } finally {
       busy = false;

@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
@@ -21,7 +21,7 @@ use crate::models::{
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
-    now_ms, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
+    now_ms, AppSettings, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
     SessionPatch, Store, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
@@ -39,6 +39,8 @@ pub const EVENTS: &[&str] = &[
     SESSION_SEGMENTS_EVENT,
     LICENSE_CHANGED_EVENT,
     UPDATE_STATE_EVENT,
+    TRAY_START_RECORDING_EVENT,
+    QUIT_REQUESTED_EVENT,
 ];
 
 /// The new [`AccessState`] after activation, removal, re-validation or a day
@@ -46,6 +48,8 @@ pub const EVENTS: &[&str] = &[
 pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 
 pub const UPDATE_STATE_EVENT: &str = "update://state";
+pub const TRAY_START_RECORDING_EVENT: &str = "tray-start-recording";
+pub const QUIT_REQUESTED_EVENT: &str = "quit-requested";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
@@ -81,6 +85,7 @@ pub struct Heartbeat {
 #[cfg(test)]
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
+    AppSettings::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
     Session::export_all(cfg)?;
@@ -605,6 +610,32 @@ pub fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+pub(crate) fn confirm_quit(
+    app: AppHandle,
+    confirmed: State<'_, crate::QuitConfirmed>,
+    recorder: State<'_, Arc<Recorder>>,
+) {
+    confirmed.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    recorder.shutdown();
+    app.exit(0);
+}
+
+#[tauri::command]
+pub fn notify_tray_start_failure(app: AppHandle, message: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    app.notification()
+        .builder()
+        .title("Scribular")
+        .body(message)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
 /// True once, after a prototype DB was encrypted (R9 notice).
 #[tauri::command]
 pub fn take_encryption_notice(store: State<'_, Arc<Store>>) -> Result<bool, String> {
@@ -653,7 +684,7 @@ pub async fn stop_recording(
     recorder: State<'_, Arc<Recorder>>,
     num_speakers: Option<u8>,
 ) -> Result<String, String> {
-    if !matches!(num_speakers, None | Some(2 | 3)) {
+    if !matches!(num_speakers, None | Some(2 | 3 | 4)) {
         return Err("speaker count must be 2, 3, or 4+".into());
     }
     let recorder = Arc::clone(&recorder);
@@ -684,6 +715,25 @@ pub fn open_privacy_settings(pane: Privacy) -> Result<(), String> {
 #[tauri::command]
 pub fn current_recording(recorder: State<Arc<Recorder>>) -> Option<String> {
     recorder.current()
+}
+
+#[tauri::command]
+pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String> {
+    store.app_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_app_settings(store: State<Arc<Store>>, settings: AppSettings) -> Result<(), String> {
+    store.set_app_settings(settings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn request_notification_permission(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .request_permission()
+        .map(|p| p == tauri::plugin::PermissionState::Granted)
+        .map_err(|e| e.to_string())
 }
 
 /// Development only (M4): transcribes a 16-bit, 16 kHz mono WAV file.
@@ -777,8 +827,50 @@ fn open_link_with(
 /// Emits job events to the webview.
 pub struct TauriJobEvents(pub AppHandle);
 
+#[derive(Default)]
+pub struct SummaryNotices(std::sync::Mutex<std::collections::HashSet<String>>);
+
+fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -> bool {
+    enabled && !focused && !already_notified
+}
+
 impl JobEvents for TauriJobEvents {
     fn progress(&self, progress: SessionProgress) {
+        let recording = progress.state == crate::store::SessionStatus::Recording;
+        crate::shell::tray::refresh(&self.0, recording);
+        if progress.state == crate::store::SessionStatus::Done {
+            if let Some(store) = self.0.try_state::<Arc<Store>>() {
+                let enabled = store
+                    .app_settings()
+                    .is_ok_and(|s| s.notify_summary_complete);
+                {
+                    let focused = self.0.get_webview_window("main").is_some_and(|w| {
+                        w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+                    });
+                    if let Some(notices) = self.0.try_state::<SummaryNotices>() {
+                        let mut sent = notices.0.lock().unwrap_or_else(|e| e.into_inner());
+                        if should_notify_summary(
+                            enabled,
+                            focused,
+                            sent.contains(&progress.session_id),
+                        ) {
+                            use tauri_plugin_notification::NotificationExt;
+                            if self
+                                .0
+                                .notification()
+                                .builder()
+                                .title("Scribular")
+                                .body("Summary ready")
+                                .show()
+                                .is_ok()
+                            {
+                                sent.insert(progress.session_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let _ = self.0.emit(SESSION_PROGRESS_EVENT, progress);
     }
 
@@ -794,6 +886,15 @@ impl JobEvents for TauriJobEvents {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_notice_is_opt_in_focused_suppressed_and_once_per_session() {
+        assert!(should_notify_summary(true, false, false));
+        assert!(!should_notify_summary(false, false, false));
+        assert!(!should_notify_summary(true, true, false));
+        assert!(should_notify_summary(true, false, false)); // a focused completion stays eligible
+        assert!(!should_notify_summary(true, false, true));
+    }
 
     /// Regenerates `src/lib/types/`. ts-rs exports into a temp dir and this
     /// copies the result over, because ts-rs's own writer calls

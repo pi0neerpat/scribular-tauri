@@ -6,12 +6,19 @@ pub mod jobs;
 pub mod license;
 pub mod llm;
 pub mod models;
+pub mod shell;
 pub mod store;
 pub mod stt;
 pub mod text;
 pub mod update;
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use tauri::{Emitter, Manager};
 
@@ -22,6 +29,8 @@ use llm::SummarizerLoader;
 use models::ModelManager;
 use store::{key::KeyStore, Store, StoreError};
 use stt::TranscriberLoader;
+
+pub(crate) struct QuitConfirmed(pub(crate) AtomicBool);
 
 /// Keychain account holding the database key; the service is the bundle id.
 const DB_KEY_ACCOUNT: &str = "database-key";
@@ -96,7 +105,27 @@ fn spawn_license_checks(app: tauri::AppHandle, licensing: Arc<license::Licensing
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
+                .on_navigation(|_, url| {
+                    (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+                        || (cfg!(debug_assertions)
+                            && url.scheme() == "http"
+                            && url.host_str() == Some("localhost")
+                            && url.port() == Some(1420))
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(QuitConfirmed(AtomicBool::new(false)))
+        .manage(commands::SummaryNotices::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::list_sessions,
@@ -122,6 +151,11 @@ pub fn run() {
             commands::transcribe_file,
             commands::get_recording_settings,
             commands::set_recording_settings,
+            commands::get_app_settings,
+            commands::set_app_settings,
+            commands::request_notification_permission,
+            commands::confirm_quit,
+            commands::notify_tray_start_failure,
             commands::confirm_speaker_labels,
             commands::skip_diarization,
             commands::update_speaker_map,
@@ -144,7 +178,22 @@ pub fn run() {
             commands::get_update_state,
             commands::install_update
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.app_handle().tray_by_id("main").is_some() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
         .setup(|app| {
+            if let Ok(menu) = tauri::menu::Menu::default(&app.handle()) {
+                if let Err(e) = app.set_menu(menu) {
+                    eprintln!("default app menu unavailable: {e}");
+                }
+            }
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("scribular.db");
@@ -169,6 +218,9 @@ pub fn run() {
                 // R7: no Store, queues or recorder; the webview shows only the
                 // locked screen and its commands.
                 return Ok(());
+            }
+            if let Err(e) = shell::tray::install(app) {
+                eprintln!("tray unavailable: {e}");
             }
             let store = Arc::new(opened?);
             // Parity spec 03 R9: built-in styles follow the shipped JSON.
@@ -250,10 +302,37 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
-                app.state::<Arc<update::UpdateManager>>().install_on_quit();
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                if let Some(recorder) = app.try_state::<Arc<Recorder>>() {
+                    if recorder.quit_confirmation_needed()
+                        && !app.state::<QuitConfirmed>().0.load(Ordering::SeqCst)
+                    {
+                        api.prevent_exit();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                        let _ = app.emit(commands::QUIT_REQUESTED_EVENT, ());
+                        return;
+                    }
+                }
+                if let Some(updates) = app.try_state::<Arc<update::UpdateManager>>() {
+                    updates.install_on_quit();
+                }
             }
+            tauri::RunEvent::Exit => {
+                if let Some(recorder) = app.try_state::<Arc<Recorder>>() {
+                    recorder.shutdown();
+                }
+            }
+            tauri::RunEvent::Reopen { .. } => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            _ => {}
         });
 }
 

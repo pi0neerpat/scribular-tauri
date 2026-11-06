@@ -23,8 +23,8 @@ pub use sessions::{
     AUDIO_RETENTION_MS,
 };
 pub use settings::{
-    RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION,
-    SUMMARY_MODEL_ID,
+    AppSettings, RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL,
+    SKIPPED_UPDATE_VERSION, SUMMARY_MODEL_ID,
 };
 
 #[derive(Debug)]

@@ -39,6 +39,9 @@ impl fmt::Display for AudioError {
             Self::PermissionDenied(Privacy::SystemAudio) => {
                 f.write_str("system audio recording permission denied")
             }
+            Self::PermissionDenied(Privacy::Notifications) => {
+                f.write_str("notification permission denied")
+            }
             Self::AppNotFound(name) => write!(f, "{name} is not playing audio"),
             Self::Device(e) => write!(f, "audio device error: {e}"),
             Self::Io(e) => write!(f, "audio capture error: {e}"),
@@ -60,6 +63,7 @@ impl From<std::io::Error> for AudioError {
 pub enum Privacy {
     Microphone,
     SystemAudio,
+    Notifications,
 }
 
 impl Privacy {
@@ -71,6 +75,9 @@ impl Privacy {
             }
             Self::SystemAudio => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            }
+            Self::Notifications => {
+                "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
             }
         }
     }

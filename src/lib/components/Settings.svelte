@@ -16,7 +16,12 @@
     getUpdateState,
     installUpdate,
     onUpdateState,
+    getAppSettings,
+    setAppSettings,
+    requestNotificationPermission,
+    openExternalLink,
   } from '../api';
+  import { appSettings } from '../app-settings';
   import LicenseSettings from './LicenseSettings.svelte';
   import NoteStyles from './NoteStyles.svelte';
   import SummaryModel from './SummaryModel.svelte';
@@ -27,6 +32,8 @@
   import type { ModelProgress } from '../types/ModelProgress';
   import type { UpdateState } from '../types/UpdateState';
   import { updateStatus } from './update-status';
+
+  let { navigationLocked = false }: { navigationLocked?: boolean } = $props();
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
@@ -43,11 +50,18 @@
   let speakerModel = $state<ModelProgress | null>(null);
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
-  let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
+  let notifyWasEnabled = $state(false);
+  let category = $state<'Note styles' | 'Session' | 'General' | 'About' | 'License'>('Session');
+  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
     if (noteStyles) noteStyles.requestLeave(action, opener);
     else action();
+  }
+
+  function chooseCategory(next: typeof category, opener: HTMLElement) {
+    if (navigationLocked) return;
+    requestLeave(() => (category = next), opener);
   }
 
   // The saved app stays selectable while it isn't playing.
@@ -65,6 +79,11 @@
     let progressVersion = 0;
     let sawUpdate = false;
     void (async () => {
+      try {
+        const app = await getAppSettings();
+        appSettings.set(app);
+        notifyWasEnabled = app.notifySummaryComplete;
+      } catch (e) { error = String(e); }
       try {
         const remove = await onUpdateState((state) => { sawUpdate = true; update = state; });
         if (disposed) remove(); else updateUnlisten = remove;
@@ -125,11 +144,37 @@
       error = String(e);
     }
   }
+
+  async function saveAppSettings() {
+    const next = $appSettings;
+    try {
+      if (next.notifySummaryComplete && !notifyWasEnabled) {
+        if (!(await requestNotificationPermission())) {
+          appSettings.update((s) => ({ ...s, notifySummaryComplete: false }));
+          denied = 'notifications';
+        } else {
+          notifyWasEnabled = true;
+          denied = null;
+        }
+      }
+      if (!next.notifySummaryComplete) notifyWasEnabled = false;
+      await setAppSettings($appSettings);
+    } catch (e) {
+      error = String(e);
+      appSettings.set(await getAppSettings());
+    }
+  }
 </script>
 
 <section>
   <h2>Settings</h2>
+  <nav aria-label="Settings categories">
+    {#each ['Note styles', 'Session', 'General', 'About', 'License'] as item}
+      <button aria-pressed={category === item} disabled={navigationLocked} onclick={(e) => chooseCategory(item as typeof category, e.currentTarget)}>{item}</button>
+    {/each}
+  </nav>
   {#if settings}
+  {#if category === 'Session'}
     <fieldset>
       <legend>Record</legend>
       {#each modes as [mode, label] (mode)}
@@ -139,7 +184,9 @@
         </label>
       {/each}
     </fieldset>
+  {/if}
 
+  {#if category === 'Session'}
     <fieldset>
       <legend>Multi-speaker</legend>
       <p>Identify different speakers after recording. The speaker model downloads once and stays on this Mac.</p>
@@ -173,7 +220,9 @@
         {#if !update.installable}<p>Finish your recording or summary first</p>{/if}
       {/if}
     </fieldset>
+  {/if}
 
+  {#if category === 'Session'}
     {#if settings.inputMode !== 'mic'}
       <label>
         App
@@ -190,7 +239,22 @@
       <button onclick={refreshApps}>Refresh</button>
       <p>Only apps playing audio right now are listed.</p>
     {/if}
+  {/if}
 
+  {#if category === 'General'}
+    <fieldset>
+      <legend>General</legend>
+      <label><input type="checkbox" bind:checked={$appSettings.showBackgroundAnimation} onchange={saveAppSettings} /> Show background animation</label>
+      <label><input type="checkbox" bind:checked={$appSettings.notifySummaryComplete} onchange={saveAppSettings} /> Show summarization complete alert</label>
+      {#if denied === 'notifications'}
+        <p role="status">Notifications are disabled. Allow Scribular in System Settings to show summary alerts.
+          <button onclick={() => openPrivacySettings('notifications')}>Open System Settings</button>
+        </p>
+      {/if}
+    </fieldset>
+  {/if}
+
+  {#if category === 'Session'}
     <fieldset>
       <legend>Audio recording</legend>
       <p>
@@ -213,11 +277,19 @@
       {/if}
     </fieldset>
   {/if}
+  {/if}
 
-  <NoteStyles bind:this={noteStyles} />
-  <SummaryModel />
+  {#if category === 'Note styles'}
+    <NoteStyles bind:this={noteStyles} />
+    <SummaryModel />
+  {/if}
 
-  <LicenseSettings />
+  {#if category === 'License'}<LicenseSettings />{/if}
+  {#if category === 'About'}
+    <p>Version: {version || 'Loading…'}</p>
+    <button onclick={() => openExternalLink('mailto:support@scribular.com')}>Contact support</button>
+    <button onclick={() => openExternalLink('https://www.scribular.com')}>Scribular website</button>
+  {/if}
 
   {#if denied}
     <p role="alert">
