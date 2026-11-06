@@ -81,11 +81,15 @@ pub fn spawn(
                         process(&data)?;
                     }
                     if drained.dropped > 0 {
-                        eprintln!(
-                            "{} samples of {} dropped for session {}",
-                            drained.dropped,
-                            source.as_str(),
-                            session_id
+                        crate::diag::log::log(
+                            "WARN",
+                            "audio",
+                            &format!(
+                                "{} samples of {} dropped for session {}",
+                                drained.dropped,
+                                source.as_str(),
+                                session_id
+                            ),
                         );
                         let mut remaining = drained.dropped;
                         while remaining > 0 {

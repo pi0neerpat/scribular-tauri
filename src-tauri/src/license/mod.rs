@@ -328,6 +328,65 @@ struct Secrets {
 
 pub type Log = Box<dyn Fn(&str) + Send + Sync>;
 
+fn diagnostic_event(event: &str) -> (&'static str, &'static str) {
+    if event.starts_with("activation refused locally") {
+        ("WARN", "activation_rejected_local")
+    } else if event.starts_with("activation of ") {
+        ("INFO", result_event(event, "activation"))
+    } else if event.starts_with("re-validation of ") {
+        ("INFO", result_event(event, "revalidation"))
+    } else if event.starts_with("licence server unreachable") {
+        ("WARN", "license_network_error")
+    } else if event.starts_with("Keychain write failed") {
+        ("WARN", "keychain_write_failed")
+    } else if event.starts_with("Keychain unavailable") {
+        ("WARN", "keychain_read_failed")
+    } else if event.starts_with("Keychain licence item unreadable") {
+        ("WARN", "keychain_item_invalid")
+    } else if event.starts_with("could not save ") {
+        ("ERROR", "license_setting_write_failed")
+    } else if event.starts_with("could not clear ") {
+        ("ERROR", "license_setting_delete_failed")
+    } else if event.starts_with("licence ") && event.ends_with(" removed") {
+        ("INFO", "license_removed")
+    } else if event.starts_with("SCRIBULAR_SKIP_LICENSE") {
+        ("INFO", "license_checks_skipped")
+    } else {
+        ("INFO", "licensing_state_updated")
+    }
+}
+
+fn result_event(event: &str, action: &str) -> &'static str {
+    let result = event
+        .split_once(": ")
+        .map(|(_, result)| result)
+        .unwrap_or("");
+    match (
+        action,
+        result
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .next()
+            .unwrap_or(""),
+    ) {
+        ("activation", "Valid") => "activation_valid",
+        ("activation", "Offline") => "activation_offline",
+        ("activation", "ServerError") => "activation_server_error",
+        ("activation", "DeviceLimit") => "activation_device_limit",
+        ("activation", "Expired") => "activation_expired",
+        ("activation", "BadFormat") => "activation_bad_format",
+        ("activation", "InvalidKey") => "activation_invalid_key",
+        ("revalidation", "Valid") => "revalidation_valid",
+        ("revalidation", "Offline") => "revalidation_offline",
+        ("revalidation", "ServerError") => "revalidation_server_error",
+        ("revalidation", "DeviceLimit") => "revalidation_device_limit",
+        ("revalidation", "Expired") => "revalidation_expired",
+        ("revalidation", "BadFormat") => "revalidation_bad_format",
+        ("revalidation", "InvalidKey") => "revalidation_invalid_key",
+        ("activation", _) => "activation_result_unknown",
+        _ => "revalidation_result_unknown",
+    }
+}
+
 pub struct Licensing {
     store: Arc<Store>,
     keys: Arc<dyn KeyStore>,
@@ -352,7 +411,10 @@ impl Licensing {
             keys,
             api,
             clock,
-            Box::new(|m| eprintln!("[license] {m}")),
+            Box::new(|event| {
+                let (level, code) = diagnostic_event(event);
+                crate::diag::log::log(level, "license", code);
+            }),
         )
     }
 
@@ -692,6 +754,35 @@ mod tests {
     const T0: i64 = 1_790_000_000_000;
     const H: i64 = 60 * 60 * 1000;
     const KEY: &str = "brave-quiet-river-042";
+
+    #[test]
+    fn app_diagnostic_events_are_closed_and_keep_license_outcomes_distinct() {
+        assert_eq!(
+            diagnostic_event(
+                "activation of brav***-042: Valid { expires_at: \"2030-01-01:00:00\" }"
+            ),
+            ("INFO", "activation_valid")
+        );
+        assert_eq!(
+            diagnostic_event(
+                "re-validation of brav***-042: Valid { expires_at: \"2030-01-01:00:00\" }"
+            ),
+            ("INFO", "revalidation_valid")
+        );
+        assert_eq!(
+            diagnostic_event("activation of brav***-042: InvalidKey"),
+            ("INFO", "activation_invalid_key")
+        );
+        assert_eq!(
+            diagnostic_event("licence server unreachable: CANARY"),
+            ("WARN", "license_network_error")
+        );
+        assert!(!format!(
+            "{:?}",
+            diagnostic_event("licence server unreachable: CANARY")
+        )
+        .contains("CANARY"));
+    }
 
     struct TempDb(std::path::PathBuf);
 

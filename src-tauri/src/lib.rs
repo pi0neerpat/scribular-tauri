@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod commands;
+pub mod diag;
 pub mod diarize;
 pub mod engines;
 pub mod jobs;
@@ -95,10 +96,20 @@ fn spawn_license_checks(app: tauri::AppHandle, licensing: Arc<license::Licensing
 }
 
 pub fn run() {
+    diag::panic::install();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::get_diagnostics,
+            commands::view_logs,
+            commands::get_telemetry_setting,
+            commands::set_telemetry_setting,
+            commands::report_frontend_error,
+            #[cfg(debug_assertions)]
+            commands::report_test_error,
+            #[cfg(debug_assertions)]
+            commands::trigger_test_panic,
             commands::list_sessions,
             commands::get_session,
             commands::update_session,
@@ -146,6 +157,25 @@ pub fn run() {
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            let log_dir = data_dir.join("logs");
+            let _ = diag::log::init(&log_dir);
+            let os = std::process::Command::new("sw_vers")
+                .arg("-productVersion")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|| "unknown".into());
+            let arch = if cfg!(target_arch = "aarch64") {
+                "arm64"
+            } else {
+                "x64"
+            };
+            diag::log::log(
+                "INFO",
+                "startup",
+                &format!("Scribular {} macOS {os} {arch}", env!("CARGO_PKG_VERSION")),
+            );
             // Each checkout's dev build gets its own database: branches add
             // different migrations, so a shared file breaks the older ones.
             // Release builds (uitest included) keep the plain path; models stay shared.
@@ -190,6 +220,17 @@ pub fn run() {
                 return Ok(());
             }
             let store = Arc::new(opened?);
+            let panic_pending = log_dir.join("panic.pending");
+            if panic_pending.exists() {
+                diag::telemetry::report(Arc::clone(&store), "unhandled");
+                let _ = std::fs::remove_file(panic_pending);
+            }
+            diag::telemetry::record_launch(Arc::clone(&store));
+            let telemetry_store = Arc::clone(&store);
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(3 * 60 * 60));
+                diag::telemetry::send_usage(Arc::clone(&telemetry_store));
+            });
             // Parity spec 03 R9: built-in styles follow the shipped JSON.
             store.sync_builtins()?;
             app.manage(Arc::clone(&store));
@@ -214,12 +255,23 @@ pub fn run() {
             // An id no longer in the manifest keeps the default.
             match store.get_setting(store::SUMMARY_MODEL_ID) {
                 Ok(Some(id)) => {
-                    if let Err(e) = models.select_llm(&id) {
-                        eprintln!("{e}; using the default summary model");
+                    if let Err(_e) = models.select_llm(&id) {
+                        diag::log::log(
+                            "WARN",
+                            "models",
+                            &format!("selected summary model unavailable ({})", "selection_error"),
+                        );
                     }
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("reading the selected summary model failed: {e}"),
+                Err(e) => diag::log::log(
+                    "ERROR",
+                    "models",
+                    &format!(
+                        "reading selected summary model failed ({})",
+                        diag::log::kind(&e)
+                    ),
+                ),
             }
             app.manage(Arc::clone(&models));
             let stt = transcriber_loader(&models);
@@ -272,6 +324,9 @@ pub fn run() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 app.state::<Arc<update::UpdateManager>>().install_on_quit();
+                if let Some(store) = app.try_state::<Arc<Store>>() {
+                    diag::telemetry::send_usage_on_quit(Arc::clone(&store));
+                }
             }
         });
 }
@@ -325,15 +380,16 @@ mod tests {
     const LIB_RS: &str = include_str!("lib.rs");
     const API_TS: &str = include_str!("../../src/lib/api.ts");
 
-    fn registered_commands() -> Vec<&'static str> {
+    fn registered_commands() -> Vec<String> {
         let start = LIB_RS
             .find("generate_handler![")
             .expect("generate_handler! not found")
             + "generate_handler![".len();
-        let end = start + LIB_RS[start..].find(']').unwrap();
+        let end = start + LIB_RS[start..].find("\n        ])").unwrap();
         LIB_RS[start..end]
+            .replace("#[cfg(debug_assertions)]", "")
             .split(',')
-            .map(|p| p.trim().rsplit("::").next().unwrap().trim())
+            .map(|p| p.trim().rsplit("::").next().unwrap().trim().to_string())
             .filter(|n| !n.is_empty())
             .collect()
     }
@@ -367,7 +423,7 @@ mod tests {
         }
         for w in &wrapped {
             assert!(
-                registered.contains(&w.as_str()),
+                registered.iter().any(|cmd| cmd == w),
                 "src/lib/api.ts invokes `{w}`, which is not registered"
             );
         }
@@ -382,6 +438,57 @@ mod tests {
                 "event `{event}` has no listen wrapper in src/lib/api.ts"
             );
         }
+    }
+
+    #[test]
+    fn production_rust_errors_use_the_diagnostics_logger() {
+        fn visit(dir: &std::path::Path, violations: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.ends_with("diag") || path.ends_with("bin") {
+                        continue;
+                    }
+                    visit(&path, violations);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let source = std::fs::read_to_string(&path).unwrap();
+                    let macros = [
+                        "eprintln",
+                        "println",
+                        "print",
+                        "dbg",
+                        "log::error",
+                        "log::warn",
+                        "log::info",
+                        "log::debug",
+                        "log::trace",
+                        "tracing::error",
+                        "tracing::warn",
+                        "tracing::info",
+                        "tracing::debug",
+                        "tracing::trace",
+                    ];
+                    for name in macros {
+                        let needle = format!("{name}{}(", "!");
+                        if source.contains(&needle) {
+                            violations.push(format!("{} contains {needle}", path.display()));
+                        }
+                    }
+                }
+            }
+        }
+        let mut violations = Vec::new();
+        visit(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .as_path(),
+            &mut violations,
+        );
+        assert!(
+            violations.is_empty(),
+            "direct production logging found: {}",
+            violations.join(", ")
+        );
     }
 
     #[test]

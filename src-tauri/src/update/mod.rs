@@ -244,7 +244,14 @@ impl UpdateManager {
                             let _ = store.delete_setting(SKIPPED_UPDATE_VERSION);
                         }
                         Ok(None) => {}
-                        Err(error) => eprintln!("reading skipped update version failed: {error}"),
+                        Err(error) => crate::diag::log::log(
+                            "ERROR",
+                            "update",
+                            &format!(
+                                "reading skipped update version failed ({})",
+                                crate::diag::log::kind(&error)
+                            ),
+                        ),
                     }
                 }
                 let update = UpdateState::Downloading {
@@ -378,8 +385,8 @@ impl UpdateManager {
         if !matches!(self.state(), UpdateState::Ready { .. }) {
             return;
         }
-        if let Err(error) = self.install_staged(false) {
-            eprintln!("install on quit failed: {error}");
+        if let Err(_error) = self.install_staged(false) {
+            crate::diag::log::log("ERROR", "update", "install on quit failed");
         }
     }
 
@@ -397,32 +404,41 @@ impl UpdateManager {
             Ok(Some(raw)) => raw,
             Ok(None) => return,
             Err(error) => {
-                eprintln!("reading pending update install failed: {error}");
+                crate::diag::log::log(
+                    "ERROR",
+                    "update",
+                    &format!(
+                        "reading pending update failed ({})",
+                        crate::diag::log::kind(&error)
+                    ),
+                );
                 return;
             }
         };
         let Ok(mut marker) = serde_json::from_str::<PendingInstall>(&raw) else {
-            eprintln!("discarding invalid pending update marker");
+            crate::diag::log::log("WARN", "update", "discarding invalid pending update marker");
             let _ = store.delete_setting(PENDING_UPDATE_INSTALL);
             return;
         };
         if marker.to == version {
             let _ = store.delete_setting(PENDING_UPDATE_INSTALL);
-            eprintln!("update {} installed", marker.to);
+            crate::diag::log::log("INFO", "update", "update installed");
         } else if marker.from == version {
             marker.attempts += 1;
             if marker.attempts >= 3 {
                 let _ = store.set_setting(SKIPPED_UPDATE_VERSION, &marker.to);
                 let _ = store.delete_setting(PENDING_UPDATE_INSTALL);
-                eprintln!(
-                    "skipping update {} after {} failed installs",
-                    marker.to, marker.attempts
+                crate::diag::log::log(
+                    "WARN",
+                    "update",
+                    &format!("skipping update after {} failed installs", marker.attempts),
                 );
             } else if let Ok(raw) = serde_json::to_string(&marker) {
                 let _ = store.set_setting(PENDING_UPDATE_INSTALL, &raw);
-                eprintln!(
-                    "update {} install attempt {} failed",
-                    marker.to, marker.attempts
+                crate::diag::log::log(
+                    "WARN",
+                    "update",
+                    &format!("update install attempt {} failed", marker.attempts),
                 );
             }
         } else {

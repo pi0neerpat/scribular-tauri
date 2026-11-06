@@ -10,7 +10,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
@@ -112,6 +112,152 @@ pub fn app_version() -> AppVersion {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+#[tauri::command]
+pub fn get_diagnostics(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    models: State<'_, Arc<ModelManager>>,
+) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "could not locate application data".to_string())?
+        .join("logs");
+    crate::diag::info::diagnostics(&store, &models, &dir)
+}
+
+#[tauri::command]
+pub fn view_logs(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "could not locate application data".to_string())?
+        .join("logs");
+    std::fs::create_dir_all(&dir).map_err(|_| "could not create log directory".to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| "could not protect log directory".to_string())?;
+    }
+    let path = dir.join("scribular.log");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|_| "could not create log file".to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| "could not protect log file".to_string())?;
+    }
+    let result = std::process::Command::new("open")
+        .arg(&path)
+        .output()
+        .map_err(|_| "could not open log file".to_string())?;
+    result
+        .status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "could not open log file".to_string())
+}
+
+#[tauri::command]
+pub fn get_telemetry_setting(store: State<'_, Arc<Store>>) -> Result<String, String> {
+    Ok(match store
+        .get_setting(crate::diag::telemetry::TELEMETRY_ENABLED)
+        .map_err(|_| "could not read telemetry setting".to_string())?
+        .as_deref()
+    {
+        Some("1") => "on",
+        Some("0") => "off",
+        _ => "undecided",
+    }
+    .into())
+}
+
+#[tauri::command]
+pub fn set_telemetry_setting(enabled: bool, store: State<'_, Arc<Store>>) -> Result<(), String> {
+    crate::diag::telemetry::set_enabled(&store, enabled)
+}
+
+#[tauri::command]
+pub fn report_frontend_error(kind: String, frames: Vec<String>, store: State<'_, Arc<Store>>) {
+    static WINDOW: std::sync::OnceLock<std::sync::Mutex<crate::diag::report::FrontendRateLimit>> =
+        std::sync::OnceLock::new();
+    let code = match kind.as_str() {
+        "window_error" | "unhandled_rejection" => "unhandled",
+        _ => return,
+    };
+    let state = WINDOW
+        .get_or_init(|| std::sync::Mutex::new(crate::diag::report::FrontendRateLimit::default()));
+    let Ok(mut state) = state.lock() else { return };
+    let (allowed, first_suppressed) = state.allow();
+    if !allowed {
+        if first_suppressed {
+            crate::diag::log::log("WARN", "webview", "suppressed frontend errors");
+        }
+        return;
+    }
+    let safe_frames = frames
+        .into_iter()
+        .filter(|f| safe_frontend_frame(f))
+        .take(8)
+        .collect::<Vec<_>>();
+    let detail = safe_frames.join(",");
+    crate::diag::log::log("ERROR", "webview", &format!("{code} {detail}"));
+    crate::diag::telemetry::report(Arc::clone(&store), code);
+}
+
+fn safe_frontend_frame(frame: &str) -> bool {
+    let Some((file, location)) = frame.rsplit_once(':') else {
+        return false;
+    };
+    let Some((file, line)) = file.rsplit_once(':') else {
+        return false;
+    };
+    !file.is_empty()
+        && frame.len() <= 240
+        && (file.starts_with("src/") || file.starts_with("assets/") || file == "index.html")
+        && !file.starts_with('/')
+        && !file.starts_with('~')
+        && !file.contains('\\')
+        && file
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && file
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./-".contains(&b))
+        && line.parse::<u32>().is_ok()
+        && location.parse::<u32>().is_ok()
+}
+
+#[cfg(test)]
+mod frontend_frame_tests {
+    use super::safe_frontend_frame;
+
+    #[test]
+    fn frontend_frames_must_be_relative_file_line_column_values() {
+        assert!(safe_frontend_frame("src/app.js:12:4"));
+        assert!(!safe_frontend_frame("/Users/jane/app.js:12:4"));
+        assert!(!safe_frontend_frame("Users/jane/app.js:12:4"));
+        assert!(!safe_frontend_frame("src/../private.js:12:4"));
+    }
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn report_test_error(store: State<'_, Arc<Store>>) {
+    crate::diag::telemetry::report(Arc::clone(&store), "test");
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+pub fn trigger_test_panic() {
+    panic!("Scribular test panic");
 }
 
 #[tauri::command]
@@ -322,7 +468,14 @@ pub fn revert_summary_model(
     }
     if let Err(e) = store.set_setting(SUMMARY_MODEL_ID, previous) {
         let _ = models.select_llm(failed);
-        eprintln!("reverting the summary model failed: {e}");
+        crate::diag::log::log(
+            "ERROR",
+            "commands",
+            &format!(
+                "reverting summary model failed ({})",
+                crate::diag::log::kind(&e)
+            ),
+        );
         return false;
     }
     true
@@ -355,8 +508,13 @@ pub fn set_summary_model(
                 let _ = app.emit(MODELS_PROGRESS_EVENT, p);
             })
             .await;
-        if let Err(e) = result {
-            eprintln!("summary model {model_id}: {e}");
+        if let Err(_e) = result {
+            crate::diag::telemetry::report(Arc::clone(&store), "dialog");
+            crate::diag::log::log(
+                "ERROR",
+                "commands",
+                &format!("summary model {model_id} failed ({})", "download_error"),
+            );
             if revert_summary_model(&store, &models, &model_id, &previous) {
                 let _ = app.emit(SUMMARY_MODEL_CHANGED_EVENT, &previous);
             }
@@ -542,11 +700,25 @@ pub async fn request_session_audio(
     let audio = tauri::async_runtime::spawn_blocking(move || store.kept_audio(&id, now_ms()))
         .await
         .map_err(|e| {
-            eprintln!("request_session_audio: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "commands",
+                &format!(
+                    "loading session audio failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
             PlaybackError::Failed
         })?
         .map_err(|e| {
-            eprintln!("request_session_audio: {e}");
+            crate::diag::log::log(
+                "ERROR",
+                "commands",
+                &format!(
+                    "loading session audio failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
             PlaybackError::Failed
         })?;
     match audio {
