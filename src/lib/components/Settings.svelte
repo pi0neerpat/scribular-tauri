@@ -61,6 +61,7 @@
 
   function chooseCategory(next: typeof category, opener: HTMLElement) {
     if (navigationLocked) return;
+    if (next === category) return;
     requestLeave(() => (category = next), opener);
   }
 
@@ -148,13 +149,13 @@
   async function saveAppSettings() {
     const next = $appSettings;
     try {
+      denied = null;
       if (next.notifySummaryComplete && !notifyWasEnabled) {
         if (!(await requestNotificationPermission())) {
           appSettings.update((s) => ({ ...s, notifySummaryComplete: false }));
           denied = 'notifications';
         } else {
           notifyWasEnabled = true;
-          denied = null;
         }
       }
       if (!next.notifySummaryComplete) notifyWasEnabled = false;
@@ -287,14 +288,20 @@
   {#if category === 'License'}<LicenseSettings />{/if}
   {#if category === 'About'}
     <p>Version: {version || 'Loading…'}</p>
-    <button onclick={() => openExternalLink('mailto:support@scribular.com')}>Contact support</button>
-    <button onclick={() => openExternalLink('https://www.scribular.com')}>Scribular website</button>
+    <button onclick={() => openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e)))}>Contact support</button>
+    <button onclick={() => openExternalLink('https://www.scribular.com').catch((e) => (error = String(e)))}>Scribular website</button>
   {/if}
 
-  {#if denied}
+  {#if denied && denied !== 'notifications'}
     <p role="alert">
       Scribular needs permission to record app audio.
       <button onclick={() => openPrivacySettings(denied!)}>Open System Settings</button>
+    </p>
+  {/if}
+  {#if denied === 'notifications'}
+    <p role="status">
+      Notifications are disabled. Allow them for Scribular in System Settings.
+      <button onclick={() => openPrivacySettings('notifications').catch((e) => (error = String(e)))}>Open System Settings</button>
     </p>
   {/if}
   {#if error}

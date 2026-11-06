@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appVersion, currentRecording, lockedState, onHeartbeat, onSessionProgress, onQuitRequested, onTrayStartRecording, takeEncryptionNotice, getAppSettings } from './lib/api';
+  import { appVersion, currentRecording, lockedState, onHeartbeat, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -45,15 +45,45 @@
     const showRecord = () => navigation.update((n) => ({ ...n, view: 'record' }));
     window.addEventListener('tray-start-failed', showRecord);
     getCurrentWindow().show().catch(() => {});
-    modelsStatus().then((m) => (modelProgress = m)).catch(() => {});
+    const modelEventsSeen = new Set<string>();
     const modelEvents = onModelsProgress((p) => {
+      modelEventsSeen.add(p.modelId);
       modelProgress = [...modelProgress.filter((m) => m.modelId !== p.modelId), p];
     });
+    modelEvents.then(() => modelsStatus()).then((snapshot) => {
+      modelProgress = [...snapshot.filter((m) => !modelEventsSeen.has(m.modelId)), ...modelProgress.filter((m) => modelEventsSeen.has(m.modelId))];
+    }).catch(() => {});
     const quitRequest = onQuitRequested(() => (confirmQuitOpen = true));
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
+    const closeRequest = onWindowCloseRequested(() => {
+      const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
+      if (view === 'settings' && settings) settings.requestLeave(hide);
+      else hide();
+    });
+    const trayStopFailure = onTrayStopFailed((message) => {
+      error = message;
+      void getCurrentWindow().show().catch((e) => (error = `${message} (${String(e)})`));
+    });
     getAppSettings().then((s) => appSettings.set(s)).catch((e) => (error = String(e)));
-    currentRecording().then((id) => (recording = id !== null)).catch(() => {});
-    const progress = onSessionProgress((p) => { recording = p.state === 'recording'; });
+    let recordingSessionId: string | null = null;
+    let recordingEvents = 0;
+    let latestProgress: import('./lib/types/SessionProgress').SessionProgress | null = null;
+    const progress = onSessionProgress((p) => {
+      recordingEvents++;
+      latestProgress = p;
+      if (p.state === 'recording') {
+        recordingSessionId = p.sessionId;
+        recording = true;
+      } else if (p.sessionId === recordingSessionId) recording = false;
+    });
+    progress.then(() => {
+      const eventsAtSnapshot = recordingEvents;
+      return currentRecording().then((id) => {
+        if (recordingEvents > eventsAtSnapshot && latestProgress?.state === 'recording') id = latestProgress.sessionId;
+        recordingSessionId = id;
+        recording = id !== null && (latestProgress?.sessionId !== id || latestProgress.state === 'recording');
+      });
+    }).catch(() => {});
     lockedState()
       .then((reason) => {
         gate = reason ? { locked: reason } : 'open';
@@ -74,6 +104,8 @@
       modelEvents.then((fn) => fn());
       quitRequest.then((fn) => fn());
       trayStart.then((fn) => fn());
+      closeRequest.then((fn) => fn());
+      trayStopFailure.then((fn) => fn());
       stopLicense();
     };
   });
@@ -119,6 +151,7 @@
     <Settings bind:this={settings} {navigationLocked} />
   {/if}
   <p>Heartbeat: {beats}</p>
+  {#if error}<p role="alert">{error}</p>{/if}
 </main>
 {:else if error}
   <p role="alert">{error}</p>

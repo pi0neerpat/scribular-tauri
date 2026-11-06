@@ -40,7 +40,9 @@ pub const EVENTS: &[&str] = &[
     LICENSE_CHANGED_EVENT,
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
+    TRAY_STOP_FAILED_EVENT,
     QUIT_REQUESTED_EVENT,
+    WINDOW_CLOSE_REQUESTED_EVENT,
 ];
 
 /// The new [`AccessState`] after activation, removal, re-validation or a day
@@ -49,7 +51,9 @@ pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 
 pub const UPDATE_STATE_EVENT: &str = "update://state";
 pub const TRAY_START_RECORDING_EVENT: &str = "tray-start-recording";
+pub const TRAY_STOP_FAILED_EVENT: &str = "tray-stop-failed";
 pub const QUIT_REQUESTED_EVENT: &str = "quit-requested";
+pub const WINDOW_CLOSE_REQUESTED_EVENT: &str = "window-close-requested";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
@@ -684,7 +688,7 @@ pub async fn stop_recording(
     recorder: State<'_, Arc<Recorder>>,
     num_speakers: Option<u8>,
 ) -> Result<String, String> {
-    if !matches!(num_speakers, None | Some(2 | 3 | 4)) {
+    if !matches!(num_speakers, None | Some(2 | 3)) {
         return Err("speaker count must be 2, 3, or 4+".into());
     }
     let recorder = Arc::clone(&recorder);
@@ -892,7 +896,6 @@ mod tests {
         assert!(should_notify_summary(true, false, false));
         assert!(!should_notify_summary(false, false, false));
         assert!(!should_notify_summary(true, true, false));
-        assert!(should_notify_summary(true, false, false)); // a focused completion stays eligible
         assert!(!should_notify_summary(true, false, true));
     }
 

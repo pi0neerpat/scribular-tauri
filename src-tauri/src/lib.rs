@@ -182,7 +182,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.app_handle().tray_by_id("main").is_some() {
                     api.prevent_close();
-                    let _ = window.hide();
+                    let _ = window.emit(commands::WINDOW_CLOSE_REQUESTED_EVENT, ());
                 } else {
                     window.app_handle().exit(0);
                 }

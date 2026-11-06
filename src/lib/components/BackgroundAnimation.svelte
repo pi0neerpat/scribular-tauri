@@ -17,7 +17,7 @@
     const stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), size: Math.random() * 1.5 + .5 }));
     let width = 0;
     let height = 0;
-    const resize = () => { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = 552 * devicePixelRatio; };
+    const resize = () => { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = innerHeight * devicePixelRatio; };
     render = () => {
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = 'rgba(120, 150, 190, .6)';
@@ -42,6 +42,6 @@
 <canvas bind:this={canvas} aria-hidden="true" class:off={!enabled}></canvas>
 
 <style>
-  canvas { position: fixed; inset: 0 auto auto 0; width: 100%; height: 552px; pointer-events: none; opacity: .6; z-index: -1; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100vh; pointer-events: none; opacity: .6; z-index: -1; }
   canvas.off { display: none; }
 </style>

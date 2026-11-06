@@ -87,6 +87,12 @@ export function onTrayStartRecording(handler: () => void): Promise<UnlistenFn> {
 export function onQuitRequested(handler: () => void): Promise<UnlistenFn> {
   return listen('quit-requested', () => handler());
 }
+export function onWindowCloseRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen('window-close-requested', () => handler());
+}
+export function onTrayStopFailed(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>('tray-stop-failed', (event) => handler(event.payload));
+}
 
 /** True once, after the prototype database was encrypted. */
 export function takeEncryptionNotice(): Promise<boolean> {

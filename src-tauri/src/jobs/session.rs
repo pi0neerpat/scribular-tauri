@@ -194,6 +194,10 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    pub fn is_recording(&self) -> bool {
+        lock(&self.inner.recording).is_some()
+    }
+
     pub fn new(
         store: Arc<Store>,
         jobs: Arc<JobQueue>,

@@ -52,7 +52,7 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 stop(app, Some(3));
             }
             "stop4" => {
-                stop(app, Some(4));
+                stop(app, None);
             }
             "skip" => {
                 stop(app, Some(0));
@@ -67,8 +67,28 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 fn stop(app: &AppHandle, speakers: Option<u8>) {
     if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
         let recorder = std::sync::Arc::clone(&recorder);
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            let _ = recorder.stop_with_speakers(speakers);
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let result =
+                tauri::async_runtime::spawn_blocking(move || recorder.stop_with_speakers(speakers))
+                    .await;
+            let error = match result {
+                Ok(Ok(_)) => return,
+                Ok(Err(e)) => e.to_string(),
+                Err(e) => e.to_string(),
+            };
+            eprintln!("tray stop failed: {error}");
+            if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
+                refresh(&app, recorder.is_recording());
+            }
+            let _ = app.emit(crate::commands::TRAY_STOP_FAILED_EVENT, error.clone());
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title("Scribular")
+                .body(error)
+                .show();
         });
     }
 }
@@ -86,65 +106,68 @@ fn build_menu(
     multi_speaker: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
-    let show = MenuItem::with_id(app, "show", "Show Scribular", true, None::<&str>)?;
-    let sep1 = PredefinedMenuItem::separator(app)?;
-    items.push(Box::new(show));
-    items.push(Box::new(sep1));
-    if recording && multi_speaker {
-        let header = MenuItem::with_id(
-            app,
-            "header",
-            "⏹ Stop - How many speakers?",
-            false,
-            None::<&str>,
-        )?;
-        let sep = PredefinedMenuItem::separator(app)?;
-        let mut choices: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> =
-            vec![Box::new(header), Box::new(sep)];
-        for (id, text) in [
-            ("stop2", "2 speakers"),
-            ("stop3", "3 speakers"),
-            ("stop4", "4+ speakers"),
-            ("skip", "Skip speaker detection"),
-        ] {
-            choices.push(Box::new(MenuItem::with_id(
+    for item in tray_model(recording, multi_speaker) {
+        items.push(match item {
+            TrayItem::Show => Box::new(MenuItem::with_id(
                 app,
-                id,
-                text,
+                "show",
+                "Show Scribular",
                 true,
                 None::<&str>,
-            )?));
-        }
-        let choice_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            choices.iter().map(|i| i.as_ref()).collect();
-        items.push(Box::new(tauri::menu::Submenu::with_id_and_items(
-            app,
-            "stop-submenu",
-            "Stop Recording",
-            true,
-            &choice_refs,
-        )?));
-    } else {
-        items.push(Box::new(MenuItem::with_id(
-            app,
-            if recording { "stop" } else { "start" },
-            if recording {
-                "Stop Recording"
-            } else {
-                "Start Recording"
-            },
-            true,
-            None::<&str>,
-        )?));
+            )?),
+            TrayItem::Separator => Box::new(PredefinedMenuItem::separator(app)?),
+            TrayItem::Start => Box::new(MenuItem::with_id(
+                app,
+                "start",
+                "Start Recording",
+                true,
+                None::<&str>,
+            )?),
+            TrayItem::Stop => Box::new(MenuItem::with_id(
+                app,
+                "stop",
+                "Stop Recording",
+                true,
+                None::<&str>,
+            )?),
+            TrayItem::SpeakerSubmenu => {
+                let mut choices: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = vec![
+                    Box::new(MenuItem::with_id(
+                        app,
+                        "header",
+                        "⏹ Stop - How many speakers?",
+                        false,
+                        None::<&str>,
+                    )?),
+                    Box::new(PredefinedMenuItem::separator(app)?),
+                ];
+                for (id, text) in [
+                    ("stop2", "2 speakers"),
+                    ("stop3", "3 speakers"),
+                    ("stop4", "4+ speakers"),
+                    ("skip", "Skip speaker detection"),
+                ] {
+                    choices.push(Box::new(MenuItem::with_id(
+                        app,
+                        id,
+                        text,
+                        true,
+                        None::<&str>,
+                    )?));
+                }
+                let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+                    choices.iter().map(|i| i.as_ref()).collect();
+                Box::new(tauri::menu::Submenu::with_id_and_items(
+                    app,
+                    "stop-submenu",
+                    "Stop Recording",
+                    true,
+                    &refs,
+                )?)
+            }
+            TrayItem::Quit => Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?),
+        });
     }
-    items.push(Box::new(PredefinedMenuItem::separator(app)?));
-    items.push(Box::new(MenuItem::with_id(
-        app,
-        "quit",
-        "Quit",
-        true,
-        None::<&str>,
-    )?));
     let refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
         items.iter().map(|i| i.as_ref()).collect();
     Menu::with_items(app, &refs)

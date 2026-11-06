@@ -3,12 +3,13 @@ import App from './App.svelte';
 import { openExternalLink } from './lib/api';
 
 document.addEventListener('click', (event) => {
-  const anchor = (event.target as Element | null)?.closest('a[href]') as HTMLAnchorElement | null;
+  const anchor = event.target instanceof Element ? event.target.closest('a[href]') as HTMLAnchorElement | null : null;
   if (!anchor) return;
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const url = new URL(anchor.href, location.href);
-  if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:') {
+  if (url.protocol === 'mailto:' || ((url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== location.origin)) {
     event.preventDefault();
-    void openExternalLink(url.href);
+    void openExternalLink(url.href).catch((error) => console.error('Failed to open external link', error));
   }
 });
 

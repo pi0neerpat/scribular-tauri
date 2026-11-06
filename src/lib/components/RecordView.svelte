@@ -129,7 +129,7 @@
   });
 
   onMount(() => {
-    const startFromTray = () => { trayStart = true; void start(); };
+    const startFromTray = () => { if (trayStart || busy) return; trayStart = true; void start(); };
     window.addEventListener('tray-start-recording', startFromTray);
     const unlisten = onSessionProgress((p) => {
       if (p.sessionId !== sessionId) return;
@@ -138,7 +138,7 @@
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
         // Keep the id while awaitingModel, so a reload still finds the session.
         if (finished.includes(p.state)) remember(null);
-        getSession(p.sessionId).then((s) => (result = s));
+        getSession(p.sessionId).then((s) => { if (sessionId === p.sessionId) result = s; });
       }
     });
     // The window may reload while a session runs.
@@ -204,9 +204,17 @@
         sessionStorage.removeItem(IN_FLIGHT_START_KEY);
         sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
       }
-      // Refused by the licence check: the gate explains it.
       const refused = accessDenied(e);
-      if (refused) accessState.set(refused);
+      if (refused) {
+        accessState.set(refused);
+        if (trayStart) {
+          const message = 'Scribular cannot start recording because account access is restricted.';
+          window.dispatchEvent(new Event('tray-start-failed'));
+          try { await notifyTrayStartFailure(message); }
+          catch (noticeError) { error = `${message} (notification failed: ${String(noticeError)})`; }
+          trayStart = false;
+        }
+      }
       else {
         denied = deniedPrivacy(String(e));
         error = String(e);
