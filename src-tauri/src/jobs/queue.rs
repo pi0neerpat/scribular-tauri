@@ -23,6 +23,7 @@ pub enum JobError {
     PromptNotFound(String),
     /// The session is recording or already summarizing.
     Busy(SessionStatus),
+    CannotDelete(SessionStatus),
 }
 
 impl fmt::Display for JobError {
@@ -33,6 +34,9 @@ impl fmt::Display for JobError {
             Self::PromptNotFound(id) => write!(f, "prompt {id} not found"),
             Self::Busy(status) => {
                 write!(f, "session can't be summarized while {}", status.as_str())
+            }
+            Self::CannotDelete(status) => {
+                write!(f, "session can't be deleted while {}", status.as_str())
             }
         }
     }
@@ -257,6 +261,46 @@ impl JobQueue {
             }
             _ => false,
         }
+    }
+
+    pub fn delete_session_safe(&self, session_id: &str) -> Result<bool, JobError> {
+        let Some(session) = self.shared.store.get_session(session_id)? else {
+            return Ok(false);
+        };
+        if matches!(
+            session.status,
+            SessionStatus::Recording | SessionStatus::Finalizing
+        ) {
+            return Err(JobError::CannotDelete(session.status));
+        }
+        self.cancel(session_id);
+        Ok(self.shared.store.delete_session(session_id)?)
+    }
+
+    pub fn clear_all_sessions(&self) -> Result<(usize, usize), JobError> {
+        let sessions = self.shared.store.list_sessions()?;
+        let mut deleted = 0;
+        let mut skipped = 0;
+        for session in sessions {
+            if matches!(
+                session.status,
+                SessionStatus::Recording | SessionStatus::Finalizing
+            ) {
+                skipped += 1;
+                continue;
+            }
+            self.cancel(&session.id);
+            match self.shared.store.delete_session(&session.id) {
+                Ok(true) => deleted += 1,
+                Ok(false) => skipped += 1,
+                Err(e) => {
+                    crate::diag::log::log("ERROR", "queue", &format!("clear sessions: deleting {} failed ({})", session.id, crate::diag::log::kind(&e)));
+                    skipped += 1;
+                }
+            }
+        }
+        self.shared.store.vacuum()?;
+        Ok((deleted, skipped))
     }
 
     fn cancel_finalizing(&self, session_id: &str) {

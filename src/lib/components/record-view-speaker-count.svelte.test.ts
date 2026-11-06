@@ -54,6 +54,20 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it('keeps Start available and offers Cancel while awaiting the summary model', async () => {
+    sessionStorage.setItem('scribular.inFlightSession', 'waiting-1');
+    getSession.mockResolvedValueOnce({ id: 'waiting-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect(target.textContent).toContain('Waiting for the summary model download'));
+    expect([...target.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Start recording', 'Cancel']),
+    );
+    await clickButton(target, 'Cancel');
+    expect(cancelJob).toHaveBeenCalledWith('waiting-1');
+    unmount(app);
+    target.remove();
+  });
+
   it.each([["2 people", 2], ["3 people", 3], ["4+ (beta)", null]] as const)(
     'forwards %s to stopRecording', async (choice, count) => {
       const { target, app } = await renderRecordView();
@@ -149,6 +163,7 @@ describe('recording speaker-count prompt', () => {
       transcript: '', plainTranscript: null, rawTranscript: null, speakerMap: null,
       diarizationState: 'none', summary: '', durationMs: null, timings: null,
       hasAudio: false, isSample: false, audioExpiresAt: null,
+      previousSummary: null, previousPromptId: null, previousModelId: null,
     } as const;
     onSessionProgress.mockImplementation(async (callback) => {
       emitProgress = callback;

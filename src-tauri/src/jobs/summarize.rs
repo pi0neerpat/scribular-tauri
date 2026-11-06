@@ -79,11 +79,27 @@ impl Reporter<'_> {
         if matches!(&stop, Stop::Failed(_)) {
             crate::diag::telemetry::report(Arc::clone(&self.shared.store), "summarize");
         }
-        let (status, error, message) = match &stop {
+        let (mut status, error, mut message) = match &stop {
             Stop::Cancelled => (SessionStatus::Cancelled, None, "Summarization stopped."),
             Stop::Failed(e) => (SessionStatus::Failed, Some(e.as_str()), e.as_str()),
         };
-        if let Err(e) = self.shared.store.set_status(self.session_id, status, error) {
+        let recovering = self
+            .shared
+            .store
+            .get_session(self.session_id)
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.error.as_deref() == Some(crate::store::INTERRUPTED));
+        let stored_error = if recovering {
+            Some(crate::store::INTERRUPTED)
+        } else {
+            error
+        };
+        if let Err(e) = self
+            .shared
+            .store
+            .set_status(self.session_id, status, stored_error)
+        {
             crate::diag::log::log(
                 "ERROR",
                 "summarize",
@@ -93,6 +109,12 @@ impl Reporter<'_> {
                     crate::diag::log::kind(&e)
                 ),
             );
+        }
+        if recovering {
+            status = SessionStatus::Failed;
+            if matches!(stop, Stop::Cancelled) {
+                message = "Recovery stopped; saved audio is available to try again.";
+            }
         }
         let (step_index, step_count) = (self.step_index, self.step_count);
         self.emit(status, step_index, step_count, message);
@@ -158,9 +180,15 @@ fn summarize(
             .map_err(stop)?
             .ok_or_else(|| Stop::Failed(format!("prompt {} not found", job.prompt_id)))?,
     };
-    store
-        .set_status(&job.session_id, SessionStatus::Summarizing, None)
-        .map_err(stop)?;
+    if session.error.as_deref() == Some(crate::store::INTERRUPTED) {
+        store
+            .set_recovery_status(&job.session_id, SessionStatus::Summarizing)
+            .map_err(stop)?;
+    } else {
+        store
+            .set_status(&job.session_id, SessionStatus::Summarizing, None)
+            .map_err(stop)?;
+    }
 
     // Electron's word floor, checked before the model takes any memory.
     if session.transcript.split(' ').count() < MIN_WORDS {

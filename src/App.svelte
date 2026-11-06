@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { appVersion, currentRecording, lockedState, onHeartbeat, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState } from './lib/api';
+  import { appVersion, currentRecording, lockedState, onHeartbeat, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -8,6 +8,7 @@
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import TrialBadge from './lib/components/TrialBadge.svelte';
   import UpdateBar from './lib/components/UpdateBar.svelte';
+  import SessionHistory from './lib/components/SessionHistory.svelte';
   import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
@@ -26,6 +27,7 @@
   let version = $state<AppVersion | null>(null);
   let error = $state<string | null>(null);
   let beats = $state(0);
+  let interrupted = $state(0);
   let modelProgress = $state<import('./lib/types/ModelProgress').ModelProgress[]>([]);
   let navigationLocked = $derived(navigationLockedBy(modelProgress));
   let view = $derived($navigation.view);
@@ -42,6 +44,10 @@
     const action = () => navigation.update((n) => ({ ...n, view: next }));
     if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action, opener);
     else action();
+  }
+
+  async function refreshInterrupted() {
+    interrupted = (await listSessions()).filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length;
   }
 
   onMount(() => {
@@ -72,6 +78,7 @@
     let recordingEvents = 0;
     let latestProgress: import('./lib/types/SessionProgress').SessionProgress | null = null;
     const progress = onSessionProgress((p) => {
+      refreshInterrupted().catch(() => {});
       recordingEvents++;
       latestProgress = p;
       if (p.state === 'recording') {
@@ -103,6 +110,7 @@
     appVersion()
       .then((v) => (version = v))
       .catch((e) => (error = String(e)));
+    refreshInterrupted().catch(() => {});
     const unlisten = onHeartbeat((beat) => (beats = beat.seq));
     const stopLicense = followAccessState();
     return () => {
@@ -149,6 +157,11 @@
       <button onclick={() => (notice = false)}>Dismiss</button>
     </p>
   {/if}
+  {#if interrupted}
+    <p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'} — recover?
+      <button onclick={() => navigate('history')}>Recover</button>
+    </p>
+  {/if}
   <FirstRun bind:speechReady />
   <ModelStatus />
   {#if version}
@@ -160,6 +173,7 @@
   {/if}
   <nav>
     <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
+    <button onclick={(event) => navigate('history', event.currentTarget)} aria-pressed={view === 'history'} disabled={navigationDisabled(navigationLocked)} aria-disabled={navigationLocked}>History</button>
     <button data-tour="settings" onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'} disabled={navigationDisabled(navigationLocked)} aria-disabled={navigationLocked}>Settings</button>
     <button onclick={showTour}>Show tour</button>
     <TrialBadge onclick={() => navigate('settings')} />
@@ -171,6 +185,7 @@
       onEnterLicense={() => navigate('settings')}
     />
   </div>
+  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} onSessionsChanged={() => refreshInterrupted().catch(() => {})} /></div>
   {#if view === 'settings'}
     <Settings bind:this={settings} {navigationLocked} />
   {/if}

@@ -24,7 +24,7 @@ use scribular_lib::jobs::{
 };
 use scribular_lib::llm::LlmError;
 use scribular_lib::store::key::MemoryKeyStore;
-use scribular_lib::store::{AudioSource, InputMode, Session, SessionStatus, Store};
+use scribular_lib::store::{AudioSource, InputMode, NewSession, Session, SessionStatus, Store};
 use scribular_lib::stt::TranscriptSegment;
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -893,6 +893,159 @@ fn a_lapse_mid_recording_still_saves_and_summarizes() {
     let s = h.get(&id);
     assert_eq!(s.transcript, TRANSCRIPT);
     assert!(!s.summary.is_empty());
+}
+
+fn interrupted_with_audio(h: &Harness) -> String {
+    let session = h
+        .store
+        .create_session(&NewSession {
+            title: "Interrupted".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some("default-therapy-dora".into()),
+            model_id: None,
+        })
+        .unwrap();
+    h.store
+        .append_audio_chunk(&session.id, AudioSource::Mic, 0, &vec![10_000; 80_000])
+        .unwrap();
+    h.store
+        .set_status(&session.id, SessionStatus::Failed, Some("interrupted"))
+        .unwrap();
+    session.id
+}
+
+#[test]
+fn interrupted_audio_recovers_transcript_then_summarizes_and_applies_retention() {
+    let h = Harness::new();
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    let recovered = h.get(&id);
+    assert_eq!(recovered.status, SessionStatus::Done);
+    assert_eq!(recovered.transcript, TRANSCRIPT);
+    assert!(!recovered.summary.is_empty());
+    assert_eq!(
+        h.chunks(&id),
+        0,
+        "audio is removed after successful recovery summary"
+    );
+}
+
+#[test]
+fn cancelling_recovery_transcription_keeps_audio_and_marks_it_interrupted() {
+    let h = Harness::with(|stt| stt.block_from = 0, |_| {});
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    wait_until("recovery transcription", || !h.stt.calls().is_empty());
+    assert!(h.recorder.cancel(&id));
+    wait_until("interrupted recovery state", || {
+        let session = h.get(&id);
+        session.status == SessionStatus::Failed && session.error.as_deref() == Some("interrupted")
+    });
+    assert_eq!(h.chunks(&id), 1);
+}
+
+#[test]
+fn a_recovery_can_be_claimed_only_once_while_transcription_runs() {
+    let h = Harness::with(|stt| stt.block_from = 0, |_| {});
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    wait_until("recovery transcription", || !h.stt.calls().is_empty());
+    assert!(h.recorder.recover(&id).is_err());
+    assert_eq!(h.stt.calls().len(), 1);
+    assert!(h.recorder.cancel(&id));
+    wait_until("recovery cleanup", || {
+        h.get(&id).status == SessionStatus::Failed
+    });
+}
+
+#[test]
+fn a_failed_recovery_summary_keeps_its_audio_for_another_attempt() {
+    let h = Harness::with(
+        |_| {},
+        |loader| loader.fail = Some(LlmError::Engine("offline".into())),
+    );
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Summarizing);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(h.get(&id).status, SessionStatus::Failed);
+    assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+    assert_eq!(h.chunks(&id), 1);
+}
+
+#[test]
+fn cancelling_a_recovery_summary_restores_the_interrupted_state_and_audio() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(100);
+        },
+    );
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Summarizing);
+    assert!(h.recorder.cancel(&id));
+    wait_until("cancelled recovery summary", || {
+        let s = h.get(&id);
+        s.status == SessionStatus::Failed && s.error.as_deref() == Some("interrupted")
+    });
+    assert_eq!(h.chunks(&id), 1);
+}
+
+#[test]
+fn recovery_with_insufficient_speech_keeps_audio_and_reports_why() {
+    let h = Harness::with(|stt| stt.segments = vec![segment(0, "too few")], |_| {});
+    let id = interrupted_with_audio(&h);
+    h.recorder.recover(&id).unwrap();
+    wait_until("insufficient recovery speech", || {
+        h.get(&id).error.as_deref() == Some("Audio capture insufficient. Please record a bit more.")
+    });
+    assert_eq!(h.get(&id).status, SessionStatus::Failed);
+    assert_eq!(h.chunks(&id), 1);
+}
+
+#[test]
+fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
+    let h = Harness::new();
+    let recording = h.start(InputMode::Mic);
+    assert!(h
+        .queue
+        .delete_session_safe(&recording)
+        .unwrap_err()
+        .to_string()
+        .contains("can't be deleted"));
+    assert!(h.get(&recording).status == SessionStatus::Recording);
+    let completed = h
+        .store
+        .create_session(&NewSession {
+            title: "Done".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some("default-therapy-dora".into()),
+            model_id: None,
+        })
+        .unwrap();
+    h.store
+        .finish_summary(
+            &completed.id,
+            "summary",
+            "style",
+            "model",
+            &Default::default(),
+        )
+        .unwrap();
+    let (deleted, skipped) = h.queue.clear_all_sessions().unwrap();
+    assert_eq!((deleted, skipped), (1, 1));
+    assert_eq!(
+        h.store
+            .list_sessions()
+            .unwrap()
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>(),
+        [recording.as_str()]
+    );
 }
 
 /// Parity spec 03 AS9: changing the active style mid-recording does not

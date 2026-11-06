@@ -16,7 +16,7 @@ const session = {
   status: 'awaitingModel' as const, error: null, promptId: null, modelId: null,
   transcript: 'A saved transcript', summary: '', durationMs: 1000, timings: null,
   plainTranscript: null, rawTranscript: null, speakerMap: null, diarizationState: 'none' as const,
-  hasAudio: false, isSample: false, audioExpiresAt: null,
+  hasAudio: false, isSample: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null,
 };
 
 describe('first run components', () => {
@@ -45,8 +45,8 @@ describe('first run components', () => {
     expect(body).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
   });
 
-  it('keeps recording available while a prior session awaits the summary model', () => {
-    expect(isWorking('awaitingModel')).toBe(false);
+  it('allows cancelling while a session awaits the summary model', () => {
+    expect(isWorking('awaitingModel')).toBe(true);
     expect(isWorking('finalizing')).toBe(true);
     expect(isWorking('summarizing')).toBe(true);
   });

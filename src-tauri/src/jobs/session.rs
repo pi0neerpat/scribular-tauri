@@ -471,6 +471,68 @@ impl Recorder {
         self.inner.jobs.cancel(session_id)
     }
 
+    pub fn recover(&self, session_id: &str) -> Result<(), String> {
+        let mut state = lock(&self.inner.state);
+        if state.shutdown {
+            return Err("app is shutting down".into());
+        }
+        if state.finalizing.contains_key(session_id) {
+            return Err("session recovery is already running".into());
+        }
+        let session = self
+            .inner
+            .store
+            .get_session(session_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("session {session_id} not found"))?;
+        if session.status != SessionStatus::Failed
+            || session.error.as_deref() != Some(store::INTERRUPTED)
+        {
+            return Err("only interrupted sessions with saved audio can be recovered".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        if !self
+            .inner
+            .store
+            .claim_recovery(session_id)
+            .map_err(|e| e.to_string())?
+        {
+            return Err("only interrupted sessions with saved audio can be recovered".into());
+        }
+        state
+            .finalizing
+            .insert(session_id.into(), Arc::clone(&cancel));
+        drop(state);
+        self.inner.emit(
+            session_id,
+            SessionStatus::Finalizing,
+            "Recovering transcript…",
+        );
+        let inner = Arc::clone(&self.inner);
+        let id = session_id.to_owned();
+        let worker = std::thread::Builder::new()
+            .name("recover-session".into())
+            .spawn(move || {
+                inner.recover(&id, &cancel);
+                lock(&inner.state).finalizing.remove(&id);
+            });
+        let worker = match worker {
+            Ok(worker) => worker,
+            Err(e) => {
+                lock(&self.inner.state).finalizing.remove(session_id);
+                let _ = self
+                    .inner
+                    .store
+                    .set_recovery_status(session_id, SessionStatus::Failed);
+                return Err(e.to_string());
+            }
+        };
+        let mut finalizers = lock(&self.finalizers);
+        finalizers.retain(|f| !f.is_finished());
+        finalizers.push(worker);
+        Ok(())
+    }
+
     /// Stops the recorder once, preserving in-flight sessions for launch recovery.
     pub fn shutdown(&self) {
         let _gate = lock(&self.install_gate);
@@ -504,6 +566,146 @@ impl Drop for Recorder {
 }
 
 impl Inner {
+    fn recover(&self, id: &str, cancel: &AtomicBool) {
+        let insufficient = crate::text::ChunkError::InsufficientAudio.to_string();
+        let failed = |inner: &Self, message: &str| {
+            let persisted = if message == insufficient {
+                message
+            } else {
+                store::INTERRUPTED
+            };
+            if let Err(e) = inner.store.fail_recovery(id, persisted) {
+                crate::diag::log::log("ERROR", "recover", &format!("recover {id} ({})", crate::diag::log::kind(&e)));
+            }
+            inner.emit(id, SessionStatus::Failed, message);
+        };
+        let session = match self.session(id) {
+            Ok(s) => s,
+            Err(e) => return failed(self, &e),
+        };
+        if let Err(e) = self.store.clear_segments(id) {
+            return failed(self, &e.to_string());
+        }
+        let mut sample_count = 0usize;
+        for &source in sources(session.input_mode) {
+            let audio = match self.store.audio_samples(id, source) {
+                Ok(v) => v,
+                Err(e) => return failed(self, &e.to_string()),
+            };
+            sample_count = sample_count.max(audio.len());
+            let mut stream = Stream::default();
+            for chunk in audio.chunks(crate::audio::CHUNK_SAMPLES) {
+                let pcm = chunk
+                    .iter()
+                    .map(|sample| *sample as f32 / 32768.0)
+                    .collect::<Vec<_>>();
+                stream.push(&pcm);
+            }
+            stream.finish();
+            while let Some(window) = stream.next() {
+                if cancel.load(Ordering::Relaxed) {
+                    return failed(self, store::INTERRUPTED);
+                }
+                let stt = match self.transcriber() {
+                    Ok(s) => s,
+                    Err(e) => return failed(self, &e),
+                };
+                match self.window(id, source, &mut stream, &window, &*stt, cancel) {
+                    Ok(true) => {}
+                    Ok(false) => return failed(self, store::INTERRUPTED),
+                    Err(e) => return failed(self, &e),
+                }
+            }
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return failed(self, store::INTERRUPTED);
+        }
+        let transcript = match self.transcript(id) {
+            Ok(t) => t,
+            Err(e) => return failed(self, &e),
+        };
+        if transcript.split_whitespace().count() < crate::text::MIN_WORDS {
+            return failed(self, &insufficient);
+        }
+        let duration_ms =
+            u32::try_from(sample_count as u64 * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
+        let diarized = match self.store.recording_settings() {
+            Ok(settings) if settings.multi_speaker => {
+                let segments = sources(session.input_mode)
+                    .iter()
+                    .map(|&source| self.store.segments(id, source).map(|s| (source, s)))
+                    .collect::<Result<Vec<_>, _>>();
+                match segments {
+                    Ok(segments) => {
+                        let mut audio = self.store.audio_range_reader(id);
+                        match crate::diarize::diarize(
+                            session.input_mode,
+                            &segments,
+                            &mut |source, start, end| {
+                                audio.samples(source, start, end).map_err(|e| e.to_string())
+                            },
+                            None,
+                            &*self.speakers,
+                            cancel,
+                        ) {
+                            Ok(value) => Some(value),
+                            Err(_) => {
+                                if !cancel.load(Ordering::Relaxed) {
+                                    crate::diag::log::log("WARN", "recover", &format!("recover {id}: diarization unavailable (diarization_error)"));
+                                    self.emit(id, SessionStatus::Finalizing, "Speaker labels unavailable; continuing with the transcript.");
+                                }
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        crate::diag::log::log("WARN", "recover", &format!("recover {id}: diarization data unavailable ({})", crate::diag::log::kind(&e)));
+                        self.emit(
+                            id,
+                            SessionStatus::Finalizing,
+                            "Speaker labels unavailable; continuing with the transcript.",
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        if cancel.load(Ordering::Relaxed) {
+            return failed(self, store::INTERRUPTED);
+        }
+        if let Err(e) = self.store.save_recovered_transcript(
+            id,
+            &transcript,
+            duration_ms,
+            diarized.as_ref().map(|(raw, map)| (raw.as_str(), map)),
+        ) {
+            return failed(self, &e.to_string());
+        }
+        if let Err(e) = self.store.set_timings(id, &Timings::default()) {
+            crate::diag::log::log("WARN", "recover", &format!("recover {id}: saving timings failed ({})", crate::diag::log::kind(&e)));
+        }
+        if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
+            lock(&self.model).take();
+        }
+        let queued = {
+            let mut state = lock(&self.state);
+            if cancel.load(Ordering::Relaxed) {
+                state.finalizing.remove(id);
+                Err(store::INTERRUPTED.to_owned())
+            } else {
+                let result = self.prompt_for(id).and_then(|prompt| {
+                    self.jobs.regenerate(id, &prompt).map_err(|e| e.to_string())
+                });
+                state.finalizing.remove(id);
+                result
+            }
+        };
+        if let Err(e) = queued {
+            return failed(self, &e);
+        }
+    }
+
     fn open(
         self: &Arc<Self>,
         session_id: &str,
