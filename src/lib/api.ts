@@ -12,6 +12,7 @@ import type { Heartbeat } from './types/Heartbeat';
 import type { InputMode } from './types/InputMode';
 import type { LockReason } from './types/LockReason';
 import type { ModelProgress } from './types/ModelProgress';
+import type { OnboardingState } from './types/OnboardingState';
 import type { ModelSpec } from './types/ModelSpec';
 import type { Privacy } from './types/Privacy';
 import type { Prompt } from './types/Prompt';
@@ -31,6 +32,18 @@ type SpeakerMap = Record<string, string>;
 
 export function appVersion(): Promise<AppVersion> {
   return invoke<AppVersion>('app_version');
+}
+
+export function getOnboardingState(): Promise<OnboardingState> {
+  return invoke<OnboardingState>('get_onboarding_state');
+}
+
+export function completeOnboarding(): Promise<void> {
+  return invoke<void>('complete_onboarding');
+}
+
+export function restoreSampleSessions(): Promise<string> {
+  return invoke<string>('restore_sample_sessions');
 }
 
 export function getDiagnostics(): Promise<string> { return invoke<string>('get_diagnostics'); }

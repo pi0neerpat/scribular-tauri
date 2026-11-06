@@ -130,6 +130,9 @@ pub fn run() {
         .manage(commands::SummaryNotices::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::get_onboarding_state,
+            commands::complete_onboarding,
+            commands::restore_sample_sessions,
             commands::get_diagnostics,
             commands::view_logs,
             commands::get_telemetry_setting,
@@ -272,6 +275,7 @@ pub fn run() {
                 diag::log::log("WARN", "shell", &format!("tray unavailable ({})", diag::log::kind(e.as_ref())));
             }
             let store = Arc::new(opened?);
+            store.seed_samples_if_needed()?;
             let panic_pending = log_dir.join("panic.pending");
             if panic_pending.exists() {
                 diag::telemetry::report(Arc::clone(&store), "unhandled");

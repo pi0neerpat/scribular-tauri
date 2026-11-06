@@ -16,7 +16,7 @@ function session(state: Session['diarizationState'], name = 'Alice', summary = '
     id: 'session-1', title: 'Test', createdAt: 0, inputMode: 'mic', status: 'done', error: null,
     promptId: null, modelId: null, transcript: 'Alice: hello', plainTranscript: 'hello',
     rawTranscript: 'SPEAKER_0: hello', speakerMap: { SPEAKER_0: name }, diarizationState: state,
-    summary, durationMs: 1000, timings: null, hasAudio: false, audioExpiresAt: null,
+    summary, durationMs: 1000, timings: null, hasAudio: false, isSample: false, audioExpiresAt: null,
   } as Session;
 }
 

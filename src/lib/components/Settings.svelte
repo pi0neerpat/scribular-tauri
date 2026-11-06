@@ -6,6 +6,7 @@
     deniedPrivacy,
     downloadModel,
     getRecordingSettings,
+    restoreSampleSessions,
     listAudioApps,
     modelsStatus,
     onModelsProgress,
@@ -59,6 +60,7 @@
   let notifyWasEnabled = $state(false);
   let category = $state<'Note styles' | 'Session' | 'General' | 'About' | 'License'>('Session');
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
+  let sampleNotice = $state<string | null>(null);
   let telemetryOn = $state(false);
   let telemetryKnown = $state(false);
   let telemetrySaving = $state(false);
@@ -183,6 +185,15 @@
     }
   }
 
+  async function restoreSample() {
+    try {
+      await restoreSampleSessions();
+      sampleNotice = 'Sample session restored.';
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function changeTelemetry() {
     if (telemetrySaving) return;
     telemetrySaving = true;
@@ -213,7 +224,7 @@
   }
 </script>
 
-<section>
+<section data-tour="input-mode">
   <h2>Settings</h2>
   <nav aria-label="Settings categories">
     {#each ['Note styles', 'Session', 'General', 'About', 'License'] as item}
@@ -336,6 +347,15 @@
     <p>Version: {version || 'Loading…'}</p>
     <button onclick={() => openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e)))}>Contact support</button>
     <button onclick={() => openExternalLink('https://www.scribular.com').catch((e) => (error = String(e)))}>Scribular website</button>
+  {/if}
+
+  {#if category === 'General'}
+  <section aria-labelledby="sample-session-title">
+    <h3 id="sample-session-title">Sample session</h3>
+    <p>Restore the example session if you deleted it.</p>
+    <button onclick={restoreSample}>Restore sample session</button>
+    {#if sampleNotice}<p role="status">{sampleNotice}</p>{/if}
+  </section>
   {/if}
 
   {#if category === 'General'}

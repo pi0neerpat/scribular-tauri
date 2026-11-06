@@ -16,6 +16,8 @@ pub const PENDING_UPDATE_INSTALL: &str = "pending_update_install";
 pub const SKIPPED_UPDATE_VERSION: &str = "skipped_update_version";
 pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
 pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
+pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
+pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
@@ -120,6 +122,14 @@ impl Store {
         })
     }
 
+    pub fn complete_onboarding(&self) -> Result<()> {
+        self.set_setting(ONBOARDING_COMPLETED, "1")
+    }
+
+    pub fn onboarding_completed(&self) -> Result<bool> {
+        Ok(self.get_setting(ONBOARDING_COMPLETED)?.as_deref() == Some("1"))
+    }
+
     /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {
@@ -162,5 +172,28 @@ impl Store {
             tx.commit()?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    fn store() -> Store {
+        let mut conn = Connection::open_in_memory().unwrap();
+        super::super::migrations::migrate(&mut conn).unwrap();
+        Store {
+            conn: Mutex::new(conn),
+        }
+    }
+
+    #[test]
+    fn onboarding_choice_persists() {
+        let store = store();
+        assert!(!store.onboarding_completed().unwrap());
+        store.complete_onboarding().unwrap();
+        assert!(store.onboarding_completed().unwrap());
     }
 }

@@ -16,4 +16,4 @@ hasAudio: boolean,
 /**
  * When the sweep deletes the kept audio, in ms since the Unix epoch.
  */
-audioExpiresAt: number | null, };
+audioExpiresAt: number | null, isSample: boolean, };

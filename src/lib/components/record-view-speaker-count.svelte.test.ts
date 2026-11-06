@@ -148,7 +148,7 @@ describe('recording speaker-count prompt', () => {
       error: null, promptId: null, modelId: null,
       transcript: '', plainTranscript: null, rawTranscript: null, speakerMap: null,
       diarizationState: 'none', summary: '', durationMs: null, timings: null,
-      hasAudio: false, audioExpiresAt: null,
+      hasAudio: false, isSample: false, audioExpiresAt: null,
     } as const;
     onSessionProgress.mockImplementation(async (callback) => {
       emitProgress = callback;

@@ -119,6 +119,7 @@ pub struct SessionListItem {
     pub status: SessionStatus,
     pub duration_ms: Option<u32>,
     pub has_audio: bool,
+    pub is_sample: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -147,6 +148,7 @@ pub struct Session {
     /// When the sweep deletes the kept audio, in ms since the Unix epoch.
     #[ts(type = "number | null")]
     pub audio_expires_at: Option<i64>,
+    pub is_sample: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -218,7 +220,7 @@ const HAS_AUDIO: &str = "(audio_kept = 1 AND EXISTS \
 
 const COLUMNS: &str = "id, title, created_at, input_mode, status, error, prompt_id, model_id, \
                        transcript, summary, duration_ms, timings, plain_transcript, raw_transcript, \
-                       speaker_map, diarization_state";
+                       speaker_map, diarization_state, is_sample";
 
 /// What [`Store::kept_audio`] found for a session.
 #[derive(Debug, PartialEq)]
@@ -246,7 +248,8 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
     let mode: String = row.get(3)?;
     let timings: Option<String> = row.get(11)?;
     let created_at: i64 = row.get(2)?;
-    let has_audio: bool = row.get(16)?;
+    let is_sample: bool = row.get(16)?;
+    let has_audio: bool = row.get(17)?;
     let speaker_map: Option<String> = row.get(14)?;
     let diarization_state: String = row.get(15)?;
     Ok(Session {
@@ -279,6 +282,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
             })?,
         has_audio,
         audio_expires_at: has_audio.then_some(created_at + AUDIO_RETENTION_MS),
+        is_sample,
     })
 }
 
@@ -447,7 +451,7 @@ impl Store {
     pub fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO} FROM sessions
+                "SELECT id, title, created_at, status, duration_ms, {HAS_AUDIO}, is_sample FROM sessions
                      ORDER BY created_at DESC, rowid DESC"
             ))?;
             let rows = stmt.query_map([], |r| {
@@ -458,6 +462,7 @@ impl Store {
                     status: status_at(r, 3)?,
                     duration_ms: r.get(4)?,
                     has_audio: r.get(5)?,
+                    is_sample: r.get(6)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
