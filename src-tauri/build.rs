@@ -8,8 +8,13 @@ fn main() {
     }
     // tauri.conf.json bundles those dylibs from src-tauri/target/release; with
     // CARGO_TARGET_DIR elsewhere, a fresh checkout lacks that path, so link it.
+    // A relative CARGO_TARGET_DIR is relative to cargo's cwd, which a build
+    // script can't see, so only absolute ones are linked.
     #[cfg(unix)]
-    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+    if let Some(dir) = std::env::var("CARGO_TARGET_DIR")
+        .ok()
+        .filter(|d| std::path::Path::new(d).is_absolute())
+    {
         let link = std::path::Path::new("target");
         let current = std::fs::read_link(link).ok();
         if current.as_deref() != Some(dir.as_ref()) {
