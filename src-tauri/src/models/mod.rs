@@ -134,6 +134,12 @@ impl ModelManager {
             .is_some_and(|i| self.running[i].load(Ordering::Acquire))
     }
 
+    pub fn is_busy(&self) -> bool {
+        self.running
+            .iter()
+            .any(|running| running.load(Ordering::Acquire))
+    }
+
     /// Makes `model_id` the summary model. Fails for an id that is not an LLM.
     pub fn select_llm(&self, model_id: &str) -> Result<(), String> {
         if !self

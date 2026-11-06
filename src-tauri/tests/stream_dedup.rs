@@ -63,7 +63,7 @@ fn windows_overlap_by_five_seconds_and_cover_all_audio() {
     stream.push(&tone(48));
     stream.finish();
     let mut windows = Vec::new();
-    while let Some(w) = stream.next() {
+    for w in stream {
         windows.push(w);
     }
     // 62 s: four full windows, then the 7 s tail with its 5 s overlap.
@@ -99,7 +99,7 @@ fn finishing_on_a_hop_queues_the_last_overlap_as_the_tail() {
     stream.push(&tone(30));
     stream.finish();
     let mut windows = Vec::new();
-    while let Some(w) = stream.next() {
+    for w in stream {
         windows.push(w);
     }
     assert_eq!(spans(&windows), [(0, 15), (10, 30), (25, 30)]);

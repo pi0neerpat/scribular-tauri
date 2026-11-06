@@ -142,10 +142,6 @@ impl Stream {
         self.queued() > CATCHING_UP
     }
 
-    pub fn next(&mut self) -> Option<Window> {
-        self.queue.pop_front()
-    }
-
     /// Transcribes `window` and returns its new segments in recording time.
     /// A silent window returns nothing without calling `stt`. A segment cut
     /// off at the end of a window is left to the next one, whose overlap
@@ -171,5 +167,13 @@ impl Stream {
             }
         }
         Ok(self.dedup.keep(window.offset_ms(), segments))
+    }
+}
+
+impl Iterator for Stream {
+    type Item = Window;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.queue.pop_front()
     }
 }

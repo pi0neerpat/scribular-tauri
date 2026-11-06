@@ -146,7 +146,7 @@ fn low_memory() -> bool {
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse::<u64>().ok())
-        .map_or(true, |bytes| bytes <= 8 << 30)
+        .is_none_or(|bytes| bytes <= 8 << 30)
 }
 
 #[derive(Default)]
@@ -189,6 +189,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Recorder {
     inner: Arc<Inner>,
     finalizers: Mutex<Vec<JoinHandle<()>>>,
+    install_gate: Arc<Mutex<()>>,
+    models: Mutex<Option<Arc<crate::models::ModelManager>>>,
 }
 
 impl Recorder {
@@ -236,6 +238,8 @@ impl Recorder {
                 unload_whisper: AtomicBool::new(low_memory()),
             }),
             finalizers: Mutex::default(),
+            install_gate: Arc::new(Mutex::new(())),
+            models: Mutex::default(),
         }
     }
 
@@ -256,6 +260,26 @@ impl Recorder {
             .map(|r| r.session_id.clone())
     }
 
+    pub fn install_gate(&self) -> Arc<Mutex<()>> {
+        Arc::clone(&self.install_gate)
+    }
+
+    pub fn set_model_manager(&self, models: Arc<crate::models::ModelManager>) {
+        *lock(&self.models) = Some(models);
+    }
+
+    pub fn is_busy(&self) -> bool {
+        lock(&self.inner.recording).is_some()
+            || !lock(&self.inner.state).finalizing.is_empty()
+            || self.inner.jobs.is_busy()
+            || lock(&self.finalizers)
+                .iter()
+                .any(|worker| !worker.is_finished())
+            || lock(&self.models)
+                .as_ref()
+                .is_some_and(|models| models.is_busy())
+    }
+
     /// Runs `operation` while preventing a recording from starting.
     pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Result<T, RecordError> {
         let recording = lock(&self.inner.recording);
@@ -273,6 +297,7 @@ impl Recorder {
         app: Option<&str>,
         title: &str,
     ) -> Result<Session, RecordError> {
+        let _gate = lock(&self.install_gate);
         let inner = &self.inner;
         if !inner.stt.ready() {
             return Err(RecordError::SpeechModelNotReady);
@@ -340,6 +365,7 @@ impl Recorder {
     }
 
     pub fn stop_with_speakers(&self, num_speakers: Option<u8>) -> Result<String, RecordError> {
+        let _gate = lock(&self.install_gate);
         let inner = &self.inner;
         let recording = lock(&inner.recording)
             .take()

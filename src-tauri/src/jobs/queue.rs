@@ -190,6 +190,11 @@ impl JobQueue {
         self.shared.lock().running.is_some()
     }
 
+    pub fn is_busy(&self) -> bool {
+        let state = self.shared.lock();
+        !state.pending.is_empty() || state.running.is_some()
+    }
+
     /// Serializes model changes with summary admission and start. Returns
     /// `None` while a summary is running. The closure runs under the queue
     /// lock and must not call back into this queue.

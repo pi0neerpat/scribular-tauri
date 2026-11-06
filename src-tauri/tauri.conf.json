@@ -22,6 +22,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "resources": ["THIRD_PARTY_NOTICES.md"],
     "macOS": {
       "minimumSystemVersion": "14.0",
@@ -47,5 +48,11 @@
       "icons/icon.png"
     ],
     "externalBin": ["binaries/AudioCapCLI"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBKEY",
+      "endpoints": ["https://github.com/pi0neerpat/scribular-tauri-releases/releases/latest/download/latest.json"]
+    }
   }
 }

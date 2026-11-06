@@ -38,11 +38,14 @@ pub const EVENTS: &[&str] = &[
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
     LICENSE_CHANGED_EVENT,
+    UPDATE_STATE_EVENT,
 ];
 
 /// The new [`AccessState`] after activation, removal, re-validation or a day
 /// rollover (spec 04 R12).
 pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
+
+pub const UPDATE_STATE_EVENT: &str = "update://state";
 
 /// Download and verification progress, one [`ModelProgress`] per change.
 pub const MODELS_PROGRESS_EVENT: &str = "models://progress";
@@ -99,6 +102,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     AccessState::export_all(cfg)?;
     ActivationResult::export_all(cfg)?;
     crate::license::Rejection::export_all(cfg)?;
+    crate::update::UpdateState::export_all(cfg)?;
     Ok(())
 }
 
@@ -108,6 +112,24 @@ pub fn app_version() -> AppVersion {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+#[tauri::command]
+pub fn check_for_updates(updates: State<'_, Arc<crate::update::UpdateManager>>) {
+    let updates = Arc::clone(&updates);
+    std::thread::spawn(move || updates.check());
+}
+
+#[tauri::command]
+pub fn get_update_state(
+    updates: State<'_, Arc<crate::update::UpdateManager>>,
+) -> crate::update::UpdateState {
+    updates.state()
+}
+
+#[tauri::command]
+pub fn install_update(updates: State<'_, Arc<crate::update::UpdateManager>>) -> Result<(), String> {
+    updates.install()
 }
 
 // Commands return `Result<_, String>`: the webview only shows the message.
@@ -436,7 +458,7 @@ fn confirm_speaker_labels_with_jobs(
     speaker_map: std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
     let current = store
-        .get_session(&id)
+        .get_session(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("session {id} not found"))?;
     let regenerate = current.speaker_map.as_ref() != Some(&speaker_map);

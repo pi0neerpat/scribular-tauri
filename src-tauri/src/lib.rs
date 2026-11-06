@@ -9,6 +9,7 @@ pub mod models;
 pub mod store;
 pub mod stt;
 pub mod text;
+pub mod update;
 
 use std::{sync::Arc, time::Duration};
 
@@ -95,6 +96,7 @@ fn spawn_license_checks(app: tauri::AppHandle, licensing: Arc<license::Licensing
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::list_sessions,
@@ -137,7 +139,10 @@ pub fn run() {
             commands::get_masked_license_key,
             commands::activate_license,
             commands::deactivate_license,
-            commands::open_external_link
+            commands::open_external_link,
+            commands::check_for_updates,
+            commands::get_update_state,
+            commands::install_update
         ])
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -155,6 +160,12 @@ pub fn run() {
                 keys,
             });
             if reason.is_some() {
+                setup_updates(
+                    app,
+                    Arc::new(|| false),
+                    Arc::new(std::sync::Mutex::new(())),
+                    None,
+                );
                 // R7: no Store, queues or recorder; the webview shows only the
                 // locked screen and its commands.
                 return Ok(());
@@ -205,15 +216,25 @@ pub fn run() {
             app.manage(Arc::clone(&jobs));
             // Audio capture stays real under `fake-engines`; only the models
             // are faked.
-            app.manage(Arc::new(Recorder::new_with_speakers(
-                store,
+            let recorder = Arc::new(Recorder::new_with_speakers(
+                Arc::clone(&store),
                 jobs,
                 stt,
                 events,
                 Arc::new(CpalMicrophone),
                 Arc::new(AudioCapCli::bundled()?),
                 speakers,
-            )));
+            ));
+            recorder.set_model_manager(Arc::clone(&models));
+            let gate = recorder.install_gate();
+            let busy_recorder = Arc::clone(&recorder);
+            setup_updates(
+                app,
+                Arc::new(move || busy_recorder.is_busy()),
+                gate,
+                Some(Arc::clone(&store)),
+            );
+            app.manage(recorder);
             std::thread::spawn(move || models.scan());
 
             let handle = app.handle().clone();
@@ -227,8 +248,54 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                app.state::<Arc<update::UpdateManager>>().install_on_quit();
+            }
+        });
+}
+
+fn setup_updates(
+    app: &mut tauri::App,
+    busy: Arc<dyn Fn() -> bool + Send + Sync>,
+    gate: Arc<std::sync::Mutex<()>>,
+    store: Option<Arc<Store>>,
+) {
+    let handle = app.handle().clone();
+    let emit_handle = handle.clone();
+    let restart_handle = handle.clone();
+    let updates = Arc::new(update::UpdateManager::new(
+        Arc::new(update::TauriUpdateSource::new(handle.clone())),
+        busy,
+        gate,
+        Arc::new(move |state| {
+            let _ = emit_handle.emit(commands::UPDATE_STATE_EVENT, state);
+        }),
+        Arc::new(move || restart_handle.restart()),
+    ));
+    app.manage(Arc::clone(&updates));
+    if let Some(store) = store {
+        updates.set_store(store);
+    }
+    let manager = Arc::clone(&updates);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(15));
+        #[cfg(debug_assertions)]
+        if std::env::var_os("SCRIBULAR_UPDATE_ENDPOINT").is_none() {
+            return;
+        }
+        loop {
+            manager.check();
+            std::thread::sleep(Duration::from_secs(60 * 60));
+        }
+    });
+    let ready_manager = updates;
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(2));
+        ready_manager.refresh_installable();
+    });
 }
 
 #[cfg(test)]
@@ -296,5 +363,30 @@ mod tests {
                 "event `{event}` has no listen wrapper in src/lib/api.ts"
             );
         }
+    }
+
+    #[test]
+    fn updater_config_uses_https_and_artifact_generation_without_electron_feed() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], true);
+        let endpoints = config["plugins"]["updater"]["endpoints"]
+            .as_array()
+            .unwrap();
+        assert!(!endpoints.is_empty());
+        for endpoint in endpoints {
+            let url = endpoint.as_str().unwrap();
+            assert!(url.starts_with("https://"));
+            assert!(!url.contains("scribular-releases"));
+        }
+    }
+
+    #[test]
+    #[ignore = "needs real updater pubkey from Patrick (spec 05 Decision 2)"]
+    fn updater_pubkey_is_nonempty_and_not_the_placeholder() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let pubkey = config["plugins"]["updater"]["pubkey"].as_str().unwrap();
+        assert!(!pubkey.is_empty() && pubkey != "REPLACE_WITH_TAURI_UPDATER_PUBKEY");
     }
 }
