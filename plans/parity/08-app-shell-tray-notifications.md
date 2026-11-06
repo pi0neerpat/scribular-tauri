@@ -2,7 +2,7 @@
 Status: draft for cwf; Date: 2026-11-03
 
 
-> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, Patrick-approval, publish-date cutoff, two-week rule, exact-pin, OSV/RustSec, owner-check or `build.rs`-review requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** Before adding a crate or npm package, check only that (1) it is commonly used (substantial downloads or dependents) and (2) it has had a release or commit within the last 12 months. Record the result in one or two lines in the PR description. No `DEPENDENCY_REVIEW_*.md` doc and no approval step. Prefer dependencies already in the tree. This covers packages only: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
+> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, approval, audit, pinning or vetting requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** The only requirement for adding a crate or npm package: it is commonly used and actively maintained. No review doc, no approval step, no PR write-up. Prefer dependencies already in the tree. Separate from this: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
 
 Electron refs are in `/Volumes/My Shared Files/Scribular/notes-assistant-electron` (v1.5.10), written as `src/...:line`. Tauri refs are in `scribular-tauri`.
 
@@ -134,7 +134,7 @@ Anti-goals
 ## Requirements (numbered R1..)
 Priorities: P1 users depend on it, P2 expected, P3 cosmetic/low.
 
-- **R0 (P1, first step).** Check each candidate below against the dependency policy at the top of this spec (commonly used; release within the last 12 months) and note the result in the PR description. No review doc, no approval step.
+- **R0 (P1).** Each candidate below must be commonly used and actively maintained (dependency policy at the top). No review step.
 
 Quit and close (P1)
 - **R1.** Closing the window (red button, Cmd+W) hides it and does not exit the app. This applies whenever the tray exists. Recording, transcription and summarization continue. Handle `WindowEvent::CloseRequested` with `prevent_close()` and `hide()`.
@@ -226,12 +226,12 @@ Why the tray runs from Rust state: Electron's renderer→main round trip (`RECOR
 
 Why hide-on-close: the tray exists so recording can continue without a window, and Electron's close-kills-recording behaviour is a trap (`audio.js:671-688` runs on `window-all-closed`).
 
-App Nap: a hidden-window recording relies on active audio I/O to keep the process awake; hold an activity assertion only if AS20 shows throttling (would need a crate, so a separate review).
+App Nap: a hidden-window recording relies on active audio I/O to keep the process awake; hold an activity assertion only if AS20 shows throttling (would need a crate; same dependency policy).
 
-## New dependencies (candidates + review needed)
-Dependency policy check only (R0); no review doc.
+## New dependencies (candidates)
+Each must meet the dependency policy (R0).
 1. **`tauri` feature `tray-icon`** (plus `image-png` for `Image::from_bytes`). Built-in, official; pulls the `tray-icon` crate (and `muda`, already used for menus). The in-house alternative is none (it needs AppKit `NSStatusItem`). Needed for R5-R8.
-2. **`tauri-plugin-notification`** (official, Rust crate only; call it from Rust so the JS package `@tauri-apps/plugin-notification` is not needed). Needed for R13 and R9 failure notices. Alternative: `osascript -e 'display notification'` through `std::process::Command` costs no dependency but is attributed to Script Editor, shows the wrong icon, and can't request permission. Rejected for a clinical product's polish, but it is the fallback if the plugin fails the dependency policy check.
+2. **`tauri-plugin-notification`** (official, Rust crate only; call it from Rust so the JS package `@tauri-apps/plugin-notification` is not needed). Needed for R13 and R9 failure notices. Alternative: `osascript -e 'display notification'` through `std::process::Command` costs no dependency but is attributed to Script Editor, shows the wrong icon, and can't request permission. Rejected for a clinical product's polish, but it is the fallback if the plugin is not commonly used or actively maintained.
 3. **Not added (in-house instead):** `tauri-plugin-opener` (R22 uses `reqwest::Url` plus the `open` command), `tauri-plugin-dialog` (in-app modals), `three` (R26 uses canvas 2D), `tauri-plugin-window-state` (Electron doesn't persist bounds).
 4. Possible later: an `objc2` crate for App Nap or vibrancy, only if AS20 or Decision 3 demands it.
 
@@ -260,13 +260,13 @@ Dependency policy check only (R0); no review doc.
 1. **Window close while recording.** Electron destroys the window and kills the audio worker (`index.js:592-599`). *Default:* hide the window and keep recording (R1), with a confirm on Cmd+Q (R3).
 2. **Native banner vs modal for "summary complete".** Electron shows a blocking OS modal. *Default:* a native banner, opt-in and off by default, generic text without client names (R12-R15).
 3. **Vibrancy/transparent window.** It needs `macOSPrivateApi`. *Default:* skip for v1 (R20); revisit if the flat look is a complaint.
-4. **Starfield implementation.** *Default:* in-house canvas 2D, no `three` (R26-R27). If the exact 3D look matters, add `three` (Patrick's call; the dependency policy check is enough).
+4. **Starfield implementation.** *Default:* in-house canvas 2D, no `three` (R26-R27). If the exact 3D look matters, add `three` (Patrick's call; it only needs to meet the dependency policy).
 5. **55-minute reminder (Electron doesn't ship it).** *Default:* defer. Don't build C1-C3 in this PR. Pick it up after parity, with limit default 55 min and an in-app modal.
 6. **Notify when the window is focused.** *Default:* suppress (R13).
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR
 **M, about 6-8 days** (the 55-min candidate would add about 1 day).
-1. PR1: dependency policy check (R0), `AppSettings`, and the Settings toggles, with the tests.
+1. PR1: `AppSettings`, and the Settings toggles, with the tests.
 2. PR2: quit/close lifecycle (R1-R4) plus `Recorder::shutdown()`.
 3. PR3: tray (R5-R11), the largest and most manual testing.
 4. PR4: notifications (R12-R16).

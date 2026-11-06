@@ -2,7 +2,7 @@
 Status: draft for cwf; Date: 2026-11-03
 
 
-> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, Patrick-approval, publish-date cutoff, two-week rule, exact-pin, OSV/RustSec, owner-check or `build.rs`-review requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** Before adding a crate or npm package, check only that (1) it is commonly used (substantial downloads or dependents) and (2) it has had a release or commit within the last 12 months. Record the result in one or two lines in the PR description. No `DEPENDENCY_REVIEW_*.md` doc and no approval step. Prefer dependencies already in the tree. This covers packages only: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
+> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, approval, audit, pinning or vetting requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** The only requirement for adding a crate or npm package: it is commonly used and actively maintained. No review doc, no approval step, no PR write-up. Prefer dependencies already in the tree. Separate from this: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
 
 ## Intent (why users need it; who)
 A new user (therapist or note-taker, not a developer) opens Scribular for the first time. They need three things quickly:
@@ -94,8 +94,8 @@ AS13 (manual real-app, run in spec 09). Given the sample is open, then the banne
 - Ordering with licensing (04): if a trial gate or licence step is added, it comes after the tour starts, never before Start recording is enabled. Interaction details are 04's to define.
 - Tests: add `src-tauri/src/store/samples.rs` unit tests, extend `first-run.test.ts` with tour cases.
 
-## New dependencies (candidates + review needed) or "none"
-None. The tour is plain Svelte and CSS; the in-house alternative to a tour library (e.g. a Shepherd/Driver.js style package) is the ~100-line component above. No review doc is needed (R1).
+## New dependencies (candidates) or "none"
+None. The tour is plain Svelte and CSS; the in-house alternative to a tour library (e.g. a Shepherd/Driver.js style package) is the ~100-line component above.
 
 ## Out of scope
 - Input-mode/target-app wizard steps.

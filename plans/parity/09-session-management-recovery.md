@@ -2,7 +2,7 @@
 Status: draft for cwf; Date: 2026-11-03
 
 
-> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, Patrick-approval, publish-date cutoff, two-week rule, exact-pin, OSV/RustSec, owner-check or `build.rs`-review requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** Before adding a crate or npm package, check only that (1) it is commonly used (substantial downloads or dependents) and (2) it has had a release or commit within the last 12 months. Record the result in one or two lines in the PR description. No `DEPENDENCY_REVIEW_*.md` doc and no approval step. Prefer dependencies already in the tree. This covers packages only: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
+> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, approval, audit, pinning or vetting requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** The only requirement for adding a crate or npm package: it is commonly used and actively maintained. No review doc, no approval step, no PR write-up. Prefer dependencies already in the tree. Separate from this: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
 
 ## Intent
 Users keep their meeting notes in the session list. They need to open a past session, copy the summary, regenerate it with another style, undo a bad regeneration, delete one session or all of them, and not lose a recording when the app crashes or the summary model is still downloading.
@@ -172,7 +172,7 @@ Paths are under `scribular-tauri/`.
 - Use the `StylePicker` from spec 03 when it lands.
 
 ## New dependencies
-None. Candidate considered and rejected: `tauri-plugin-clipboard-manager`. The in-house alternative is `navigator.clipboard` plus a `/usr/bin/pbcopy` command. If Patrick prefers the plugin, it needs only the dependency policy check at the top of this spec.
+None. Candidate considered and rejected: `tauri-plugin-clipboard-manager`. The in-house alternative is `navigator.clipboard` plus a `/usr/bin/pbcopy` command. If Patrick prefers the plugin, it only needs to meet the dependency policy at the top of this spec.
 
 ## Out of scope
 - Chat (dead in Electron).

@@ -1,8 +1,35 @@
-# Auto-update — Tauri parity spec
-Status: draft for cwf; Date: 2026-11-03
+# Auto-update — Tauri spec
+Status: draft for cwf; Date: 2026-11-05
 
+## Summary
+- **What:** the app checks for new versions every hour, downloads them in the background and offers "Restart to update".
+- **Why:** without it, every tester stays on the first build they installed and never gets fixes.
+- **User-visible change:** new "ready to update" bar; new Updates section in Settings with "Check for updates"; quitting while idle installs a downloaded update.
+- **Size / risk:** M, about 5 days. Most likely to go wrong: the update package holds an app that is not fully notarized, so CI checks it before publishing.
+- **Needs from Patrick:** where the update feed lives, and creating the update signing key (5 decisions below).
 
-> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, Patrick-approval, publish-date cutoff, two-week rule, exact-pin, OSV/RustSec, owner-check or `build.rs`-review requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** Before adding a crate or npm package, check only that (1) it is commonly used (substantial downloads or dependents) and (2) it has had a release or commit within the last 12 months. Record the result in one or two lines in the PR description. No `DEPENDENCY_REVIEW_*.md` doc and no approval step. Prefer dependencies already in the tree. This covers packages only: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
+## User workflow
+```mermaid
+flowchart LR
+  L[Open app] --> K[Hourly check]:::new
+  K --> N{Newer version?}:::new
+  N -- no --> K
+  N -- yes --> D[Download in background]:::new
+  D --> W{Recording or summary running?}:::new
+  W -- yes --> H[Bar stays hidden]:::new --> W
+  W -- no --> B[Restart to update bar]:::new
+  B -- Restart --> R[App relaunches on new version]:::new
+  B -- Later --> Q[Next idle quit installs it]:::new
+  D -. bad download or offline .-> S[Settings shows Last check failed]:::new
+  classDef new fill:#d4f4dd,stroke:#2d8a4e
+  classDef changed fill:#fff3c4,stroke:#b58900
+```
+**UX impact:**
+- One new bar, shown only when nothing is recording or summarizing; "Later" hides it until next launch.
+- A new Updates section in Settings with a manual check button and the last failure message.
+- No new error pop-ups: background check failures show only in Settings.
+
+---
 
 ## Intent (why users need it; who)
 
@@ -64,12 +91,12 @@ Fresh start (Patrick, 2026-11-03): Electron users stay on Electron. The two apps
 
 ## Requirements (numbered R1..)
 
-**Dependencies and keys**
-- **R1** First implementation step: check the updater crates (below) against the dependency policy at the top of this spec and note the result in the PR description. No review doc, no approval step.
+### Dependencies and keys
+- **R1** The updater crates (below) must be commonly used and actively maintained (see Dependencies). No review step.
 - **R2** Generate an updater keypair with `tauri signer generate`. It is a minisign-style key, **unrelated to the Apple Developer ID cert**. The public key goes in `tauri.conf.json` at `plugins.updater.pubkey` (public, committed). The private key and its password go **only** in GitHub Actions secrets `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` on `pi0neerpat/scribular-tauri`, set by Patrick with `gh secret set`. The builder never sees, prints or invents key values.
 - **R3** Losing the private key strands every installed copy (they can only verify against the baked-in public key). Patrick keeps an offline backup. The runbook states this. There is no in-app key rotation in v1.
 
-**Feed and artifacts**
+### Feed and artifacts
 - **R4** The feed lives in a dedicated **public** repo, default `pi0neerpat/scribular-tauri-releases` (see Decisions). Endpoint: `https://github.com/pi0neerpat/scribular-tauri-releases/releases/latest/download/latest.json`. It is never `scribular-releases`.
 - **R5** `bundle.createUpdaterArtifacts = true` so the build emits `Scribular.app.tar.gz` and `Scribular.app.tar.gz.sig` next to the DMG.
 - **R6** CI generates `latest.json` with an in-house script (`scripts/make-latest-json.mjs`, Node built-ins only; no `tauri-action`): `version`, `notes`, `pub_date` (RFC 3339), and `platforms["darwin-aarch64"] = { signature: <contents of the .sig file>, url: <release asset URL of the .tar.gz> }`.
@@ -77,14 +104,14 @@ Fresh start (Patrick, 2026-11-03): Electron users stay on Electron. The two apps
 - **R8** CI verifies before publish: (a) the `.sig` verifies against the committed public key; (b) the app inside the `.tar.gz` passes `codesign --verify --deep --strict`, `spctl -a -vv` ("Notarized Developer ID") and `xcrun stapler validate`. If the bundler tars the app before stapling, (b) fails and the workflow must reorder or re-tar and re-sign. Do not assume.
 - **R9** The existing Apple secrets and verification steps stay unchanged. The two key systems stay independent: Apple signs the app, the updater key signs the update tarball.
 
-**Version bumping**
+### Version bumping
 - **R10** One source of truth: `src-tauri/Cargo.toml` `version`. Remove `version` from `tauri.conf.json` (Tauri falls back to `Cargo.toml`; confirm with a local `tauri info`/CI build; if not, keep all three in sync) and keep `package.json` in sync. `scripts/bump-version.mjs` (in-house) takes `patch|minor|major`, edits the files and prints the new version.
 - **R11** `release-mac.yml` gets `workflow_dispatch` inputs: `bump` (choice, default `patch`, matches Electron `build-electron.yml:22-32`), `publish` (boolean, default `false`), `notes` (string, default `See https://www.scribular.com/releases`). With `publish=false` it behaves as today (artifact upload only), so the current verify run stays cheap.
 - **R12** The bump is applied in the runner's working tree before the build. **After** a successful publish, the workflow commits "Bump version to X.Y.Z" to `main` and pushes the tag `vX.Y.Z` (needs `permissions: contents: write`). Doing it after publish avoids orphan bumps and tags from failed builds (Electron commits first, `build-electron.yml:48-57`). The workflow fails early if `vX.Y.Z` already exists or, when the feed has a current `latest.json`, if X.Y.Z is not strictly greater than its version. A missing/404 feed is allowed for the bootstrap release.
 - **R13** Release-repo token: a fine-grained PAT with Contents read/write on the releases repo only, in secret `RELEASES_REPO_TOKEN` on `scribular-tauri`. Passed as `GH_TOKEN` env to publish steps only. No `set -x` near it.
 - **R14** Guard against feeding Electron: the workflow aborts if the publish target repo is `pi0neerpat/scribular-releases`.
 
-**Runtime**
+### Runtime
 - **R15** Add `tauri-plugin-updater`, registered in `lib.rs`, configured in `tauri.conf.json` (`pubkey`, `endpoints`). Drive it **from Rust only** (`app.updater()`), through a trait so the state machine is testable with a fake. No JS plugin, no capability additions, no `tauri-plugin-process`. Relaunch with `AppHandle::restart()`.
 - **R16** `UpdateManager` (Rust, managed state) owns this state machine: `Idle → Checking → (UpToDate→Idle | Downloading{received,total} → Ready{version,notes} | Error{message} → Checking on the next scheduled or manual retry)`. States are exposed as the `UpdateState` ts-rs type.
 - **R17** Schedule: first check ~15 s after launch (off the startup path), then every 60 min (parity with Electron `index.js:530-531`). Skipped in debug builds (parity with `app.isPackaged`, `:480`) unless `SCRIBULAR_UPDATE_ENDPOINT` is set (debug builds only, used for manual tests). A check while one is running or while `Ready` is a no-op.
@@ -95,17 +122,17 @@ Fresh start (Patrick, 2026-11-03): Electron users stay on Electron. The two apps
 - **R22** Emit `update://state` with `installable: false` in every state except `Ready` while idle; only `Ready` + not busy emits `installable: true`. While `Ready`, a 2 s ticker re-evaluates `busy` and re-emits only on change, so no hooks into `Recorder` or `JobQueue` are needed. The ticker stops when state leaves `Ready`.
 - **R23** Install flow: `install_update` → acquire the shared install gate → check busy → write the pending-install marker (R27) → `update.install(bytes)` → `app.restart()`. On install error: restore state to `Ready` if the bundle is untouched, else `Error`; log; the user keeps a working app (R26).
 
-**UI**
+### UI
 - **R24** `UpdateBar.svelte`, mounted in `src/App.svelte`, visible only when `Ready && installable && !dismissedForThisVersion`: "Scribular X.Y.Z is ready" with **Restart to update**, **Later** and **What's new** (opens `https://www.scribular.com/releases` via the `open_external_link` command that spec 04 introduces; no new plugin). **Later** hides the bar for that version until the next launch (fixes Electron gap 3). While `busy` the bar is hidden, and it reappears the moment `installable` turns true (parity with `client.js:449-460`, now covering transcription and summary).
 - **R25** `Settings.svelte` gets an **Updates** section: current version (from `appVersion()`), state text ("Up to date", "Checking…", "Downloading 40%", "Version X.Y.Z ready", "Last check failed: <message>"), a **Check for updates** button (new vs Electron, Spec author's call), and **Restart to update** when `Ready` (disabled with the reason "Finish your recording or summary first" when busy). Network failures during background checks show nothing in the main view; they appear only here.
 
-**Failure handling / rollback**
+### Failure handling / rollback
 - **R26** The client never auto-downgrades: only `remote > current` (the plugin's default semver comparison) is accepted. A bad *download* or *signature* is discarded and retried at the next hourly check, with no UI beyond the Settings status. Classify errors by the plugin's error type, not message text.
 - **R27** Pending-install marker in the Rust-owned store (settings key-value if the store has one, else a small migration): `{from, to, attempts}`. On launch: running version == `to` → clear it. Running version == `from` (install did not take) → `attempts += 1`. After 3 failed attempts for the same `to`, record `skipped_version = to` and stop auto-downloading it until a newer version appears. Log each outcome.
 - **R28** Release-side rollback runbook in `plans/RELEASING.md`: a bad release is pulled by switching it back to **draft** in the releases repo. `/releases/latest/download/latest.json` then resolves to the previous release, so machines that have not updated stay put. Machines already on the bad build do **not** downgrade (R26); fix forward with a higher version. Never delete the private key to "stop" updates.
 - **R29** Data safety: update installs replace only the `.app` bundle. User data in `app_data_dir` is untouched. Forward-only SQLite migrations mean a rolled-back binary may meet a newer DB. See Interacts: the release runbook warns about it and every release with a migration notes it.
 
-## Acceptance scenarios (numbered AS1..; Given/When/Then; each tagged automated (cargo test / fake-engines / vitest) or manual real-app check)
+## Acceptance scenarios (numbered AS1..; Given/When/Then; each tagged automated or manual)
 
 **AS1 (automated, cargo test + fake updater)** Given a fake updater reporting 0.2.0 while the app is 0.1.0 and idle. When the check runs. Then state goes `Checking → Downloading → Ready{0.2.0}` and `update://state` is emitted with `installable: false` for `Checking` and `Downloading`, and `installable: true` only for idle `Ready`.
 
@@ -142,43 +169,33 @@ Fresh start (Patrick, 2026-11-03): Electron users stay on Electron. The two apps
 **AS17 (manual, runbook)** Switch the published release to draft: `latest.json` resolves to the previous version and a 0.1.0 client sees no update to the pulled version.
 
 ## Design notes (modules, commands/events, data model + migration, UI components)
+- **Where it runs / data flow:** all update logic runs in Rust. A scheduler thread drives `UpdateManager`, which calls `tauri-plugin-updater` through a trait and emits `update://state` to the webview. The webview only renders state and calls commands.
+- **Modules**
+  - `src-tauri/src/update/mod.rs` (new): `trait UpdateSource { check() -> Result<Option<UpdateInfo>>; download(&UpdateInfo, on_progress) -> Result<Vec<u8>>; install(&UpdateInfo, Vec<u8>) -> Result<()> }`. Real impl `TauriUpdateSource` wraps `app.updater()`. Fake impl in tests (same pattern as the fake engines). `UpdateManager { state, staged: Option<(UpdateInfo, Vec<u8>)>, install_gate, busy }`, with `update/state.rs` for transitions, mirroring `jobs/state.rs`.
+  - `src-tauri/src/jobs/session.rs`: make `Recorder::is_busy()` the shared definition, including active recording, recorder finalization, queued/running summary work and model download. Recording start/stop and update installation acquire the same install gate; installation holds it through restart.
+  - `src-tauri/src/lib.rs`: `.plugin(tauri_plugin_updater::Builder::new().build())`, `app.manage(UpdateManager)`, spawn the scheduler thread in `.setup`, handle `RunEvent::ExitRequested` for R21 (needs `.build(...).run(|app, event| ...)` if the app currently uses `.run(generate_context!())`).
+  - `src-tauri/tauri.conf.json`: `bundle.createUpdaterArtifacts: true`; `plugins.updater: { pubkey, endpoints: [...] }`; drop `version`. `src-tauri/capabilities/default.json`: unchanged (Rust-driven).
+  - CI (`.github/workflows/release-mac.yml`): (1) checkout, setup, `npm ci` as today; (2) `bump-version.mjs ${{ inputs.bump }}`, export `VERSION`; (3) build with the existing Apple env plus `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (secrets only); (4) existing verification plus tarball extraction and the R8 checks; (5) `make-latest-json.mjs`; (6) if `inputs.publish`: guard R14, `gh release create --draft` on the releases repo with `GH_TOKEN=RELEASES_REPO_TOKEN`, upload assets, `latest.json` last, `gh release edit --draft=false`, commit bump + tag; (7) always upload the DMG artifact as now.
+- **Commands & events:** `check_for_updates()`, `get_update_state()`, `install_update()` in `src-tauri/src/commands.rs`, added to `generate_handler!` in `lib.rs:49-69` (the parity test in `lib.rs` forces the matching wrappers). `src/lib/api.ts`: `checkForUpdates`, `getUpdateState`, `installUpdate`, `onUpdateState`. Event `update://state` carries `UpdateState` (ts-rs generates `src/lib/types/UpdateState.ts`).
+- **Migration:** none expected. The pending-install marker and `skipped_version` (R27) go in the settings KV table via `src-tauri/src/store/`; use a migration `NNN_update_state` only if that table does not fit.
+- **UI components:** `src/lib/components/UpdateBar.svelte` (new), mounted in `src/App.svelte`; Updates section in `src/lib/components/Settings.svelte`; a pure `update-status.ts` for the state → text mapping (same style as `record-status.ts`) so vitest covers it without rendering.
+- **First-release baseline:** 0.1.0 shipped to testers from the current workflow has no updater key or endpoint and cannot self-update. The first updater-enabled build is the baseline; earlier testers reinstall once by hand.
+- **Name collision to watch:** Electron's mac bundle is also "Scribular" (`appId com.app.scribular`, `electron-builder.json:2`), the Tauri bundle id is `com.app.scribular.tauri` (`tauri.conf.json`). Both would install to `/Applications/Scribular.app`. Each updater replaces the bundle it is running from, and the feeds differ, so there is no cross-update, but a user dragging both DMGs overwrites one with the other. Owned here as Decision 5; this spec does not change the name unless Patrick chooses to.
+- **Spec author's calls:**
+  - Drive the plugin from Rust only: one owner of update state, testable through a fake, no capability additions.
+  - Keep downloaded bytes in memory (~11 MB) rather than on disk: nothing to clean up; a quit just means a re-download.
+  - Commit the version bump and tag only after a successful publish: no orphan bumps from failed builds.
+  - In-house `make-latest-json.mjs` and `bump-version.mjs` instead of `tauri-action`: a few lines of Node, no new action to trust.
+  - Add a manual "Check for updates" button (Electron has none): cheap, and the only place a failure is visible.
+  - Poll `busy` every 2 s while `Ready` instead of hooking `Recorder`/`JobQueue`: no coupling, negligible cost.
 
-**Rust**
-- `src-tauri/src/update/mod.rs` (new): `trait UpdateSource { check() -> Result<Option<UpdateInfo>>; download(&UpdateInfo, on_progress) -> Result<Vec<u8>>; install(&UpdateInfo, Vec<u8>) -> Result<()> }`. Real impl `TauriUpdateSource` wraps `app.updater()`. Fake impl in tests (same pattern as the fake engines). `UpdateManager { state, staged: Option<(UpdateInfo, Vec<u8>)>, install_gate, busy }`, with `update/state.rs` for transitions, mirroring `jobs/state.rs`.
-- `src-tauri/src/jobs/session.rs`: make `Recorder::is_busy()` the shared definition, including active recording, recorder finalization, queued/running summary work and model download. Recording start/stop and update installation acquire the same install gate; installation holds it through restart.
-- `src-tauri/src/commands.rs`: `check_for_updates()`, `get_update_state()`, `install_update()`. Add them to `generate_handler!` in `lib.rs:49-69` (the parity test in `lib.rs` will force the matching `api.ts` wrappers).
-- `src-tauri/src/lib.rs`: `.plugin(tauri_plugin_updater::Builder::new().build())`, `app.manage(UpdateManager)`, spawn the scheduler thread in `.setup`, handle `RunEvent::ExitRequested` for R21 (needs `.build(...).run(|app, event| ...)` if the app currently uses `.run(generate_context!())`).
-- Event: `update://state` carrying `UpdateState` (ts-rs generates `src/lib/types/UpdateState.ts`).
-- Store: the pending-install marker and `skipped_version` (R27), via the existing settings mechanism in `src-tauri/src/store/`, or a migration `NNN_update_state` if that is cleaner. The builder checks `store/` and picks.
-- `src-tauri/tauri.conf.json`: `bundle.createUpdaterArtifacts: true`; `plugins.updater: { pubkey, endpoints: [...] }`; drop `version`.
-- `src-tauri/capabilities/default.json`: unchanged (Rust-driven).
+## Dependencies and security check
+Dependency policy (Patrick, 2026-11-05; replaces the template's checklist and `plans/DEPENDENCY_REVIEW_*.md`): the only requirement for a new crate or npm package is that it is commonly used and actively maintained. No review doc, no approval step, no PR write-up. Prefer dependencies already in the tree.
 
-**Frontend**
-- `src/lib/api.ts`: `checkForUpdates`, `getUpdateState`, `installUpdate`, `onUpdateState`.
-- `src/lib/components/UpdateBar.svelte` (new), mounted in `src/App.svelte`; update section in `src/lib/components/Settings.svelte`; a pure `update-status.ts` for the state → text mapping (same style as `record-status.ts`) so vitest covers it without rendering.
+| Crate / package | Why not in-house |
+|---|---|
+| `tauri-plugin-updater` (Rust only) | Check, download, minisign verify, tarball extract, atomic `.app` replace. In-house would be `reqwest` (present) + `minisign-verify` + `tar`/`flate2` + our own bundle replace: three new crates plus security-critical file replacement. |
 
-**CI** (`.github/workflows/release-mac.yml`)
-1. checkout, setup, `npm ci` as today.
-2. `bump-version.mjs ${{ inputs.bump }}`; export `VERSION`.
-3. Build step: existing Apple env plus `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (secrets only).
-4. Existing verification; add the tarball extraction + R8 checks.
-5. `make-latest-json.mjs`.
-6. If `inputs.publish`: guard R14, `gh release create --draft` on the releases repo with `GH_TOKEN=RELEASES_REPO_TOKEN`, upload assets, `latest.json` last, `gh release edit --draft=false`, commit bump + tag.
-7. Always upload the DMG artifact as now.
-
-**First-release baseline.** 0.1.0 shipped to testers from the current workflow has no updater key or endpoint and cannot self-update. The first updater-enabled build is the baseline; earlier testers reinstall once by hand.
-
-**Name collision to watch.** Electron's mac bundle is also "Scribular" (`appId com.app.scribular`, `electron-builder.json:2`), the Tauri bundle id is `com.app.scribular.tauri` (`tauri.conf.json`). Both would install to `/Applications/Scribular.app`. Each updater replaces the bundle it is running from, and the feeds differ, so there is no cross-update, but a user dragging both DMGs overwrites one with the other. Owned here as a decision (Decision 5); this spec does not change the name unless Patrick chooses to.
-
-## New dependencies (candidates + review needed) or "none"
-
-Check (R1): per the dependency policy at the top of this spec, each candidate is commonly used and had a release within the last 12 months. No review doc.
-
-| Candidate | Why | In-house alternative |
-|---|---|---|
-| `tauri-plugin-updater` (Rust only) | Check, download, minisign verify, tarball extract, atomic `.app` replace. | `reqwest` (present) + `minisign-verify` + `tar`/`flate2` + own bundle replace. That is still three new crates plus security-critical file replacement. The plugin wins. |
-
-Review points:
 - **TLS features.** Check its default features. Avoid any default that pulls rustls with `aws-lc-rs` (CMake/C build, see M3 notes). Prefer the `native-tls` feature to match `reqwest` in `Cargo.toml` and macOS system trust. Confirm `otool -L` still passes the bundle guard (`release-mac.yml:46-50`).
 - **Not added:** `@tauri-apps/plugin-updater` (JS), `tauri-plugin-process`, `tauri-action`. `AppHandle::restart()` and `gh` + a small Node script replace them.
 - **Tooling, not a dependency:** `tauri signer generate` (from the existing `@tauri-apps/cli`).
@@ -192,7 +209,7 @@ Review points:
 - Migrating or updating Electron installs; changing the Electron app or feed.
 - Making the Tauri bundle name distinct from the Electron one, unless Patrick picks that in Decision 5 (then it is a `productName` change in this spec).
 
-## Depends on / interacts with (other parity specs by slug)
+## Depends on / interacts with (other specs by slug)
 
 - **01-encryption-audio-retention:** release runbook (R29) must note any release that migrates the SQLite/SQLCipher schema; rollback is forward-only. Keychain-held keys survive a bundle replacement only if the code signature/identity stays the same; the same Developer ID is used, so verify in AS13.
 - **04-licensing-trial:** licence checks are not network-gated by the updater; the update feed must stay reachable without a licence. No dependency otherwise.
@@ -200,6 +217,13 @@ Review points:
 - **08-app-shell-tray-notifications:** if a tray menu exists, it may later show "Update ready". Not required here. Quit paths (menu, Cmd-Q, tray) must all reach `RunEvent::ExitRequested` so R21 behaves the same.
 - **09-session-management-recovery:** killing the app mid-install is not recoverable by this spec; crash recovery of interrupted recordings is theirs. Our busy rule exists to avoid the situation.
 - **03-note-styles-model-choice:** 03 R20 switches models without a relaunch, so no relaunch path is needed. `install_update` stays update-only.
+
+## Coordination notes
+Added by gap-check 2026-11-04.
+- **Release/bundle owner:** this spec owns the release workflow and app identity (Decision 5). Native-lib additions in other specs extend the same verify step (`release-mac.yml:33-57`): 01 adds a no-`libcrypto`/`libssl` check, 02 adds ONNX/sherpa dylibs.
+- **Links:** use spec 04's `open_external_link`.
+- **Pending-install marker (R27):** store it in the settings KV table (no migration). After 01, settings are inside the encrypted DB, so read it after unlock; if the store is Locked, skip the post-update check rather than fail.
+- **Test mode:** Electron makes `quitAndInstall` a no-op under `--e2e-test` at runtime. Do not copy this. Any test-only behaviour is compile-time (`cfg(test)`/feature).
 
 ## Decisions for Patrick (with recommended default)
 
@@ -209,16 +233,9 @@ Review points:
 4. **Release gate:** should a published release require a manual approval (GitHub environment) before the draft goes public? Default: no; `publish=false` dry-run plus manual dispatch is the gate.
 5. **App identity vs the Electron app (added by gap-check 2026-11-04).** Both apps install as `/Applications/Scribular.app` (Electron `productName Scribular`, `appId com.app.scribular`; Tauri `tauri.conf.json:3,5`). (a) Bundle identifier: default **keep `com.app.scribular.tauri` and freeze it**. It is the Keychain service for 01's DB key and 04's licence item and names the data dir, so changing it after testers have data orphans their key (Locked screen). (b) Install name: default **keep "Scribular.app"** and tell existing Electron users in release notes that the new app replaces the old one in /Applications (data is separate: Electron data stays in its own folder and is not migrated). Alternative: a distinct `productName` (e.g. "Scribular (Beta)") during the overlap period. Only (a) affects spec 01, and the default keeps today's value, so this does not block 01.
 
-## Coordination notes (gap-check 2026-11-04)
-- **Release/bundle owner:** this spec owns the release workflow and app identity (Decision 5). Native-lib additions in other specs extend the same verify step (`release-mac.yml:33-57`): 01 adds a no-`libcrypto`/`libssl` check, 02 adds ONNX/sherpa dylibs.
-- **Links:** use spec 04's `open_external_link`.
-- **Pending-install marker (R27):** store it in the settings KV table (no migration). After 01, settings are inside the encrypted DB, so read it after unlock; if the store is Locked, skip the post-update check rather than fail.
-- **Test mode:** Electron makes `quitAndInstall` a no-op under `--e2e-test` at runtime. Do not copy this. Any test-only behaviour is compile-time (`cfg(test)`/feature).
-
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR
 
 **M, about 5 days.**
-1. PR0: dependency policy check (under 0.5 day; fold into PR1 if trivial).
-2. PR1 (2 days): `update/` module, trait + fake, state machine, `Recorder::is_busy`, commands, events, marker logic, AS1-AS9.
-3. PR2 (1 day): `api.ts`, `UpdateBar`, Settings section, vitest AS11.
-4. PR3 (1.5 days): keypair handoff, `tauri.conf.json`, bump + latest.json scripts, workflow changes, `plans/RELEASING.md`, AS10/AS12. Then manual AS13-AS17 with real v0.1.1.
+1. PR1 (M, 2 days): `update/` module, trait + fake, state machine, `Recorder::is_busy`, commands, events, marker logic — covers AS1–AS9.
+2. PR2 (S, 1 day): `api.ts`, `UpdateBar`, Settings section — covers AS11.
+3. PR3 (M, 1.5 days): keypair handoff, `tauri.conf.json`, bump + latest.json scripts, workflow changes, `plans/RELEASING.md` — covers AS10, AS12; then manual checks AS13–AS17 with a real v0.1.1.

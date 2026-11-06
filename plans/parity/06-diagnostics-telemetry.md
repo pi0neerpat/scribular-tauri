@@ -2,7 +2,7 @@
 Status: draft for cwf; Date: 2026-11-03
 
 
-> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, Patrick-approval, publish-date cutoff, two-week rule, exact-pin, OSV/RustSec, owner-check or `build.rs`-review requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** Before adding a crate or npm package, check only that (1) it is commonly used (substantial downloads or dependents) and (2) it has had a release or commit within the last 12 months. Record the result in one or two lines in the PR description. No `DEPENDENCY_REVIEW_*.md` doc and no approval step. Prefer dependencies already in the tree. This covers packages only: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
+> **Dependency policy (Patrick, 2026-11-05; supersedes every dependency-review, approval, audit, pinning or vetting requirement in this spec and in `plans/DEPENDENCY_REVIEW_*.md`).** The only requirement for adding a crate or npm package: it is commonly used and actively maintained. No review doc, no approval step, no PR write-up. Prefer dependencies already in the tree. Separate from this: a pinned model file still needs its URL, size and sha256 taken from the upstream file, never invented.
 
 ## Intent (why users need it; who)
 - Support needs a way to see what went wrong on a user's Mac: a log file, a "Copy diagnostics" blob, and (optionally) error reports that reach the maintainer.
@@ -148,12 +148,12 @@ Anti-goals
 - Tauri capabilities: no new plugin permissions (app commands are allowed by default, `capabilities/default.json`). Clipboard: `navigator.clipboard.writeText` from a click handler, as Electron.
 - Closed-set error mapping lives in one `ReportCode` enum so adding a code is a compile-time change and reviewers see every string that can leave the device.
 
-## New dependencies (candidates + review needed) or "none"
-Default: **none** (reqwest, serde_json, std are enough). No review doc is needed.
+## New dependencies (candidates) or "none"
+Default: **none** (reqwest, serde_json, std are enough).
 - `tauri-plugin-log` (+ `log`, `fern`): rotation and webview→Rust log forwarding for free. Rejected by default: pulls a plugin permission surface and `log` macros that make it easy to log a `{e}` string raw; in-house is ~150 lines.
 - `tracing` + `tracing-appender`: heavier than needed; daily rotation only, no size rotation.
 - `sentry`/`tauri-plugin-sentry`: rejected; third-party service for therapy data, contradicts the closed-payload requirement.
-- `uuid` (for install id): in-house alternative is formatting 16 random bytes; `getrandom` is already transitive. Only add if the review prefers it.
+- `uuid` (for install id): in-house alternative is formatting 16 random bytes; `getrandom` is already transitive. Add only if preferred over the in-house version.
 
 ## Out of scope
 - Backend dashboards/admin for `appError` and `usageStats`, any server change.
