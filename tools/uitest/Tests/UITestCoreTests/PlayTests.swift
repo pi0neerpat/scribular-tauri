@@ -22,3 +22,14 @@ import Testing
         #expect(message == "play: file not found: \(root.appendingPathComponent("missing.wav").path)")
     }
 }
+
+@Test func playUnplayableFileFails() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let bad = root.appendingPathComponent("bad.wav")
+    try Data("RIFF".utf8).write(to: bad)  // exists, but afplay rejects it and exits 1
+    let player = Player()
+    defer { player.stop() }
+
+    #expect(throws: DriverError.self) { try player.start(bad, loop: true) }
+}

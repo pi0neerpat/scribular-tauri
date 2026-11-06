@@ -44,6 +44,7 @@ final class AXDriver: Driver {
         case .play(let path, let loop):
             let file = try resolvePlayPath(path, cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
             do { try player.start(file, loop: loop) }
+            catch let error as DriverError { throw error }
             catch { throw .fatal("play: could not start afplay: \(error.localizedDescription)") }
             return file.path
         case .stopAudio:

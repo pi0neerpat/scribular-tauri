@@ -14,6 +14,14 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+
+# a re-run after a cancelled trust prompt: trust the imported cert instead of adding a second identity
+if security find-certificate -c "$NAME" -p "$KEYCHAIN" > "$work/cert.pem" 2>/dev/null; then
+  security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$work/cert.pem"
+  security find-identity -v -p codesigning | grep "$NAME"
+  exit 0
+fi
+
 pass=$(openssl rand -hex 16)
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
