@@ -598,7 +598,7 @@ impl Inner {
                 match segments {
                     Ok(segments) => {
                         let mut audio = self.store.audio_range_reader(id);
-                        crate::diarize::diarize(
+                        match crate::diarize::diarize(
                             session.input_mode,
                             &segments,
                             &mut |source, start, end| {
@@ -607,10 +607,26 @@ impl Inner {
                             None,
                             &*self.speakers,
                             cancel,
-                        )
-                        .ok()
+                        ) {
+                            Ok(value) => Some(value),
+                            Err(e) => {
+                                if !cancel.load(Ordering::Relaxed) {
+                                    eprintln!("recover {id}: diarization unavailable: {e}");
+                                    self.emit(id, SessionStatus::Finalizing, "Speaker labels unavailable; continuing with the transcript.");
+                                }
+                                None
+                            }
+                        }
                     }
-                    Err(_) => None,
+                    Err(e) => {
+                        eprintln!("recover {id}: diarization data unavailable: {e}");
+                        self.emit(
+                            id,
+                            SessionStatus::Finalizing,
+                            "Speaker labels unavailable; continuing with the transcript.",
+                        );
+                        None
+                    }
                 }
             }
             _ => None,
@@ -626,10 +642,25 @@ impl Inner {
         ) {
             return failed(self, &e.to_string());
         }
-        let _ = self.store.set_timings(id, &Timings::default());
-        let queued = self
-            .prompt_for(id)
-            .and_then(|prompt| self.jobs.regenerate(id, &prompt).map_err(|e| e.to_string()));
+        if let Err(e) = self.store.set_timings(id, &Timings::default()) {
+            eprintln!("recover {id}: saving timings failed: {e}");
+        }
+        if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
+            lock(&self.model).take();
+        }
+        let queued = {
+            let mut state = lock(&self.state);
+            if cancel.load(Ordering::Relaxed) {
+                state.finalizing.remove(id);
+                Err(store::INTERRUPTED.to_owned())
+            } else {
+                let result = self.prompt_for(id).and_then(|prompt| {
+                    self.jobs.regenerate(id, &prompt).map_err(|e| e.to_string())
+                });
+                state.finalizing.remove(id);
+                result
+            }
+        };
         if let Err(e) = queued {
             return failed(self, &e);
         }

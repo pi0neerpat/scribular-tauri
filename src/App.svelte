@@ -31,6 +31,10 @@
     else action();
   }
 
+  async function refreshInterrupted() {
+    interrupted = (await listSessions()).filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length;
+  }
+
   onMount(() => {
     lockedState()
       .then((reason) => {
@@ -43,7 +47,6 @@
     appVersion()
       .then((v) => (version = v))
       .catch((e) => (error = String(e)));
-    const refreshInterrupted = () => listSessions().then((sessions) => (interrupted = sessions.filter((s) => s.interrupted).length));
     refreshInterrupted().catch(() => {});
     const progress = onSessionProgress(() => { refreshInterrupted().catch(() => {}); });
     const unlisten = onHeartbeat((beat) => (beats = beat.seq));
@@ -95,7 +98,7 @@
       onEnterLicense={() => navigate('settings')}
     />
   </div>
-  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} /></div>
+  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} onSessionsChanged={refreshInterrupted} /></div>
   {#if view === 'settings'}
     <Settings bind:this={settings} />
   {/if}

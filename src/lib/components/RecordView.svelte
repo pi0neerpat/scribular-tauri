@@ -230,7 +230,16 @@
   }
 
   async function cancel() {
-    if (sessionId) await cancelJob(sessionId);
+    if (!sessionId) return;
+    try {
+      await cancelJob(sessionId);
+      const session = await getSession(sessionId);
+      if (session) {
+        status = session.status;
+        result = session;
+        if (finished.includes(session.status)) remember(null);
+      }
+    } catch (e) { error = String(e); }
   }
 </script>
 
@@ -243,13 +252,17 @@
       {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
     </p>
     <button bind:this={stopButton} onclick={stop} disabled={busy || askSpeakerCount}>Stop</button>
-  {:else if working}
+  {:else if working && status !== 'awaitingModel'}
     <p>
       {progress?.message ?? 'Working…'}
       {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
     </p>
     <button onclick={cancel}>Cancel</button>
   {:else}
+    {#if status === 'awaitingModel'}
+      <p>{progress?.message ?? 'Waiting for the summary model download…'}</p>
+      <button onclick={cancel}>Cancel</button>
+    {/if}
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
     {#if styles}
       <StylePicker prompts={styles.prompts} selectedId={styles.activeId} onSelect={chooseStyle} />

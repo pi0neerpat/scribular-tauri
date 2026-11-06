@@ -6,7 +6,7 @@
   import type { SessionProgress } from '../types/SessionProgress';
   import SummaryPanel from './SummaryPanel.svelte';
 
-  let { active = true }: { active?: boolean } = $props();
+  let { active = true, onSessionsChanged }: { active?: boolean; onSessionsChanged?: () => void } = $props();
   let sessions = $state<SessionListItem[]>([]);
   let selected = $state<Session | null>(null);
   let progress = $state<Record<string, SessionProgress>>({});
@@ -17,7 +17,7 @@
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
-  let interrupted = $derived(sessions.filter((s) => s.interrupted).length);
+  let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
 
   async function refresh() {
     sessions = await listSessions();
@@ -25,7 +25,8 @@
   }
 
   async function open(item: SessionListItem) {
-    selected = await getSession(item.id);
+    try { selected = await getSession(item.id); }
+    catch (e) { error = String(e); }
   }
 
   async function applyProgress(p: SessionProgress) {
@@ -61,7 +62,7 @@
   }
 
   async function remove(id: string) {
-    try { await deleteSession(id); await refresh(); }
+    try { await deleteSession(id); await refresh(); onSessionsChanged?.(); }
     catch (e) { error = String(e); }
   }
 
@@ -80,9 +81,10 @@
   async function clear() {
     try {
       const result = await clearAllSessions();
-      clearResult = `${result.deleted} deleted${result.skipped ? `; ${result.skipped} live session${result.skipped === 1 ? '' : 's'} skipped` : ''}`;
+      clearResult = `${result.deleted} deleted${result.skipped ? `; ${result.skipped} session${result.skipped === 1 ? '' : 's'} not deleted` : ''}`;
       confirmClear = false;
       await refresh();
+      onSessionsChanged?.();
     } catch (e) { error = String(e); }
   }
 </script>
@@ -113,7 +115,7 @@
             <span>{event?.message ?? item.status}</span>
             <span>{item.status === 'awaitingModel' ? 'Waiting for the summary model download…' : item.status === 'summarizing' ? 'Summarizing…' : item.snippet}</span>
           </button>
-          {#if item.interrupted && item.hasAudio}
+          {#if item.interrupted && item.hasAudio && item.status === 'failed'}
             <button onclick={() => recover(item.id)}>Recover</button>
           {:else if item.interrupted && !item.hasAudio}
             <span>Audio no longer available</span>
@@ -122,6 +124,8 @@
             <button onclick={() => confirmRemove(item.id)}>{deleteConfirmId === item.id ? 'Confirm' : 'Delete'}</button>
           {:else if item.status === 'awaitingModel'}
             <button onclick={() => cancel(item.id)}>Cancel</button>
+          {:else if item.status === 'finalizing'}
+            <button onclick={() => cancel(item.id)}>Stop</button>
           {:else if item.status === 'summarizing'}
             <button onclick={() => cancel(item.id)}>Stop</button>
           {/if}
@@ -130,7 +134,8 @@
     </ul>
     {#if selected}
       <SummaryPanel session={selected} {active} management prompts={prompts} models={models}
-        onUpdate={(s) => (selected = s)} onDelete={() => remove(selected!.id)} />
+        onUpdate={(s) => { selected = s; void refresh(); }}
+        onDelete={['recording', 'finalizing'].includes(selected.status) ? undefined : () => remove(selected!.id)} />
     {/if}
   </div>
 </section>

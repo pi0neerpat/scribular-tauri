@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { cancelJob, copyText, getPromptList, listSummaryModels, onSummaryDelta, regenerateSummary, undoSummary } from '../api';
+  import { onMount, untrack } from 'svelte';
+  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, regenerateSummary, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
   import type { Session } from '../types/Session';
@@ -31,7 +31,9 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const working = $derived(['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(session.status));
   const provenance = $derived(byline || [
-    session.promptId ? (prompts?.prompts.find((p) => p.id === session.promptId)?.name ?? 'Deleted style') : null,
+    session.promptId && prompts
+      ? (prompts.prompts.find((p) => p.id === session.promptId)?.name ?? 'Deleted style')
+      : null,
     session.modelId ? (models.find((m) => m.spec.id === session.modelId)?.spec.displayName ?? session.modelId) : null,
   ].filter(Boolean).join(' · '));
 
@@ -41,6 +43,19 @@
     selectedPrompt = promptList?.prompts.some((p) => p.id === session.promptId)
       ? session.promptId
       : promptList?.activeId ?? promptList?.prompts[0]?.id ?? null;
+  });
+
+  $effect(() => {
+    const id = session.id;
+    untrack(() => {
+      preview = '';
+      copied = false;
+      error = null;
+      busy = false;
+      confirmDelete = false;
+      clearTimeout(deleteTimer);
+      clearTimeout(copyTimer);
+    });
   });
 
   onMount(() => {
@@ -75,18 +90,23 @@
   }
 
   async function undo() {
-    try { onUpdate?.(await undoSummary(session.id)); }
+    try { const updated = await undoSummary(session.id); preview = ''; onUpdate?.(updated); }
     catch (e) { error = String(e); }
   }
 
   function deleteClick() {
-    if (confirmDelete) { clearTimeout(deleteTimer); onDelete?.(); return; }
+    if (confirmDelete) { clearTimeout(deleteTimer); confirmDelete = false; onDelete?.(); return; }
     confirmDelete = true;
     deleteTimer = setTimeout(() => (confirmDelete = false), 3000);
   }
 
   async function stop() {
-    try { await cancelJob(session.id); preview = ''; }
+    try {
+      await cancelJob(session.id);
+      preview = '';
+      const updated = await getSession(session.id);
+      if (updated) onUpdate?.(updated);
+    }
     catch (e) { error = String(e); }
   }
 </script>

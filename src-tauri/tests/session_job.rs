@@ -951,9 +951,9 @@ fn a_failed_recovery_summary_keeps_its_audio_for_another_attempt() {
     );
     let id = interrupted_with_audio(&h);
     h.recorder.recover(&id).unwrap();
-    wait_until("failed recovery summary", || {
-        h.get(&id).status == SessionStatus::Failed
-    });
+    h.events.wait_for(&id, SessionStatus::Summarizing);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(h.get(&id).status, SessionStatus::Failed);
     assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
     assert_eq!(h.chunks(&id), 1);
 }
@@ -993,7 +993,12 @@ fn recovery_with_insufficient_speech_keeps_audio_and_reports_why() {
 fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
     let h = Harness::new();
     let recording = h.start(InputMode::Mic);
-    assert!(h.queue.delete_session_safe(&recording).is_err());
+    assert!(h
+        .queue
+        .delete_session_safe(&recording)
+        .unwrap_err()
+        .to_string()
+        .contains("can't be deleted"));
     assert!(h.get(&recording).status == SessionStatus::Recording);
     let completed = h
         .store

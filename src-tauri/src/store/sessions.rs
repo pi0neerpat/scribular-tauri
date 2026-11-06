@@ -515,7 +515,7 @@ impl Store {
         let changed = self.with(|c| Ok(c.execute(
                 "UPDATE sessions SET
                     status = CASE WHEN error = 'interrupted' AND ?2 = 'cancelled' THEN 'failed' ELSE ?2 END,
-                    error = CASE WHEN error = 'interrupted' THEN error ELSE ?3 END
+                    error = CASE WHEN error = 'interrupted' AND ?2 = 'cancelled' THEN error ELSE ?3 END
                  WHERE id = ?1",
                 params![id, status.as_str(), error],
             )?))?;
@@ -594,7 +594,7 @@ impl Store {
         let changed = self.with(|c| {
             Ok(c.execute(
                 "UPDATE sessions SET summary = previous_summary,
-                 prompt_id = COALESCE(previous_prompt_id, prompt_id), model_id = previous_model_id,
+                 prompt_id = previous_prompt_id, model_id = previous_model_id,
                  previous_summary = NULL, previous_prompt_id = NULL, previous_model_id = NULL
              WHERE id = ?1 AND previous_summary IS NOT NULL
                  AND status NOT IN ('recording', 'finalizing', 'awaitingModel', 'summarizing')",

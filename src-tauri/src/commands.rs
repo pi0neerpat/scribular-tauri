@@ -173,8 +173,15 @@ pub struct ClearSessionsResult {
 }
 
 #[tauri::command]
-pub fn clear_all_sessions(jobs: State<Arc<JobQueue>>) -> Result<ClearSessionsResult, String> {
-    let (deleted, skipped) = jobs.clear_all_sessions().map_err(|e| e.to_string())?;
+pub async fn clear_all_sessions(
+    jobs: State<'_, Arc<JobQueue>>,
+) -> Result<ClearSessionsResult, String> {
+    let jobs = Arc::clone(&jobs);
+    let (deleted, skipped) =
+        tauri::async_runtime::spawn_blocking(move || jobs.clear_all_sessions())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
     Ok(ClearSessionsResult { deleted, skipped })
 }
 

@@ -24,6 +24,7 @@ pub enum JobError {
     PromptNotFound(String),
     /// The session is recording or already summarizing.
     Busy(SessionStatus),
+    CannotDelete(SessionStatus),
 }
 
 impl fmt::Display for JobError {
@@ -34,6 +35,9 @@ impl fmt::Display for JobError {
             Self::PromptNotFound(id) => write!(f, "prompt {id} not found"),
             Self::Busy(status) => {
                 write!(f, "session can't be summarized while {}", status.as_str())
+            }
+            Self::CannotDelete(status) => {
+                write!(f, "session can't be deleted while {}", status.as_str())
             }
         }
     }
@@ -254,7 +258,7 @@ impl JobQueue {
             session.status,
             SessionStatus::Recording | SessionStatus::Finalizing
         ) {
-            return Err(JobError::Busy(session.status));
+            return Err(JobError::CannotDelete(session.status));
         }
         self.cancel(session_id);
         Ok(self.shared.store.delete_session(session_id)?)
@@ -273,7 +277,14 @@ impl JobQueue {
                 continue;
             }
             self.cancel(&session.id);
-            deleted += usize::from(self.shared.store.delete_session(&session.id)?);
+            match self.shared.store.delete_session(&session.id) {
+                Ok(true) => deleted += 1,
+                Ok(false) => skipped += 1,
+                Err(e) => {
+                    eprintln!("clear sessions: deleting {} failed: {e}", session.id);
+                    skipped += 1;
+                }
+            }
         }
         self.shared.store.vacuum()?;
         Ok((deleted, skipped))
