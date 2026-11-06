@@ -13,6 +13,7 @@
   let error = $state<string | null>(null);
   let confirmClear = $state(false);
   let clearResult = $state('');
+  let clearing = $state(false);
   let deleteConfirmId = $state<string | null>(null);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
@@ -79,13 +80,15 @@
   }
 
   async function clear() {
+    if (clearing) return;
+    clearing = true;
     try {
       const result = await clearAllSessions();
       clearResult = `${result.deleted} deleted${result.skipped ? `; ${result.skipped} session${result.skipped === 1 ? '' : 's'} not deleted` : ''}`;
       confirmClear = false;
       await refresh();
       onSessionsChanged?.();
-    } catch (e) { error = String(e); }
+    } catch (e) { error = String(e); } finally { clearing = false; }
   }
 </script>
 
@@ -99,7 +102,7 @@
   {#if clearResult}<p role="status">{clearResult}</p>{/if}
   {#if confirmClear}
     <p>Delete all sessions? This cannot be undone.</p>
-    <button onclick={clear}>Confirm delete all</button>
+    <button onclick={clear} disabled={clearing}>Confirm delete all</button>
     <button onclick={() => (confirmClear = false)}>Cancel</button>
   {:else}
     <button onclick={() => (confirmClear = true)} disabled={!sessions.length}>Delete all sessions</button>

@@ -98,7 +98,7 @@
       onEnterLicense={() => navigate('settings')}
     />
   </div>
-  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} onSessionsChanged={refreshInterrupted} /></div>
+  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} onSessionsChanged={() => refreshInterrupted().catch(() => {})} /></div>
   {#if view === 'settings'}
     <Settings bind:this={settings} />
   {/if}

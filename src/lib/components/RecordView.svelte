@@ -231,10 +231,12 @@
 
   async function cancel() {
     if (!sessionId) return;
+    const before = status;
     try {
       await cancelJob(sessionId);
       const session = await getSession(sessionId);
-      if (session) {
+      // A progress event that landed meanwhile is newer than this snapshot.
+      if (session && status === before) {
         status = session.status;
         result = session;
         if (finished.includes(session.status)) remember(null);
