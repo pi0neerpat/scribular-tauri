@@ -98,9 +98,16 @@ pub struct ModelManager {
     install_gate: OnceLock<Arc<Mutex<()>>>,
 }
 
-struct DownloadGuard<'a>(&'a AtomicBool);
+struct DownloadGuard(Arc<AtomicBool>);
 
-impl Drop for DownloadGuard<'_> {
+impl DownloadGuard {
+    /// Claims `flag`; None when a download already holds it.
+    fn claim(flag: Arc<AtomicBool>) -> Option<Self> {
+        (!flag.swap(true, Ordering::AcqRel)).then(|| Self(flag))
+    }
+}
+
+impl Drop for DownloadGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
@@ -252,28 +259,25 @@ impl ModelManager {
     ) -> Option<bool> {
         let _download = self.download_locks[i].lock().await;
         let spec = &self.specs[i];
-        let running = &self.running[i];
+        let running = Arc::clone(&self.running[i]);
         // Claimed under the install gate: an update install either sees this
         // download as busy or restarts before it starts.
         // The gate is a std Mutex an install can hold for a while; wait for it
-        // off the async workers.
-        let claimed = match self.install_gate.get().cloned() {
-            Some(gate) => {
-                let flag = Arc::clone(running);
-                tauri::async_runtime::spawn_blocking(move || {
-                    let _gate = gate.lock().unwrap_or_else(|p| p.into_inner());
-                    flag.swap(true, Ordering::AcqRel)
-                })
-                .await
-                // The closure cannot panic; treat a join failure as busy.
-                .unwrap_or(true)
-            }
-            None => running.swap(true, Ordering::AcqRel),
+        // off the async workers. The guard is created inside the blocking task,
+        // so a cancelled waiter still drops it and clears the claim.
+        let _guard = match self.install_gate.get().cloned() {
+            Some(gate) => tauri::async_runtime::spawn_blocking(move || {
+                let _gate = gate.lock().unwrap_or_else(|p| p.into_inner());
+                DownloadGuard::claim(running)
+            })
+            .await
+            // The closure cannot panic; treat a join failure as busy.
+            .unwrap_or(None),
+            None => DownloadGuard::claim(running),
         };
-        if claimed {
+        if _guard.is_none() {
             return None;
         }
-        let _guard = DownloadGuard(running);
         if self.readiness.get(&spec.id) == ModelState::Ready {
             on_progress(ModelProgress {
                 model_id: spec.id.clone(),
