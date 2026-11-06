@@ -98,4 +98,6 @@ import Testing
     #expect(steps[1].command == .click(label: "timeout", index: 2, within: nil))
     #expect(steps[2].timeout == nil)
     #expect(throws: ScriptError.self) { try parseScript("expect \"X\" timeout soon") }
+    #expect(throws: ScriptError.self) { try parseScript("expect \"X\" timeout infs") }
+    #expect(throws: ScriptError.self) { try parseScript("wait 5s timeout 300s") }
 }

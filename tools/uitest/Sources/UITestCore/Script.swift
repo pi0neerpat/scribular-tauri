@@ -73,8 +73,8 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         func quoted(_ token: Token?) -> String? { token?.quoted == true ? token?.text : nil }
         func seconds(_ token: Token) throws(ScriptError) -> Double {
             let duration = token.text
-            if !token.quoted, duration.hasSuffix("ms"), let value = Double(duration.dropLast(2)), value >= 0 { return value / 1000 }
-            if !token.quoted, duration.hasSuffix("s"), let value = Double(duration.dropLast()), value >= 0 { return value }
+            if !token.quoted, duration.hasSuffix("ms"), let value = Double(duration.dropLast(2)), value.isFinite, value >= 0 { return value / 1000 }
+            if !token.quoted, duration.hasSuffix("s"), let value = Double(duration.dropLast()), value.isFinite, value >= 0 { return value }
             throw fail("invalid duration: \(duration)")
         }
 
@@ -147,6 +147,10 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit
         default:
             throw fail("unknown command: \(first.text)")
+        }
+        // only these commands retry; a timeout anywhere else would be silently ignored
+        if timeout != nil, !["launch", "click", "expect", "expect-not", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, expect, expect-not and close-window")
         }
         steps.append(Step(line: lineNumber, source: source, command: command, timeout: timeout))
     }
