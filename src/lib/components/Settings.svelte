@@ -11,6 +11,11 @@
     onModelsProgress,
     openPrivacySettings,
     setRecordingSettings,
+    appVersion,
+    checkForUpdates,
+    getUpdateState,
+    installUpdate,
+    onUpdateState,
   } from '../api';
   import LicenseSettings from './LicenseSettings.svelte';
   import NoteStyles from './NoteStyles.svelte';
@@ -20,6 +25,8 @@
   import type { Privacy } from '../types/Privacy';
   import type { RecordingSettings } from '../types/RecordingSettings';
   import type { ModelProgress } from '../types/ModelProgress';
+  import type { UpdateState } from '../types/UpdateState';
+  import { updateStatus } from './update-status';
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
@@ -34,6 +41,8 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let speakerModel = $state<ModelProgress | null>(null);
+  let version = $state<string>('');
+  let update = $state<UpdateState>({ state: 'idle', installable: false });
   let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
@@ -51,9 +60,21 @@
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
+    let updateUnlisten: (() => void) | undefined;
     let disposed = false;
     let progressVersion = 0;
+    let sawUpdate = false;
     void (async () => {
+      try {
+        const remove = await onUpdateState((state) => { sawUpdate = true; update = state; });
+        if (disposed) remove(); else updateUnlisten = remove;
+      } catch { /* The snapshot below still supplies the update state. */ }
+      try {
+        const [app, current] = await Promise.all([appVersion(), getUpdateState()]);
+        version = app.version;
+        // An event that arrived meanwhile is newer than the snapshot.
+        if (!sawUpdate) update = current;
+      } catch { /* Update status is optional while the rest of Settings loads. */ }
       try {
         try {
           const removeListener = await onModelsProgress((p) => {
@@ -74,7 +95,7 @@
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => { disposed = true; unlisten?.(); };
+    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); };
   });
 
   async function refreshApps() {
@@ -132,6 +153,24 @@
           <progress aria-label="Speaker model download progress" value={speakerModel.downloadedBytes} max={speakerModel.totalBytes}></progress>
         {/if}
         {#if speakerModel?.error}<p role="alert">{speakerModel.error}</p>{/if}
+      {/if}
+    </fieldset>
+
+    <fieldset>
+      <legend>Updates</legend>
+      <p>Current version: {version || 'Loading…'}</p>
+      <p role="status">{updateStatus(update)}</p>
+      <button
+        onclick={() => checkForUpdates().catch((e) => (error = String(e)))}
+        disabled={update.state === 'checking' || update.state === 'downloading'}
+      >Check for updates</button>
+      {#if update.state === 'ready'}
+        <button
+          onclick={() => installUpdate().catch((e) => (error = String(e)))}
+          disabled={!update.installable}
+          title={!update.installable ? 'Finish your recording or summary first' : undefined}
+        >Restart to update</button>
+        {#if !update.installable}<p>Finish your recording or summary first</p>{/if}
       {/if}
     </fieldset>
 

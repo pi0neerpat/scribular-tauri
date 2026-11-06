@@ -928,6 +928,15 @@ impl AudioRangeReader<'_> {
     }
 }
 
+fn retain_or_delete_audio(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
+    if super::settings::select(tx, super::settings::KEEP_AUDIO)?.as_deref() == Some("1") {
+        tx.execute("UPDATE sessions SET audio_kept = 1 WHERE id = ?1", [id])?;
+    } else {
+        tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod audio_range_tests {
     use super::*;
@@ -1024,13 +1033,4 @@ mod audio_range_tests {
         assert!(reader.samples(AudioSource::Mic, 0, 100).unwrap().is_empty());
         assert_eq!(reader.decoded_chunks, 0);
     }
-}
-
-fn retain_or_delete_audio(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()> {
-    if super::settings::select(tx, super::settings::KEEP_AUDIO)?.as_deref() == Some("1") {
-        tx.execute("UPDATE sessions SET audio_kept = 1 WHERE id = ?1", [id])?;
-    } else {
-        tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
-    }
-    Ok(())
 }

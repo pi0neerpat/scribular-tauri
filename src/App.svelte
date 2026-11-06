@@ -7,6 +7,7 @@
   import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import TrialBadge from './lib/components/TrialBadge.svelte';
+  import UpdateBar from './lib/components/UpdateBar.svelte';
   import { followAccessState } from './lib/license';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
@@ -53,6 +54,7 @@
   <LockedScreen reason={gate.locked} />
 {:else if gate === 'open'}
 <main>
+  <UpdateBar />
   {#if notice}
     <p role="status">
       Your earlier test sessions were encrypted. Turn on FileVault to protect copies of the old file

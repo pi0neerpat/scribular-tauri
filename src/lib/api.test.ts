@@ -8,9 +8,13 @@ vi.mock('@tauri-apps/api/event', () => ({ listen }));
 const {
   accessDenied,
   appVersion,
+  checkForUpdates,
+  getUpdateState,
+  installUpdate,
   deniedPrivacy,
   onHeartbeat,
   onSessionSegments,
+  onUpdateState,
   requestSessionAudio,
   startFresh,
   startRecording,
@@ -36,6 +40,20 @@ describe('api', () => {
     expect(name).toBe('app://heartbeat');
     cb({ payload: { seq: 3 } });
     expect(seen).toEqual([3]);
+  });
+
+  it('wraps updater commands and event', async () => {
+    invoke.mockResolvedValue({ state: 'idle', installable: false });
+    await checkForUpdates();
+    await expect(getUpdateState()).resolves.toEqual({ state: 'idle', installable: false });
+    await installUpdate();
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(['check_for_updates', 'get_update_state', 'install_update']);
+    listen.mockResolvedValue(() => {});
+    const handler = vi.fn();
+    await onUpdateState(handler);
+    expect(listen.mock.calls[0][0]).toBe('update://state');
+    listen.mock.calls[0][1]({ payload: { state: 'idle', installable: false } });
+    expect(handler).toHaveBeenCalledWith({ state: 'idle', installable: false });
   });
 
   it('onSessionSegments listens on session://segments', async () => {

@@ -12,6 +12,8 @@ pub const ACTIVE_PROMPT_ID: &str = "active_prompt_id";
 pub const MULTI_SPEAKER: &str = "multi_speaker";
 /// The manifest id of the summary model (parity spec 03 R18).
 pub const SUMMARY_MODEL_ID: &str = "summary_model_id";
+pub const PENDING_UPDATE_INSTALL: &str = "pending_update_install";
+pub const SKIPPED_UPDATE_VERSION: &str = "skipped_update_version";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".

@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Condvar, Mutex,
+        Arc, Condvar, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -88,17 +88,26 @@ pub struct ModelManager {
     specs: Vec<ModelSpec>,
     client: reqwest::Client,
     /// One guard per model: retries can proceed while a later model downloads.
-    running: Vec<AtomicBool>,
+    running: Vec<Arc<AtomicBool>>,
     /// Serializes requests so concurrent callers see an owner's result before retrying.
     download_locks: Vec<AsyncMutex<()>>,
     pub readiness: Readiness,
     /// The summary model (spec 03 R18); only it downloads with the rest.
     selected_llm: Mutex<String>,
+    /// The recorder's update install gate, shared so downloads cannot start mid-install.
+    install_gate: OnceLock<Arc<Mutex<()>>>,
 }
 
-struct DownloadGuard<'a>(&'a AtomicBool);
+struct DownloadGuard(Arc<AtomicBool>);
 
-impl Drop for DownloadGuard<'_> {
+impl DownloadGuard {
+    /// Claims `flag`; None when a download already holds it.
+    fn claim(flag: Arc<AtomicBool>) -> Option<Self> {
+        (!flag.swap(true, Ordering::AcqRel)).then(|| Self(flag))
+    }
+}
+
+impl Drop for DownloadGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
@@ -114,13 +123,18 @@ impl ModelManager {
             .unwrap_or_default();
         Self {
             dir,
-            running: specs.iter().map(|_| AtomicBool::new(false)).collect(),
+            running: specs.iter().map(|_| Arc::new(AtomicBool::new(false))).collect(),
             download_locks: specs.iter().map(|_| AsyncMutex::new(())).collect(),
             specs,
             client: reqwest::Client::new(),
             readiness: Readiness::default(),
             selected_llm: Mutex::new(first_llm),
+            install_gate: OnceLock::new(),
         }
+    }
+
+    pub fn set_install_gate(&self, gate: Arc<Mutex<()>>) {
+        let _ = self.install_gate.set(gate);
     }
 
     pub fn selected_llm(&self) -> String {
@@ -132,6 +146,12 @@ impl ModelManager {
             .iter()
             .position(|spec| spec.id == model_id)
             .is_some_and(|i| self.running[i].load(Ordering::Acquire))
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.running
+            .iter()
+            .any(|running| running.load(Ordering::Acquire))
     }
 
     /// Makes `model_id` the summary model. Fails for an id that is not an LLM.
@@ -239,11 +259,25 @@ impl ModelManager {
     ) -> Option<bool> {
         let _download = self.download_locks[i].lock().await;
         let spec = &self.specs[i];
-        let running = &self.running[i];
-        if running.swap(true, Ordering::AcqRel) {
+        let running = Arc::clone(&self.running[i]);
+        // Claimed under the install gate: an update install either sees this
+        // download as busy or restarts before it starts.
+        // The gate is a std Mutex an install can hold for a while; wait for it
+        // off the async workers. The guard is created inside the blocking task,
+        // so a cancelled waiter still drops it and clears the claim.
+        let _guard = match self.install_gate.get().cloned() {
+            Some(gate) => tauri::async_runtime::spawn_blocking(move || {
+                let _gate = gate.lock().unwrap_or_else(|p| p.into_inner());
+                DownloadGuard::claim(running)
+            })
+            .await
+            // The closure cannot panic; treat a join failure as busy.
+            .unwrap_or(None),
+            None => DownloadGuard::claim(running),
+        };
+        if _guard.is_none() {
             return None;
         }
-        let _guard = DownloadGuard(running);
         if self.readiness.get(&spec.id) == ModelState::Ready {
             on_progress(ModelProgress {
                 model_id: spec.id.clone(),

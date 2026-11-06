@@ -22,7 +22,10 @@ pub use sessions::{
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
     AUDIO_RETENTION_MS,
 };
-pub use settings::{RecordingSettings, ACTIVE_PROMPT_ID, SUMMARY_MODEL_ID};
+pub use settings::{
+    RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION,
+    SUMMARY_MODEL_ID,
+};
 
 #[derive(Debug)]
 pub enum StoreError {

@@ -252,7 +252,7 @@ mod tests {
         let mut dropped = 0;
         loop {
             let drained = consumer.drain(&mut out);
-            out.extend(std::iter::repeat(f32::NAN).take(drained.dropped));
+            out.extend(std::iter::repeat_n(f32::NAN, drained.dropped));
             dropped += drained.dropped;
             if drained.closed {
                 break;
