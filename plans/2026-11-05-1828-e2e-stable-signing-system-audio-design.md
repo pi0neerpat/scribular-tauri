@@ -12,7 +12,7 @@ The same signature problem would also hit system-audio capture: the "System Audi
 ## Goals
 
 - Rebuilding the app and re-running any uitest scenario needs **no keychain prompt and no permission prompt** after a one-time setup.
-- uitest drives the **real shipping build** (no `fake-engines`): real system audio → real Whisper → real Gemma summary. AS11 is just the first example; this is the standard for all recording scenarios.
+- uitest drives the **real shipping build** (no `fake-engines`): real system audio → real Whisper → real Gemma summary. This is the standard for all recording scenarios.
 - Recording scenarios prove audio really arrived by asserting a **known phrase from the fixture** in the transcript (a silent capture must fail).
 - **No uitest run ever re-downloads models** once they're cached (user requirement, applies to every run and every scenario).
 - Future agents know: **recording tests use system audio, never the mic.**
@@ -33,6 +33,8 @@ The same signature problem would also hit system-audio capture: the "System Audi
 
 ## Decisions (user's)
 
+- **Out of scope: rewriting the AS11 scenario** (user dropped it 2026-11-05). Existing scenarios aren't migrated in this work beyond removing `handle-keychain`.
+
 - **Use a local self-signed code-signing certificate** (no Apple Developer account).
 - Drop the mic path for automated tests; harden the system-audio path.
 - uitest runs the real app build, not `fake-engines` (chosen over "real STT + fake summary" and "fake engines + silence check").
@@ -46,6 +48,7 @@ The same signature problem would also hit system-audio capture: the "System Audi
 - One-time script `tools/uitest/setup-signing.sh` (idempotent):
   - Creates a self-signed **code signing** certificate named `Scribular Local Dev` in the login keychain if it doesn't exist (via `openssl` to make cert + key, `security import` a .p12, and `security add-trusted-cert -p codeSign` so `codesign` accepts it; may prompt once for the login password — that's acceptable in a one-time setup).
   - Prints the identity and the export line for builds.
+- Drop `handle-keychain` from scenarios once signing is in place; keep `keychain-after-rebuild.uitest` but change it to "rebuild, relaunch, expect no prompt" (`expect "Settings"` without `handle-keychain`).
 - Builds for testing pass the identity via env var, not config: `APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --bundles app` (no `--features fake-engines`; update `Preflight.swift:21`'s hint to match). Tauri signs the app and its sidecar (`AudioCapCLI`) with it. `tauri.conf.json` is not changed.
 - After the first launch of a signed build, the user clicks "Always Allow" on the keychain prompt and grants System Audio Recording once. Subsequent rebuilds keep the same designated requirement (cert leaf + bundle ID), so no further prompts.
 - Verification: `codesign -dr - <app>` shows a requirement referencing the certificate, not a `cdhash`. **Check the sidecar too** (`Contents/MacOS/AudioCapCLI`): the System Audio Recording grant may attach to it. If Tauri leaves it ad-hoc signed, add an explicit `codesign --force -s "Scribular Local Dev"` step for it (and re-sign the app after).
@@ -69,24 +72,11 @@ The same signature problem would also hit system-audio capture: the "System Audi
 - Fixture: reuse `src-tauri/tests/fixtures/audio/2-speakers-12s.wav`.
 - Parser + runner unit tests in `tools/uitest/Tests/UITestCoreTests` like the existing commands; README command table updated.
 
-### 4. AS11 via App audio (real app)
-
-Rewrite `tools/uitest/scenarios/as11-note-style-default.uitest` so that, before recording, it:
-
-1. `play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop`
-2. In Settings → Record, clicks `App audio`.
-3. Clicks `Refresh` (only apps currently playing are listed — Settings.svelte "Only apps playing audio right now are listed."). Retry Refresh, or wait briefly, if `afplay` hasn't appeared yet (Claude's call).
-4. Selects `afplay` in the `App` dropdown (native `<select>` in the webview; selection mechanism via AX is the builder's to find — `labels` will show what's exposed; keyboard selection is an acceptable fallback).
-5. Records 30s, stops, then expects a **known phrase from the fixture** in the transcript (with a generous timeout for real Whisper), and `Summary · UITest Recap` (with a timeout for real Gemma). The spike picks the phrase: transcribe `2-speakers-12s.wav` a few times with the real build and choose a short phrase that comes out identically every time. Put it in a comment in the scenario.
-6. Other recording scenarios follow the same pattern: `play` a fixture, App audio, select `afplay`, assert a fixture phrase.
-
-Drop `handle-keychain` from launch-dependent scenarios once signing is in place; keep `keychain-after-rebuild.uitest` but change its meaning to "rebuild, relaunch, expect no prompt" (i.e. `expect "Settings"` without `handle-keychain`).
-
-### 5. Documentation for future agents
+### 4. Documentation for future agents
 
 - New repo-root `CLAUDE.md` (none exists) with a short "E2E / uitest" section: build the real app (no `fake-engines`) with `APPLE_SIGNING_IDENTITY="Scribular Local Dev"`; recording tests use App audio + `play`, never the mic; assert fixture phrases, never summary wording; models come from the shared cache, so never delete it as a "fix"; pointer to `tools/uitest/README.md`.
 - `tools/uitest/README.md`: one-time setup gets the signing script step (replacing the `UITEST_KEYCHAIN_PASSWORD` step as the primary path; mention the env var only as a fallback); build command includes the identity; "Recording tests" subsection stating the system-audio rule.
-- `plans/parity/03-note-styles-model-choice.md:136` (AS11): note it records via App audio from `afplay`.
+- Document the recording-scenario pattern for future scenario authors: `play "<fixture>" loop` → Settings → `App audio` → `Refresh` (retry if `afplay` isn't listed yet) → select `afplay` in the `App` dropdown → record → `expect` a known fixture phrase in the transcript (pick one that transcribes identically across runs) → `expect` the summary header. Never assert summary wording.
 
 ## Constraints
 
@@ -99,5 +89,5 @@ Drop `handle-keychain` from launch-dependent scenarios once signing is in place;
 
 - Exact openssl/security incantation for the certificate (must yield an identity listed by `security find-identity -v -p codesigning`).
 - How `play` paths resolve and how the child is tracked/killed in the Swift driver.
-- How to drive the native `<select>` through Accessibility.
+- How to drive the native `<select>` through Accessibility (needed only to verify `play` end-to-end once; document what works).
 - Whether `handle-keychain` code stays as a fallback or is removed (keep if cheap).
