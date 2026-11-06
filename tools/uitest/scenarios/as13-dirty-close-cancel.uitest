@@ -1,6 +1,8 @@
 launch
 click "Settings"
 expect "Note styles"
+# wait for the download banner so it cannot shift the layout mid-click
+expect "Downloading the speech model"
 click "New style"
 click "Name" index 2
 type "UITest Draft"

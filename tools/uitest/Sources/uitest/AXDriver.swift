@@ -21,6 +21,15 @@ final class AXDriver: Driver {
         switch command {
         case .launch(let keepData):
             let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
+            // a rebuilt (re-signed) app blocks on a keychain prompt before its window opens
+            if keychainWindow() != nil {
+                if keychainPassword != nil { _ = try handleKeychain() }
+                else {
+                    // no password: give a person 2 minutes to approve the prompt by hand
+                    let deadline = Date().addingTimeInterval(120)
+                    while keychainWindow() != nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
+                }
+            }
             guard let app = appElement(),
                   let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
                 throw .retryable("app window not ready")
@@ -239,12 +248,17 @@ final class AXDriver: Driver {
         }
     }
 
+    /// SecurityAgent can linger after a prompt closes, so only an open window counts as a prompt.
+    private func keychainWindow() -> AXUIElement? {
+        guard let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first else { return nil }
+        return (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first
+    }
+
     private func handleKeychain() throws(DriverError) -> String? {
         // the prompt can appear a moment after the app touches the keychain; wait up to 5s before concluding there is none
         var found: (AXUIElement)?
         for attempt in 0..<20 {
-            if let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first,
-               let first = (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first {
+            if let first = keychainWindow() {
                 found = first
                 break
             }

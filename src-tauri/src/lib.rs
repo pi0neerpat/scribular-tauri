@@ -52,7 +52,12 @@ fn summarizer_loader(models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
 #[cfg(feature = "fake-engines")]
 fn transcriber_loader(_models: &Arc<ModelManager>) -> Arc<dyn TranscriberLoader> {
     Arc::new(engines::fake::FakeTranscriberLoader(Arc::new(
-        engines::fake::FakeTranscriber::new(Vec::new()),
+        // A canned line so recordings in the fake-engines app reach the summary (uitest AS11).
+        engines::fake::FakeTranscriber::new(vec![stt::TranscriptSegment {
+            start_ms: 0,
+            end_ms: 1_000,
+            text: "The client talked about sleep and work stress this week.".into(),
+        }]),
     )))
 }
 
