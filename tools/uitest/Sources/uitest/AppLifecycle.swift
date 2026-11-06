@@ -47,6 +47,7 @@ final class AppLifecycle {
                 dataMoved = true
             }
             try linkCache(source, cache)
+            let trusted = try trustBuild()
             do {
                 let result = LaunchResult()
                 launching = result
@@ -75,9 +76,28 @@ final class AppLifecycle {
             let executable = Bundle(url: appPath)?.executableURL ?? appPath
             let built = (try? executable.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? nil
             let date = built.map { ISO8601DateFormatter().string(from: $0) } ?? "unknown"
-            detail = "\(appPath.path) (built \(date))"
+            detail = "\(appPath.path) (built \(date))" + (trusted.isEmpty ? "" : "\n  " + trusted.replacingOccurrences(of: "\n", with: "\n  "))
         }
         return detail ?? appPath.path
+    }
+
+    /// Runs trust-build.sh so a rebuilt (new cdhash) app reads its keychain key without a prompt.
+    private func trustBuild() throws(DriverError) -> String {
+        let script = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("trust-build.sh")
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path, appPath.path]
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch { throw .fatal("could not run trust-build.sh: \(error.localizedDescription)") }
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw .fatal("trust-build.sh failed: \(output)") }
+        return output
     }
 
     func quit() {
