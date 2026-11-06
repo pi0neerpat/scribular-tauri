@@ -99,6 +99,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::get_onboarding_state,
+            commands::complete_onboarding,
+            commands::restore_sample_sessions,
+            commands::get_telemetry_setting,
+            commands::set_telemetry_setting,
             commands::list_sessions,
             commands::get_session,
             commands::update_session,
@@ -171,6 +176,7 @@ pub fn run() {
                 return Ok(());
             }
             let store = Arc::new(opened?);
+            store.seed_samples_if_needed()?;
             // Parity spec 03 R9: built-in styles follow the shipped JSON.
             store.sync_builtins()?;
             app.manage(Arc::clone(&store));

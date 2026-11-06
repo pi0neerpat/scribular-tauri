@@ -6,6 +6,7 @@
     deniedPrivacy,
     downloadModel,
     getRecordingSettings,
+    restoreSampleSessions,
     listAudioApps,
     modelsStatus,
     onModelsProgress,
@@ -43,6 +44,7 @@
   let speakerModel = $state<ModelProgress | null>(null);
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
+  let sampleNotice = $state<string | null>(null);
   let noteStyles: { requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined;
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
@@ -125,9 +127,18 @@
       error = String(e);
     }
   }
+
+  async function restoreSample() {
+    try {
+      await restoreSampleSessions();
+      sampleNotice = 'Sample session restored.';
+    } catch (e) {
+      error = String(e);
+    }
+  }
 </script>
 
-<section>
+<section data-tour="input-mode">
   <h2>Settings</h2>
   {#if settings}
     <fieldset>
@@ -216,6 +227,13 @@
 
   <NoteStyles bind:this={noteStyles} />
   <SummaryModel />
+
+  <section aria-labelledby="sample-session-title">
+    <h3 id="sample-session-title">Sample session</h3>
+    <p>Restore the example session if you deleted it.</p>
+    <button onclick={restoreSample}>Restore sample session</button>
+    {#if sampleNotice}<p role="status">{sampleNotice}</p>{/if}
+  </section>
 
   <LicenseSettings />
 

@@ -5,6 +5,9 @@ import PermissionNotice from './PermissionNotice.svelte';
 import RecordView from './RecordView.svelte';
 import FirstRun from './FirstRun.svelte';
 import SpeechModelStatus from './SpeechModelStatus.svelte';
+import OnboardingTour from './OnboardingTour.svelte';
+import SampleBadge from './SampleBadge.svelte';
+import SampleBanner from './SampleBanner.svelte';
 import { isWorking } from './record-status';
 import { deniedPrivacy } from '../api';
 
@@ -13,7 +16,7 @@ const session = {
   status: 'awaitingModel' as const, error: null, promptId: null, modelId: null,
   transcript: 'A saved transcript', summary: '', durationMs: 1000, timings: null,
   plainTranscript: null, rawTranscript: null, speakerMap: null, diarizationState: 'none' as const,
-  hasAudio: false, audioExpiresAt: null,
+  hasAudio: false, isSample: false, audioExpiresAt: null,
 };
 
 describe('first run components', () => {
@@ -54,6 +57,14 @@ describe('first run components', () => {
     expect(body).toContain('Open System Audio Settings');
   });
 
+  it('offers the telemetry choice without disabling recording when the speech model is ready', () => {
+    const { body } = render(FirstRun, { props: { speechReady: true } });
+    expect(body).toContain('Help improve Scribular?');
+    expect(body).toContain('No thanks');
+    const record = render(RecordView, { props: { speechReady: true } }).body;
+    expect(record).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
+  });
+
   it('shows a failed speech download and an actionable retry', () => {
     const { body } = render(SpeechModelStatus, { props: { speech: {
       modelId: 'whisper-base', state: 'failed', downloadedBytes: 0, totalBytes: 10,
@@ -61,5 +72,18 @@ describe('first run components', () => {
     } } });
     expect(body).toContain('Speech model download failed: network unavailable');
     expect(body).toContain('Retry speech model download');
+  });
+
+  it('renders a non-modal tour without a full-screen click shield', () => {
+    const { body } = render(OnboardingTour, { props: { onNavigate: () => {}, onComplete: () => {} } });
+    expect(body).toContain("Let's take a quick tour.");
+    expect(body).toContain('Your permissions and speech model are getting ready below.');
+    expect(body).not.toMatch(/position:\s*fixed;[^"']*inset:\s*0/);
+    expect(body).toContain('pointer-events: none');
+  });
+
+  it('provides a labelled sample badge and example banner', () => {
+    expect(render(SampleBadge).body).toContain('Sample');
+    expect(render(SampleBanner).body).toContain('This is an example. It is not a real recording.');
   });
 });

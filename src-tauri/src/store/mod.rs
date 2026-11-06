@@ -7,6 +7,7 @@ pub mod key;
 mod migrations;
 mod plaintext_migration;
 mod prompts;
+mod samples;
 mod sessions;
 mod settings;
 
@@ -23,8 +24,8 @@ pub use sessions::{
     AUDIO_RETENTION_MS,
 };
 pub use settings::{
-    RecordingSettings, ACTIVE_PROMPT_ID, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION,
-    SUMMARY_MODEL_ID,
+    RecordingSettings, ACTIVE_PROMPT_ID, ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL,
+    SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION, SUMMARY_MODEL_ID, TELEMETRY_ENABLED,
 };
 
 #[derive(Debug)]
@@ -44,6 +45,7 @@ pub enum StoreError {
     BuiltInPrompt,
     EmptyPrompt,
     PromptTooLong,
+    InvalidSetting(String),
     /// Unstarring would leave no favourite style (spec 03 R5).
     LastFavourite,
 }
@@ -69,6 +71,7 @@ impl fmt::Display for StoreError {
                 "The style's prompt is longer than {} characters.",
                 prompts::MAX_PROMPT_CHARS
             ),
+            Self::InvalidSetting(key) => write!(f, "setting `{key}` has an invalid value"),
             Self::LastFavourite => f.write_str("At least one style must remain starred."),
         }
     }

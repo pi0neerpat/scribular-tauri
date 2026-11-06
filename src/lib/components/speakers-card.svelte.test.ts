@@ -15,7 +15,7 @@ const session: Session = {
   id: 'session-1', title: 'Test', createdAt: 0, inputMode: 'mic', status: 'done', error: null,
   promptId: null, modelId: null, transcript: '', plainTranscript: 'plain',
   rawTranscript: Object.keys(names).map((id, i) => `${id}: quote ${i + 1}`).join('\n'), speakerMap: names,
-  diarizationState: 'pending', summary: '', durationMs: 1000, timings: null, hasAudio: false,
+  diarizationState: 'pending', summary: '', durationMs: 1000, timings: null, hasAudio: false, isSample: false,
   audioExpiresAt: null,
 };
 

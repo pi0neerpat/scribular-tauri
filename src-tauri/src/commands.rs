@@ -76,12 +76,19 @@ pub struct Heartbeat {
     pub seq: u32,
 }
 
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingState {
+    pub completed: bool,
+}
+
 /// Exports every IPC root type, plus the types they reference, into
 /// `cfg.out_dir()`.
 #[cfg(test)]
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
+    OnboardingState::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
     Session::export_all(cfg)?;
     SessionPatch::export_all(cfg)?;
@@ -112,6 +119,36 @@ pub fn app_version() -> AppVersion {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+#[tauri::command]
+pub fn get_onboarding_state(store: State<Arc<Store>>) -> Result<OnboardingState, String> {
+    store
+        .onboarding_completed()
+        .map(|completed| OnboardingState { completed })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn complete_onboarding(store: State<Arc<Store>>) -> Result<(), String> {
+    store.complete_onboarding().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn restore_sample_sessions(store: State<Arc<Store>>) -> Result<String, String> {
+    store.restore_samples().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_telemetry_setting(store: State<Arc<Store>>) -> Result<Option<bool>, String> {
+    store.telemetry_setting().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_telemetry_setting(store: State<Arc<Store>>, enabled: bool) -> Result<(), String> {
+    store
+        .set_telemetry_setting(enabled)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -414,11 +451,26 @@ pub fn download_model(
 #[tauri::command]
 pub fn regenerate_summary(
     jobs: State<Arc<JobQueue>>,
+    store: State<Arc<Store>>,
     session_id: String,
     prompt_id: String,
 ) -> Result<(), String> {
+    reject_sample_regeneration(
+        store
+            .get_session(&session_id)
+            .map_err(|e| e.to_string())?
+            .is_some_and(|s| s.is_sample),
+    )?;
     jobs.regenerate(&session_id, &prompt_id)
         .map_err(|e| e.to_string())
+}
+
+fn reject_sample_regeneration(is_sample: bool) -> Result<(), String> {
+    if is_sample {
+        Err("Sample sessions can't be regenerated".into())
+    } else {
+        Ok(())
+    }
 }
 
 /// Stops the session's transcription or summary. Returns whether it had
@@ -794,6 +846,17 @@ impl JobEvents for TauriJobEvents {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sample_regeneration_is_rejected_before_the_job_queue_is_called() {
+        let mut queue_called = false;
+        let result = reject_sample_regeneration(true).and_then(|()| {
+            queue_called = true;
+            Ok(())
+        });
+        assert_eq!(result.unwrap_err(), "Sample sessions can't be regenerated");
+        assert!(!queue_called);
+    }
 
     /// Regenerates `src/lib/types/`. ts-rs exports into a temp dir and this
     /// copies the result over, because ts-rs's own writer calls
