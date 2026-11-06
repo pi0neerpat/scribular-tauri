@@ -29,6 +29,7 @@ private final class Cleanup {
 }
 
 private func runCLI() -> Int32 {
+    setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
     guard let scriptPath = args.first else {
         print("usage: uitest <script> [--app <path to .app>]")
