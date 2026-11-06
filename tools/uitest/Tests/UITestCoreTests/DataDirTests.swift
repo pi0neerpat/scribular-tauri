@@ -36,3 +36,51 @@ import Testing
     #expect(throws: (any Error).self) { try moveDataDir(from: source, intoRunDir: run) }
     #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("a.db").path))
 }
+
+private func cacheFixture() throws -> (app: URL, cache: URL) {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return (root.appendingPathComponent("app"), root.appendingPathComponent("cache/models"))
+}
+
+@Test func linksFreshDataDir() throws {
+    let (app, cache) = try cacheFixture()
+
+    try linkModelCache(appDataDir: app, cache: cache)
+
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: app.appendingPathComponent("models").path) == cache.path)
+}
+
+@Test func seedsCacheFromExistingModels() throws {
+    let (app, cache) = try cacheFixture()
+    let models = app.appendingPathComponent("models")
+    try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+    try Data("weights".utf8).write(to: models.appendingPathComponent("w.bin"))
+
+    try linkModelCache(appDataDir: app, cache: cache)
+
+    #expect(try Data(contentsOf: cache.appendingPathComponent("w.bin")) == Data("weights".utf8))
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: models.path) == cache.path)
+}
+
+@Test func linkIsIdempotent() throws {
+    let (app, cache) = try cacheFixture()
+
+    try linkModelCache(appDataDir: app, cache: cache)
+    try linkModelCache(appDataDir: app, cache: cache)
+
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: app.appendingPathComponent("models").path) == cache.path)
+}
+
+@Test func linkKeepsCacheContents() throws {
+    let (app, cache) = try cacheFixture()
+    let models = app.appendingPathComponent("models")
+    try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+    try Data("old".utf8).write(to: cache.appendingPathComponent("w.bin"))
+    try Data("new".utf8).write(to: models.appendingPathComponent("w.bin"))
+
+    try linkModelCache(appDataDir: app, cache: cache)
+
+    #expect(try Data(contentsOf: cache.appendingPathComponent("w.bin")) == Data("old".utf8))
+}

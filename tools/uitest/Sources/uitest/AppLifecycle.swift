@@ -36,13 +36,17 @@ final class AppLifecycle {
     func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
         if !launched {
             try terminateExisting()
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let source = home.appendingPathComponent("Library/Application Support/com.app.scribular.tauri", isDirectory: true)
+            let cache = home.appendingPathComponent("Library/Caches/scribular-uitest/models", isDirectory: true)
             if !keepData && !dataMoved {
-                let source = FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent("Library/Application Support/com.app.scribular.tauri", isDirectory: true)
+                // seed the cache from a real models dir first, so 1.85 GB of models never moves into the run folder
+                if FileManager.default.fileExists(atPath: source.path) { try linkCache(source, cache) }
                 do { _ = try moveDataDir(from: source, intoRunDir: runDir) }
                 catch { throw .fatal("could not move app data: \(error.localizedDescription)") }
                 dataMoved = true
             }
+            try linkCache(source, cache)
             do {
                 let result = LaunchResult()
                 launching = result
@@ -87,6 +91,11 @@ final class AppLifecycle {
         app = nil
         launching = nil
         launched = false
+    }
+
+    private func linkCache(_ appDataDir: URL, _ cache: URL) throws(DriverError) {
+        do { try linkModelCache(appDataDir: appDataDir, cache: cache) }
+        catch { throw .fatal("could not link model cache: \(error.localizedDescription)") }
     }
 
     private func terminateExisting() throws(DriverError) {
