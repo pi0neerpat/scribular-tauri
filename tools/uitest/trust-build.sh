@@ -16,6 +16,7 @@ PW_ACCOUNT="login-password"
 
 if [ "${1:-}" = "--store-password" ]; then
   read -rsp "Mac login password: " pw; echo
+  # shortcut: checks the password only when the keychain is locked; the first trust run is the real check
   security unlock-keychain -p "$pw" "$KEYCHAIN" || { echo "wrong password" >&2; exit 1; }
   security add-generic-password -U -s "$PW_SERVICE" -a "$PW_ACCOUNT" -w "$pw" -T /usr/bin/security "$KEYCHAIN"
   echo "stored: builds will be trusted automatically"
@@ -29,25 +30,26 @@ CDHASH=$(codesign -dvvv "$APP" 2>&1 | sed -n 's/^CDHash=//p')
 
 # one line per item for $SERVICE: "<account>\t<current partition list>"
 items=$(security dump-keychain -a "$KEYCHAIN" | awk -v svc="\"svce\"<blob>=\"$SERVICE\"" '
-  function flush() { if (hit) print acct "\t" parts; hit = 0; acct = ""; parts = "" }
+  function flush() { if (hit) print acct "\t" parts; hit = 0; acct = ""; parts = ""; want_parts = 0 }
   /^keychain: / { flush() }
+  /authorizations.*partition_id/ { want_parts = 1 }
   index($0, svc) { hit = 1 }
   /"acct"<blob>="/ { acct = $0; sub(/.*"acct"<blob>="/, "", acct); sub(/"$/, "", acct) }
-  /description: (apple-tool:|apple:|teamid:|cdhash:)/ { parts = $0; sub(/.*description: /, "", parts); gsub(/, /, ",", parts) }
+  want_parts && /description:/ { parts = $0; sub(/.*description: /, "", parts); gsub(/, /, ",", parts); want_parts = 0 }
   END { flush() }')
+pw="${UITEST_KEYCHAIN_PASSWORD:-$(security find-generic-password -s "$PW_SERVICE" -a "$PW_ACCOUNT" -w "$KEYCHAIN" 2>/dev/null || true)}"
+[ -n "$pw" ] || { echo "no login password: run 'bash tools/uitest/trust-build.sh --store-password' once" >&2; exit 1; }
 [ -n "$items" ] || { echo "no keychain items for $SERVICE yet (first launch creates them)"; exit 0; }
 
-pw=""
 while IFS=$'\t' read -r acct parts; do
   if [[ ",$parts," == *",cdhash:$CDHASH,"* ]]; then
     echo "already trusted: $SERVICE/$acct cdhash:$CDHASH"
     continue
   fi
-  if [ -z "$pw" ]; then
-    pw="${UITEST_KEYCHAIN_PASSWORD:-$(security find-generic-password -s "$PW_SERVICE" -a "$PW_ACCOUNT" -w "$KEYCHAIN" 2>/dev/null || true)}"
-    [ -n "$pw" ] || { echo "no login password: run 'bash tools/uitest/trust-build.sh --store-password' once" >&2; exit 1; }
+  if ! printf '%s\n' "$pw" | security set-generic-password-partition-list -s "$SERVICE" -a "$acct" \
+    -S "${parts:+$parts,}cdhash:$CDHASH" "$KEYCHAIN" > /dev/null; then
+    echo "keychain rejected the stored password: re-run 'bash tools/uitest/trust-build.sh --store-password' (did your Mac login password change?)" >&2
+    exit 1
   fi
-  security set-generic-password-partition-list -s "$SERVICE" -a "$acct" \
-    -S "${parts:+$parts,}cdhash:$CDHASH" -k "$pw" "$KEYCHAIN" > /dev/null
   echo "trusted: $SERVICE/$acct cdhash:$CDHASH"
 done <<< "$items"

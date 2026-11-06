@@ -35,6 +35,7 @@ final class AppLifecycle {
 
     func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
         if !launched {
+            let trusted = try trustBuild()
             try terminateExisting()
             let home = FileManager.default.homeDirectoryForCurrentUser
             let source = home.appendingPathComponent("Library/Application Support/com.app.scribular.tauri", isDirectory: true)
@@ -47,7 +48,6 @@ final class AppLifecycle {
                 dataMoved = true
             }
             try linkCache(source, cache)
-            let trusted = try trustBuild()
             do {
                 let result = LaunchResult()
                 launching = result

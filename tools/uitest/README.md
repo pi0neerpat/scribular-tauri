@@ -7,7 +7,7 @@
 1. Grant Accessibility and Screen Recording access to the terminal or agent host that runs `uitest` in System Settings → Privacy & Security. Restart that host after changing permissions.
 2. Install `ffmpeg` with `brew install ffmpeg`.
 3. Create the local signing identity once with `bash tools/uitest/setup-signing.sh`. It adds a self-signed "Scribular Local Dev" codesigning certificate to the login keychain (nothing is written to the repo). Apps signed with it keep the same identity across rebuilds, so the Screen & System Audio Recording grant and the keychain ACL survive a rebuild: you answer each prompt once, by hand, on the first signed launch.
-4. Store the Mac login password once with `bash tools/uitest/trust-build.sh --store-password`. Every `launch` then runs `trust-build.sh`, which uses it to trust each new build (see below). It is saved in the login keychain (service `scribular-uitest`), readable by `/usr/bin/security` without a prompt, so any process running as you can read it. Remove it with `security delete-generic-password -s scribular-uitest -a login-password`.
+4. Store the Mac login password once with `bash tools/uitest/trust-build.sh --store-password`. Every `launch` then runs `trust-build.sh`, which uses it to trust each new build (see below). It is saved in the login keychain (service `scribular-uitest`), readable by `/usr/bin/security` without a prompt, so any process running as you can read it. Re-run `--store-password` after changing your Mac login password; a wrong stored password is reported on the next launch. Remove it with `security delete-generic-password -s scribular-uitest -a login-password`.
 
    `UITEST_KEYCHAIN_PASSWORD`, if set, overrides the stored password and lets `handle-keychain` answer any prompt that still appears. The runner redacts it from output.
 
@@ -16,9 +16,11 @@
 Build the signed app separately; `launch` never builds. `launch` runs `trust-build.sh` first: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (their partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt. `launch` fails with a clear message if no password is stored.
 
 ```sh
-APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --bundles app
+APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
 ```
+
+Generate a local throwaway updater key with `npm run tauri signer generate -- -w <path>` and use its private key value for `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
 
 This machine places the bundle at `/Users/admin/cargo-target/scribular-tauri/release/bundle/macos/Scribular.app`; pass the path printed by your own build with `--app` if it differs. `launch` reports the app path and executable modification time so stale builds are visible.
 
