@@ -171,6 +171,6 @@ it('keeps notification permission guidance through unrelated saves and shows it 
   await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalled());
   expect(alerts()).toHaveLength(1);
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Session')!.click();
-  expect(alerts()).toHaveLength(1);
+  await vi.waitFor(() => expect(target.textContent).toContain('Notifications are disabled. Allow them for Scribular in System Settings.'));
   unmount(app);
 });
