@@ -47,10 +47,7 @@ import Testing
     let original = Data("keep me".utf8)
     try original.write(to: finalizer.recordingURL)
     try Data("new video".utf8).write(to: finalizer.temporaryURL)
-    var threw = false
-    do { try finalizer.finish(result: .pass, duration: 1) }
-    catch { threw = true }
-    #expect(threw)
+    #expect(throws: RecordingFinalizerError.outputExists) { try finalizer.finish(result: .pass, duration: 1) }
     #expect(try Data(contentsOf: finalizer.recordingURL) == original)
 }
 
@@ -81,4 +78,19 @@ import Testing
     #expect(shouldRemoveRecorderMarker(parentExited: true, recorderExists: false))
     #expect(!shouldRemoveRecorderMarker(parentExited: false, recorderExists: false))
     #expect(!shouldRemoveRecorderMarker(parentExited: true, recorderExists: true))
+}
+
+@Test func finalizeRenamesFfmpegLogBesideRecording() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let finalizer = RecordingFinalizer(name: "04-smoke", directory: directory,
+                                       scenario: "smoke.uitest", appBuildTime: "build", stepCount: 0)
+    try Data("v".utf8).write(to: finalizer.temporaryURL)
+    let log = finalizer.temporaryURL.deletingPathExtension().appendingPathExtension("ffmpeg.log")
+    try Data("l".utf8).write(to: log)
+    try finalizer.finish(result: .fail, duration: 1)
+    #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("04-smoke-FAILED.ffmpeg.log").path))
+    #expect(!FileManager.default.fileExists(atPath: log.path))
 }

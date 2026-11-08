@@ -78,6 +78,13 @@ public final class RecordingFinalizer {
 
         if finalURL == nil {
             let destination = result == .pass ? recordingURL : failedURL
+            // Recorder writes the log beside the temp MP4; give it the final name so it is discoverable.
+            let log = temporaryURL.deletingPathExtension().appendingPathExtension("ffmpeg.log")
+            let finalLog = destination.deletingPathExtension().appendingPathExtension("ffmpeg.log")
+            if FileManager.default.fileExists(atPath: log.path) {
+                try? FileManager.default.removeItem(at: finalLog)
+                try? FileManager.default.moveItem(at: log, to: finalLog)
+            }
             if FileManager.default.fileExists(atPath: temporaryURL.path) {
                 do { try FileManager.default.moveItem(at: temporaryURL, to: destination) }
                 catch {

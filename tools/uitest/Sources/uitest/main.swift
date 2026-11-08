@@ -97,7 +97,7 @@ private func runCLI() -> Int32 {
     let start = Date()
     let finalizeLock = NSLock()
     var finalized = false
-    func finalizeOnce(_ value: String) -> Bool {
+    func finalizeOnce(_ value: String, duration: Double) -> Bool {
         finalizeLock.lock()
         defer { finalizeLock.unlock() }
         guard !finalized else { return true }
@@ -108,7 +108,7 @@ private func runCLI() -> Int32 {
             return true
         }
         do {
-            if let output = try finalizer.finish(result: result, duration: Date().timeIntervalSince(start)), result != .pass {
+            if let output = try finalizer.finish(result: result, duration: duration), result != .pass {
                 print("recording: \(output.path)")
             } else if result != .pass {
                 print("recording: no recording")
@@ -124,9 +124,10 @@ private func runCLI() -> Int32 {
     let signals = [SIGINT, SIGTERM].map { value -> DispatchSourceSignal in
         let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
         source.setEventHandler {
+            let duration = Date().timeIntervalSince(start)
             cleanup.run()
-            print("FAIL interrupted — recording run stopped by signal")
-            _ = finalizeOnce("interrupted")
+            print(recorder == nil ? "FAIL interrupted — run stopped by signal" : "FAIL interrupted — recording run stopped by signal")
+            _ = finalizeOnce("interrupted", duration: duration)
             Darwin.exit(value == SIGINT ? 130 : 143)
         }
         source.resume()
@@ -145,8 +146,9 @@ private func runCLI() -> Int32 {
                                               onStep: { step, date in finalizer?.record(step, at: date) }),
                           out: { print($0) })
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
+    let duration = Date().timeIntervalSince(start)
     cleanup.run()
-    let recordingSaved = finalizeOnce(passed ? "pass" : "fail")
+    let recordingSaved = finalizeOnce(passed ? "pass" : "fail", duration: duration)
     return passed && recordingSaved ? 0 : 1
 }
 
