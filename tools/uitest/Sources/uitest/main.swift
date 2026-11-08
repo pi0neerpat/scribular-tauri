@@ -28,37 +28,6 @@ private final class Cleanup {
     }
 }
 
-private struct RecordingMetadata: Encodable {
-    struct Step: Encodable {
-        let line: Int
-        let source: String
-        let timestamp: String
-    }
-    let scenario: String
-    let appBuildTime: String
-    let stepCount: Int
-    let duration: Double
-    let result: String
-    let steps: [Step]
-}
-
-private func finalizeRecording(name: String, url: URL, directory: URL, scenario: String, appBuildTime: String,
-                               result: String, duration: Double,
-                               stepCount: Int, steps: [RecordingMetadata.Step]) {
-    let finalURL = result == "pass" ? url : directory.appendingPathComponent("\(name)-FAILED.mp4")
-    if result != "pass", FileManager.default.fileExists(atPath: url.path) {
-        do { try FileManager.default.moveItem(at: url, to: finalURL) }
-        catch { print("warning: could not rename failed recording: \(error.localizedDescription)") }
-    }
-    let metadata = RecordingMetadata(scenario: scenario, appBuildTime: appBuildTime,
-                                     stepCount: stepCount, duration: duration, result: result, steps: steps)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    do { try encoder.encode(metadata).write(to: directory.appendingPathComponent("\(name).json"), options: .atomic) }
-    catch { print("warning: could not write recording metadata: \(error.localizedDescription)") }
-    if result != "pass" { print("recording: \(finalURL.path)") }
-}
-
 private func runCLI() -> Int32 {
     setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
@@ -92,16 +61,17 @@ private func runCLI() -> Int32 {
         .appendingPathComponent("runs/\(runName)", isDirectory: true)
     let recordingsBase = recordingDirectory(cli.recordingDirectory)
     Recorder.reapOrphans(in: [URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("runs", isDirectory: true), recordingsBase])
-    let recordDir = cli.recordingName.map { _ in recordingsBase }
-    let recordingURL = cli.recordingName.flatMap { name in recordDir?.appendingPathComponent("\(name).mp4") }
+    let finalizer = cli.recordingName.map {
+        RecordingFinalizer(name: $0, directory: recordingsBase,
+                           scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent,
+                           appBuildTime: appBuildTime(appPath), stepCount: steps.count)
+    }
+    let recordingURL = finalizer?.recordingURL
     do {
         try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
-        if let recordDir { try FileManager.default.createDirectory(at: recordDir, withIntermediateDirectories: true) }
-        if let name = cli.recordingName {
-            let reserved = ["\(name).mp4", "\(name).json", "\(name)-FAILED.mp4"]
-            if let existing = reserved.first(where: { FileManager.default.fileExists(atPath: recordingsBase.appendingPathComponent($0).path) }) {
-                throw NSError(domain: "uitest.recorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "recording already exists: \(recordingsBase.appendingPathComponent(existing).path)"])
-            }
+        if finalizer != nil {
+            try FileManager.default.createDirectory(at: recordingsBase, withIntermediateDirectories: true)
+            try finalizer?.validateAvailable()
         }
         try Preflight.check(appPath: appPath)
     } catch let error as PreflightError {
@@ -112,7 +82,7 @@ private func runCLI() -> Int32 {
         return 2
     }
 
-    let recorder = cli.makeRecorder { name in Recorder(output: recordingsBase.appendingPathComponent("\(name).mp4")) }
+    let recorder = finalizer.map { Recorder(output: $0.temporaryURL) }
     if let recorder {
         do { try recorder.start() }
         catch {
@@ -125,19 +95,29 @@ private func runCLI() -> Int32 {
     let player = Player()
     let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder, player: player)
     let start = Date()
-    let builtAt = appBuildTime(appPath)
+    let finalizeLock = NSLock()
+    var finalized = false
+    func finalizeOnce(_ result: String) {
+        finalizeLock.lock()
+        defer { finalizeLock.unlock() }
+        guard !finalized else { return }
+        finalized = true
+        guard let finalizer, let result = RecordingResult(rawValue: result) else { return }
+        do {
+            if let output = try finalizer.finish(result: result, duration: Date().timeIntervalSince(start)), result != .pass {
+                print("recording: \(output.path)")
+            }
+        } catch { print("warning: could not finalize recording: \(error.localizedDescription)") }
+    }
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let signals = [SIGINT, SIGTERM].map { value -> DispatchSourceSignal in
         let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
         source.setEventHandler {
             cleanup.run()
-            if let name = cli.recordingName, let recordingURL {
+            if finalizer != nil {
                 print("FAIL interrupted — recording run stopped by signal")
-                finalizeRecording(name: name, url: recordingURL, directory: recordingsBase,
-                                  scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent, appBuildTime: builtAt,
-                                  result: "interrupted",
-                                  duration: Date().timeIntervalSince(start), stepCount: steps.count, steps: [])
+                finalizeOnce("interrupted")
             }
             Darwin.exit(value == SIGINT ? 130 : 143)
         }
@@ -150,25 +130,15 @@ private func runCLI() -> Int32 {
     }
 
     let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"], player: player)
-    var stepTimes = [RecordingMetadata.Step]()
     let passed = runSteps(steps, driver: driver,
                           options: RunOptions(runDir: runDir, recordingPath: recordingURL?.path ?? "no recording",
                                               secrets: [ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"]].compactMap { $0 },
                                               pace: cli.pace,
-                                              onStep: { step, date in
-                                                  let formatter = ISO8601DateFormatter()
-                                                  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                                                  stepTimes.append(.init(line: step.line, source: step.source, timestamp: formatter.string(from: date)))
-                                              }),
+                                              onStep: { step, date in finalizer?.record(step, at: date) }),
                           out: { print($0) })
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
-    let duration = Date().timeIntervalSince(start)
     cleanup.run()
-    if let name = cli.recordingName, let recordingURL {
-        finalizeRecording(name: name, url: recordingURL, directory: recordingsBase,
-                          scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent, appBuildTime: builtAt,
-                          result: passed ? "pass" : "fail", duration: duration, stepCount: steps.count, steps: stepTimes)
-    }
+    finalizeOnce(passed ? "pass" : "fail")
     return passed ? 0 : 1
 }
 

@@ -111,6 +111,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         }
         passed += 1
         let completedAt = Date()
+        options.onStep?(step, completedAt)
         let changed = switch step.command {
         case .click, .type, .key, .closeWindow, .handleKeychain: true
         default: false
@@ -125,7 +126,6 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             options.sleep(1)
             visibleChange = false
         }
-        options.onStep?(step, completedAt)
         emit("✓ \(step.line) \(step.source)\(detail.map { " \($0)" } ?? "")")
     }
 

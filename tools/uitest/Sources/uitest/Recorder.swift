@@ -1,9 +1,12 @@
 import Foundation
+import Darwin
+import UITestCore
 
 final class Recorder {
     private struct Marker: Codable {
         let pid: Int32
         let parentPID: Int32
+        let executablePath: String?
         let outputPath: String
     }
     private let process = Process()
@@ -51,7 +54,9 @@ final class Recorder {
         try process.run()
         Thread.sleep(forTimeInterval: 0.25)
         guard process.isRunning else { throw NSError(domain: "uitest.recorder", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "ffmpeg could not start screen recording"]) }
-        let data = try JSONEncoder().encode(Marker(pid: process.processIdentifier, parentPID: getpid(), outputPath: output.standardizedFileURL.path))
+        let data = try JSONEncoder().encode(Marker(pid: process.processIdentifier, parentPID: getpid(),
+                                                  executablePath: process.executableURL?.standardizedFileURL.path,
+                                                  outputPath: output.standardizedFileURL.path))
         do { try data.write(to: marker, options: .atomic) }
         catch {
             process.terminate()
@@ -88,16 +93,21 @@ final class Recorder {
                 let markers = (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil))?.filter { $0.lastPathComponent.hasPrefix(".uitest-recorder-") && $0.pathExtension == "json" } ?? []
                 for file in markers {
                     guard let data = try? Data(contentsOf: file), let item = try? JSONDecoder().decode(Marker.self, from: data),
-                          roots.contains(where: { item.outputPath.hasPrefix($0.path + "/") }),
-                          kill(item.parentPID, 0) == -1, errno == ESRCH else { continue }
-                    guard kill(item.pid, 0) == 0 else {
-                        if errno == ESRCH { try? manager.removeItem(at: file) }
+                          roots.contains(where: { item.outputPath.hasPrefix($0.path + "/") }) else { continue }
+                    let parentExited = kill(item.parentPID, 0) == -1 && errno == ESRCH
+                    guard parentExited else { continue }
+                    let recorderExists = kill(item.pid, 0) == 0 || errno != ESRCH
+                    if shouldRemoveRecorderMarker(parentExited: parentExited, recorderExists: recorderExists) {
+                        try? manager.removeItem(at: file)
                         continue
                     }
                     guard let command = processCommand(item.pid),
-                          let executable = command.split(whereSeparator: \.isWhitespace).first,
-                          URL(fileURLWithPath: String(executable)).lastPathComponent == "ffmpeg",
-                          command.split(whereSeparator: \.isWhitespace).last.map(String.init) == item.outputPath else {
+                          let executable = processExecutable(item.pid),
+                          command.hasSuffix(" \(item.outputPath)"),
+                          let expected = Preflight.executable("ffmpeg"),
+                          recorderProcessMatches(executable: executable, arguments: [item.outputPath],
+                                                 expectedExecutable: item.executablePath ?? expected.path,
+                                                 outputPath: item.outputPath) else {
                         try? manager.removeItem(at: file)
                         continue
                     }
@@ -122,5 +132,11 @@ final class Recorder {
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         probe.waitUntilExit()
         return probe.terminationStatus == 0 ? text : nil
+    }
+
+    private static func processExecutable(_ pid: Int32) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4096)
+        let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        return count > 0 ? String(cString: buffer) : nil
     }
 }

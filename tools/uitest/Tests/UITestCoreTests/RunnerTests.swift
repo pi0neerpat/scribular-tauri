@@ -68,6 +68,33 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(driver.screenshots == [runDir.appendingPathComponent("fail-1.png")])
 }
 
+@Test func stepTimestampIsCapturedBeforeActionAndExpectPacingSleeps() {
+    final class EventLog {
+        var events = [String]()
+    }
+    final class EventDriver: Driver {
+        let log: EventLog
+        init(log: EventLog) { self.log = log }
+        func perform(_ command: Command) throws(DriverError) -> String? {
+            log.events.append("perform")
+            return nil
+        }
+        func visibleLabels() -> [String] { [] }
+        func screenshot(to url: URL) throws {}
+    }
+
+    let log = EventLog()
+    let driver = EventDriver(log: log)
+    #expect(runSteps([step(1, .click(label: "Save", index: nil, within: nil), source: "click \"Save\""),
+                      step(2, .expect("Saved"), source: "expect \"Saved\"")],
+                     driver: driver,
+                     options: RunOptions(runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4", pace: 2.5,
+                                         sleep: { _ in log.events.append("sleep") },
+                                         onStep: { _, _ in log.events.append("timestamp") }),
+                     out: { _ in }))
+    #expect(log.events == ["perform", "timestamp", "sleep", "perform", "timestamp", "sleep"])
+}
+
 @Test func fatalStopsImmediately() {
     let driver = FakeDriver()
     driver.results = [.failure(.fatal("ambiguous: 2 matches for \"Cancel\""))]
