@@ -92,7 +92,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                 switch error {
                 case .fatal(let message):
                     fail(step, message)
-                    emit("FAIL \(passed)/\(steps.count) steps")
+                    emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                     return false
                 case .retryable(let message):
                     if started == nil { started = Date() }
@@ -102,7 +102,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                             ? String(Int(limit))
                             : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
                         fail(step, "\(message) after \(timeout)s")
-                        emit("FAIL \(passed)/\(steps.count) steps")
+                        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
                     Thread.sleep(forTimeInterval: min(options.poll, remaining))

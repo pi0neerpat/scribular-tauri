@@ -58,13 +58,13 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     var output = [String]()
     let runDir = URL(fileURLWithPath: "/tmp/run")
     let passed = runSteps([step(1, .expect("X"), source: "expect \"X\"")], driver: driver,
-                          options: RunOptions(timeout: 0.05, poll: 0.01, runDir: runDir, recordingPath: "r.mp4"),
+                          options: RunOptions(timeout: 0.05, poll: 0.01, runDir: runDir, recordingPath: "no recording"),
                           out: { output.append($0) })
     #expect(!passed)
     #expect(output[0] == "✗ 1 expect \"X\": not found after 0.05s")
     #expect(output[1].contains("screenshot: "))
     #expect(output[2] == "  visible: \"Settings\", \"Note styles\"")
-    #expect(output[3] == "FAIL 0/1 steps")
+    #expect(output[3] == "FAIL 0/1 steps — recording: no recording")
     #expect(driver.screenshots == [runDir.appendingPathComponent("fail-1.png")])
 }
 
