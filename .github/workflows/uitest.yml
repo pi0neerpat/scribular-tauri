@@ -1,0 +1,31 @@
+name: Native UI test tooling
+
+on:
+  pull_request:
+    paths:
+      - 'tools/uitest/**'
+      - '.github/workflows/uitest.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/uitest/**'
+      - '.github/workflows/uitest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  uitest:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Swift package tests
+        run: swift test --package-path tools/uitest
+      - name: Additive guard self-test
+        run: bash tools/uitest/scripts/check-additive-self-test.sh
+      - name: Additive guard
+        run: |
+          git fetch origin main
+          bash tools/uitest/scripts/check-additive.sh origin/main

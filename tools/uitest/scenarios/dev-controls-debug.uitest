@@ -1,0 +1,7 @@
+launch
+click "Settings"
+click "General"
+expect "Developer"
+expect "Send test error"
+expect "Trigger test panic"
+quit

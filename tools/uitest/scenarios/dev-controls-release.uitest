@@ -1,0 +1,6 @@
+launch
+click "Settings"
+click "General"
+expect "Privacy & diagnostics"
+expect-not "Developer"
+quit

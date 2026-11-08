@@ -124,3 +124,44 @@ import Testing
     #expect(throws: ScriptError.self) { try parseScript("play \"a.wav\" timeout 5s") }
     #expect(throws: ScriptError.self) { try parseScript("stop-audio now") }
 }
+
+@Test func parsesNativeSurfaceCommands() throws {
+    let script = """
+    expect-status-item "Scribular" timeout 30s
+    status-item click "Scribular"
+    screenshot-menubar
+    screenshot-menubar "tray-icon"
+    screenshot-screen
+    screenshot-screen "tray-menu"
+    expect-notification "ready" timeout 30s
+    dock click "Scribular"
+    """
+    let steps = try parseScript(script)
+    #expect(steps.map(\.command) == [
+        .expectStatusItem("Scribular"), .statusItemClick("Scribular"),
+        .screenshotMenubar(name: nil), .screenshotMenubar(name: "tray-icon"),
+        .screenshotScreen(name: nil), .screenshotScreen(name: "tray-menu"),
+        .expectNotification("ready"), .dockClick("Scribular")
+    ])
+    #expect(steps[0].timeout == 30)
+    #expect(steps[6].timeout == 30)
+}
+
+@Test func rejectsMalformedNativeSurfaceCommandsWithLineNumbers() {
+    #expect(throws: ScriptError(line: 1, message: #"usage: expect-status-item "text""#)) { try parseScript("expect-status-item Scribular") }
+    #expect(throws: ScriptError(line: 2, message: #"usage: status-item click "help""#)) { try parseScript("quit\nstatus-item hover \"Scribular\"") }
+    #expect(throws: ScriptError(line: 3, message: #"usage: dock click "title""#)) { try parseScript("quit\nquit\ndock press \"Scribular\"") }
+}
+
+@Test func doctorReportFormatsResultsWithoutSecrets() {
+    let passed = DoctorReport(checks: [
+        DoctorCheck(name: "Accessibility", fix: "System Settings", passed: true),
+        DoctorCheck(name: "Keychain password", fix: "bash tools/uitest/trust-build.sh --store-password", passed: true),
+    ])
+    #expect(passed.exitCode == 0)
+    #expect(passed.lines == ["ok Accessibility: System Settings", "ok Keychain password: bash tools/uitest/trust-build.sh --store-password"])
+    let missing = DoctorReport(checks: [DoctorCheck(name: "ffmpeg", fix: "brew install ffmpeg", passed: false)])
+    #expect(missing.exitCode == 1)
+    #expect(missing.lines == ["MISSING ffmpeg: brew install ffmpeg"])
+    #expect(!missing.lines.joined().contains("secret-password"))
+}

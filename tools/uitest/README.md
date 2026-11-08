@@ -78,6 +78,39 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `play "file.wav" [loop]` | Play the file through `/usr/bin/afplay` in the background, so the app can record it in App-audio mode (`afplay` in the App picker). Relative paths resolve against the directory uitest runs from; a missing file fails the step. `loop` restarts it when it ends. Stops at `stop-audio`, `quit`, or the end of the run (pass or fail). |
 | `stop-audio` | Stop `play` playback. |
 | `quit` | Quit the app and stop `play` playback. |
+| `expect-status-item "Scribular"` | Wait for the app status item whose Accessibility help equals the text. |
+| `status-item click "Scribular"` | Press the matching app status item. Native menu items are not exposed to Accessibility. |
+| `screenshot-menubar ["name"]` | Capture the first 40 points of the main display to `menubar-<line>.png` or the named file. |
+| `screenshot-screen ["name"]` | Capture the whole main display to `screen-<line>.png` or the named file. |
+| `expect-notification "text"` | Wait until a Notification Center banner's text contains the value. |
+| `dock click "Scribular"` | Press the unique matching Dock item. |
+
+`timeout 30s` also applies to `expect-status-item` and `expect-notification`. Notifications are brief (about 3–4 seconds in the tested VM), so put `expect-notification` directly after the action that triggers the banner. It searches banner text in Notification Center; it does not read notification history.
+
+### Native surfaces and fallbacks
+
+Use the native UI command first, then a surface screenshot, then a log or state assertion, then simulated evidence, then mark the scenario unverified. The Scribular status item is reachable with `expect-status-item` and `status-item click`. The opened native menu's items are not exposed to Accessibility; inspect them only with `screenshot-screen`.
+
+`screenshot-menubar` captures the main display's top 40 points. `screenshot-screen` captures the whole main display and is useful for the status menu or notification banner. These commands save to the current run directory and print the path; existing `screenshot` behavior is unchanged.
+
+### Doctor
+
+Run `swift run --package-path tools/uitest uitest doctor [--app /path/to/Scribular.app]` to check host permissions, System Events automation, `ffmpeg`, the stored keychain password, and optionally the app bundle. It prints every check as `ok` or `MISSING`, includes the fix command, exits 1 if any check is missing, and never prints the stored password. With `--app`, it also prints the per-build trust command; the current cdhash trust cannot be detected automatically.
+
+### Keychain after rebuild
+
+Store the login password once with `bash tools/uitest/trust-build.sh --store-password`. After each rebuild, run `bash tools/uitest/trust-build.sh <path>/Scribular.app` so the new build's cdhash can read the existing Scribular keychain items. Keep `handle-keychain` in a scenario as a safety net for a prompt that still appears; the Always-Allow path is not verified.
+
+### Developer controls
+
+The Developer controls require a debug build because both the frontend section and native test commands are compile-time gated. From the repository root:
+
+```sh
+CARGO_TARGET_DIR=/Users/admin/cargo-target/<clone> APPLE_SIGNING_IDENTITY='Scribular Local Dev' npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json
+bash tools/uitest/trust-build.sh /Users/admin/cargo-target/<clone>/debug/bundle/macos/Scribular.app
+```
+
+The release bundle must continue to show `Privacy & diagnostics` and no `Developer` section.
 
 To explore a screen, write a short script that navigates there and ends with `labels` and `screenshot`. Put an `expect` before `labels`: right after `launch` the web content is not loaded yet, and `labels` lists only the window and menu bar.
 
