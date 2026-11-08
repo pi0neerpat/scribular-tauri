@@ -95,8 +95,8 @@ public final class RecordingFinalizer {
     }
 }
 
-public func recorderProcessMatches(executable: String, command: String, expectedExecutable: String, outputPath: String) -> Bool {
-    executable == expectedExecutable && command.hasSuffix(" \(outputPath)")
+public func recorderProcessMatches(executable: String, arguments: [String], expectedExecutable: String, outputPath: String) -> Bool {
+    executable == expectedExecutable && arguments.last == outputPath
 }
 
 public func shouldRemoveRecorderMarker(parentExited: Bool, recorderExists: Bool) -> Bool {

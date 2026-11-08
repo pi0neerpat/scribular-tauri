@@ -101,10 +101,9 @@ final class Recorder {
                         try? manager.removeItem(at: file)
                         continue
                     }
-                    guard let command = processCommand(item.pid),
-                          let executable = processExecutable(item.pid),
-                          let expected = Preflight.executable("ffmpeg"),
-                          recorderProcessMatches(executable: executable, command: command,
+                    guard let arguments = processArguments(item.pid), let executable = processExecutable(item.pid) else { continue }
+                    guard let expected = Preflight.executable("ffmpeg"),
+                          recorderProcessMatches(executable: executable, arguments: arguments,
                                                  expectedExecutable: item.executablePath ?? expected.resolvingSymlinksInPath().standardizedFileURL.path,
                                                  outputPath: item.outputPath) else {
                         try? manager.removeItem(at: file)
@@ -113,24 +112,49 @@ final class Recorder {
                     _ = kill(item.pid, SIGTERM)
                     let deadline = Date().addingTimeInterval(2)
                     while Date() < deadline && kill(item.pid, 0) == 0 { Thread.sleep(forTimeInterval: 0.05) }
-                    if kill(item.pid, 0) == 0 { _ = kill(item.pid, SIGKILL) }
-                    try? manager.removeItem(at: file)
+                    if kill(item.pid, 0) == 0 {
+                        _ = kill(item.pid, SIGKILL)
+                        let killDeadline = Date().addingTimeInterval(2)
+                        while Date() < killDeadline && kill(item.pid, 0) == 0 { Thread.sleep(forTimeInterval: 0.05) }
+                    }
+                    if kill(item.pid, 0) == -1, errno == ESRCH { try? manager.removeItem(at: file) }
                 }
             }
         }
     }
 
-    private static func processCommand(_ pid: Int32) -> String? {
-        let probe = Process()
-        let output = Pipe()
-        probe.executableURL = URL(fileURLWithPath: "/bin/ps")
-        probe.arguments = ["-p", String(pid), "-o", "command="]
-        probe.standardOutput = output
-        probe.standardError = FileHandle.nullDevice
-        guard (try? probe.run()) != nil else { return nil }
-        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        probe.waitUntilExit()
-        return probe.terminationStatus == 0 ? text : nil
+    private static func processArguments(_ pid: Int32) -> [String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard mib.withUnsafeMutableBufferPointer({ sysctl($0.baseAddress, u_int($0.count), nil, &size, nil, 0) }) == 0,
+              size > MemoryLayout<Int32>.size else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        guard mib.withUnsafeMutableBufferPointer({ mib in
+            bytes.withUnsafeMutableBytes { sysctl(mib.baseAddress, u_int(mib.count), $0.baseAddress, &size, nil, 0) }
+        }) == 0 else { return nil }
+
+        var argc: Int32 = 0
+        withUnsafeMutableBytes(of: &argc) { target in
+            bytes.withUnsafeBytes { source in target.copyMemory(from: UnsafeRawBufferPointer(rebasing: source[..<MemoryLayout<Int32>.size])) }
+        }
+        guard argc > 0, argc < 256 else { return nil }
+        var offset = MemoryLayout<Int32>.size
+        func readString() -> String? {
+            guard offset < size else { return nil }
+            let start = offset
+            while offset < size, bytes[offset] != 0 { offset += 1 }
+            guard offset < size else { return nil }
+            defer { offset += 1 }
+            return String(decoding: bytes[start..<offset], as: UTF8.self)
+        }
+        guard readString() != nil else { return nil } // executable path before argv
+        while offset < size, bytes[offset] == 0 { offset += 1 }
+        var arguments = [String]()
+        for _ in 0..<argc {
+            guard let argument = readString() else { return nil }
+            arguments.append(argument)
+        }
+        return arguments
     }
 
     private static func processExecutable(_ pid: Int32) -> String? {
