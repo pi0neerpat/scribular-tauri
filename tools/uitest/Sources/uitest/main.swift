@@ -102,10 +102,16 @@ private func runCLI() -> Int32 {
         defer { finalizeLock.unlock() }
         guard !finalized else { return }
         finalized = true
-        guard let finalizer, let result = RecordingResult(rawValue: result) else { return }
+        guard let result = RecordingResult(rawValue: result) else { return }
+        guard let finalizer else {
+            if result != .pass { print("recording: no recording") }
+            return
+        }
         do {
             if let output = try finalizer.finish(result: result, duration: Date().timeIntervalSince(start)), result != .pass {
                 print("recording: \(output.path)")
+            } else if result != .pass {
+                print("recording: no recording")
             }
         } catch { print("warning: could not finalize recording: \(error.localizedDescription)") }
     }
@@ -115,10 +121,8 @@ private func runCLI() -> Int32 {
         let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
         source.setEventHandler {
             cleanup.run()
-            if finalizer != nil {
-                print("FAIL interrupted — recording run stopped by signal")
-                finalizeOnce("interrupted")
-            }
+            print("FAIL interrupted — recording run stopped by signal")
+            finalizeOnce("interrupted")
             Darwin.exit(value == SIGINT ? 130 : 143)
         }
         source.resume()

@@ -91,7 +91,7 @@ quit
 
 ## Output
 
-Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. A successful run's result line includes the recording path (or `no recording`). Failed runs print their failure summary, then print the final recording path (`-FAILED.mp4` for a recorded run):
+Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. A successful run's result line includes the recording path (or `no recording`). Failed runs print their failure summary, then print the final recording path (`-FAILED.mp4` for a recorded run, or `no recording`):
 
 ```text
 ✓ 1 launch /path/to/Scribular.app (built 2026-11-05T20:00:00Z)
