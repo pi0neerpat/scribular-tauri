@@ -76,6 +76,7 @@ public final class RecordingFinalizer {
         } else if result == .pass {
             throw RecordingFinalizerError.recordingMissing
         }
+        self.result = result
 
         let metadata = RecordingMetadata(scenario: scenario, appBuildTime: appBuildTime, stepCount: stepCount,
                                          duration: duration, result: result, steps: steps)
@@ -85,18 +86,17 @@ public final class RecordingFinalizer {
         try encoder.encode(metadata).write(to: temporaryMetadataURL, options: .atomic)
         do {
             try FileManager.default.linkItem(at: temporaryMetadataURL, to: metadataURL)
-            try FileManager.default.removeItem(at: temporaryMetadataURL)
+            try? FileManager.default.removeItem(at: temporaryMetadataURL)
         } catch {
             try? FileManager.default.removeItem(at: temporaryMetadataURL)
             throw error
         }
-        self.result = result
         return finalURL
     }
 }
 
-public func recorderProcessMatches(executable: String, arguments: [String], expectedExecutable: String, outputPath: String) -> Bool {
-    executable == expectedExecutable && arguments.last == outputPath
+public func recorderProcessMatches(executable: String, command: String, expectedExecutable: String, outputPath: String) -> Bool {
+    executable == expectedExecutable && command.hasSuffix(" \(outputPath)")
 }
 
 public func shouldRemoveRecorderMarker(parentExited: Bool, recorderExists: Bool) -> Bool {

@@ -55,7 +55,7 @@ final class Recorder {
         Thread.sleep(forTimeInterval: 0.25)
         guard process.isRunning else { throw NSError(domain: "uitest.recorder", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "ffmpeg could not start screen recording"]) }
         let data = try JSONEncoder().encode(Marker(pid: process.processIdentifier, parentPID: getpid(),
-                                                  executablePath: process.executableURL?.standardizedFileURL.path,
+                                                  executablePath: process.executableURL?.resolvingSymlinksInPath().standardizedFileURL.path,
                                                   outputPath: output.standardizedFileURL.path))
         do { try data.write(to: marker, options: .atomic) }
         catch {
@@ -103,10 +103,9 @@ final class Recorder {
                     }
                     guard let command = processCommand(item.pid),
                           let executable = processExecutable(item.pid),
-                          command.hasSuffix(" \(item.outputPath)"),
                           let expected = Preflight.executable("ffmpeg"),
-                          recorderProcessMatches(executable: executable, arguments: [item.outputPath],
-                                                 expectedExecutable: item.executablePath ?? expected.path,
+                          recorderProcessMatches(executable: executable, command: command,
+                                                 expectedExecutable: item.executablePath ?? expected.resolvingSymlinksInPath().standardizedFileURL.path,
                                                  outputPath: item.outputPath) else {
                         try? manager.removeItem(at: file)
                         continue
@@ -137,6 +136,8 @@ final class Recorder {
     private static func processExecutable(_ pid: Int32) -> String? {
         var buffer = [CChar](repeating: 0, count: 4096)
         let count = proc_pidpath(pid, &buffer, UInt32(buffer.count))
-        return count > 0 ? String(cString: buffer) : nil
+        guard count > 0 else { return nil }
+        let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
     }
 }

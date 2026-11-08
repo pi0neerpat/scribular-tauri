@@ -39,11 +39,11 @@ import Testing
 @Test func recorderProcessMustMatchExecutableAndExactOutputArgument() {
     let executable = "/opt/homebrew/bin/ffmpeg"
     let output = "/tmp/test recording.mp4"
-    #expect(recorderProcessMatches(executable: executable, arguments: ["ffmpeg", output],
+    #expect(recorderProcessMatches(executable: executable, command: "ffmpeg -i input \(output)",
                                    expectedExecutable: executable, outputPath: output))
-    #expect(!recorderProcessMatches(executable: "/usr/bin/ffmpeg-wrapper", arguments: ["ffmpeg-wrapper", output],
+    #expect(!recorderProcessMatches(executable: "/usr/bin/ffmpeg-wrapper", command: "ffmpeg-wrapper -i input \(output)",
                                     expectedExecutable: executable, outputPath: output))
-    #expect(!recorderProcessMatches(executable: executable, arguments: ["ffmpeg", "prefix\(output)"],
+    #expect(!recorderProcessMatches(executable: executable, command: "ffmpeg -i input prefix\(output)",
                                     expectedExecutable: executable, outputPath: output))
 }
 
