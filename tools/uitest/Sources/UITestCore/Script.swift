@@ -17,11 +17,14 @@ public struct KeyCombo: Equatable {
 public enum Command: Equatable {
     case launch(keepData: Bool)
     case click(label: String, index: Int?, within: String?)
+    case pickApp(String)
     case type(String)
     case key(KeyCombo)
     case expect(String)
     case expectNot(String)
     case wait(seconds: Double)
+    case pause(seconds: Double)
+    case pace(seconds: Double)
     case closeWindow
     case handleKeychain
     case labels
@@ -112,6 +115,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 }
             }
             command = .click(label: label, index: index, within: within)
+        case "pick-app":
+            guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-app \"app name\"") }
+            command = .pickApp(app)
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
@@ -127,9 +133,10 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "expect", "expect-not":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: \(first.text) \"label\"") }
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
-        case "wait":
-            guard args.count == 1, !args[0].quoted else { throw fail("usage: wait 30s or wait 500ms") }
-            command = .wait(seconds: try seconds(args[0]))
+        case "wait", "pause", "pace":
+            guard args.count == 1, !args[0].quoted else { throw fail("usage: \(first.text) 3s or \(first.text) 500ms") }
+            let duration = try seconds(args[0])
+            command = first.text == "wait" ? .wait(seconds: duration) : first.text == "pause" ? .pause(seconds: duration) : .pace(seconds: duration)
         case "labels":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = .labels
@@ -160,8 +167,8 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "expect", "expect-not", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, expect, expect-not and close-window")
+        if timeout != nil, !["launch", "click", "pick-app", "expect", "expect-not", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, pick-app, expect, expect-not and close-window")
         }
         steps.append(Step(line: lineNumber, source: source, command: command, timeout: timeout))
     }

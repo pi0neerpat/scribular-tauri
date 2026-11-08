@@ -65,6 +65,34 @@ final class AXDriver: Driver {
             guard let frame = frame(of: element) else { throw .retryable("not found") }
             try click(at: CGPoint(x: frame.midX, y: frame.midY))
             return nil
+        case .pickApp(let app):
+            if popupMenuOpen() {
+                _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
+                let closed = waitUntil(timeout: 2) { !popupMenuOpen() }
+                Thread.sleep(forTimeInterval: 1)
+                guard closed && !popupMenuOpen() else { throw .retryable("a menu is still open") }
+            }
+            if let picker = try appPicker(), (attribute(picker, kAXValueAttribute) as? String) == app { return nil }
+            _ = try perform(.click(label: "Refresh", index: nil, within: nil))
+            Thread.sleep(forTimeInterval: 2.5)
+            guard let picker = try appPicker() else { throw .retryable("picker not found") }
+            guard let frame = frame(of: picker) else { throw .retryable("picker not visible") }
+            try click(at: CGPoint(x: frame.midX, y: frame.midY))
+            guard waitUntil(timeout: 3, { popupMenuOpen() }) else { throw .retryable("picker menu did not open") }
+            Thread.sleep(forTimeInterval: 0.3)
+            _ = try perform(.type(app))
+            Thread.sleep(forTimeInterval: 0.3)
+            _ = try perform(.key(KeyCombo(modifiers: [], key: "enter")))
+            var closed = waitUntil(timeout: 2) { !popupMenuOpen() }
+            if !closed {
+                _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
+                closed = waitUntil(timeout: 2) { !popupMenuOpen() }
+            }
+            Thread.sleep(forTimeInterval: 1)
+            guard closed && !popupMenuOpen() else { throw .retryable("a menu is still open") }
+            let value = attribute(picker, kAXValueAttribute) as? String ?? "(unavailable)"
+            guard value == app else { throw .retryable("picker shows \"\(value)\"") }
+            return nil
         case .type(let text):
             for character in text {
                 guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
@@ -105,6 +133,8 @@ final class AXDriver: Driver {
         case .wait(let seconds):
             Thread.sleep(forTimeInterval: seconds)
             return nil
+        case .pause, .pace:
+            throw .fatal("pacing commands are handled by the runner")
         case .closeWindow:
             guard let app = appElement(), let focused = axElement(attribute(app, kAXFocusedWindowAttribute)),
                   let close = axElement(attribute(focused, kAXCloseButtonAttribute)),
@@ -159,6 +189,37 @@ final class AXDriver: Driver {
         guard let found = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else { return nil }
         application = found
         return AXUIElementCreateApplication(found.processIdentifier)
+    }
+
+    private func popupMenuOpen() -> Bool {
+        guard let pid = application?.processIdentifier else { return false }
+        let layer = Int(CGWindowLevelForKey(.popUpMenuWindow))
+        return (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]])?.contains {
+            ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) && ($0[kCGWindowLayer as String] as? Int) == layer
+        } ?? false
+    }
+
+    private func waitUntil(timeout: TimeInterval, interval: TimeInterval = 0.1, _ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return false }
+            Thread.sleep(forTimeInterval: min(interval, remaining))
+        }
+        return true
+    }
+
+    private func appPicker() throws(DriverError) -> AXUIElement? {
+        let popups = allElements().filter { attribute($0, kAXRoleAttribute) as? String == "AXPopUpButton" }
+        let titled = popups.filter { attribute($0, kAXTitleAttribute) as? String == "App" }
+        let candidates = titled.isEmpty
+            ? popups.filter { attribute($0, kAXValueAttribute) as? String == "Choose an app…" }
+            : titled
+        switch candidates.count {
+        case 0: return nil
+        case 1: return candidates[0]
+        case let count: throw .fatal("ambiguous: \(count) App pickers")
+        }
     }
 
     private func allElements(from root: AXUIElement? = nil) -> [AXUIElement] {

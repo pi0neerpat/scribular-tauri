@@ -6,13 +6,7 @@ expect-not "Getting Scribular ready" timeout 900s
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
 click "Settings"
 click "App audio" index 1
-click "Refresh"
-# the app list must load before the menu opens; the open menu does not update
-wait 6s
-click "Choose an app…"
-click "afplay"
-# the first click after the menu closes is swallowed
-wait 1s
+pick-app "afplay" timeout 60s
 click "Record" index 1
 # capture follows the afplay process running at Start, and a loop restart is a new process: start one fresh full clip
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"

@@ -109,6 +109,14 @@ import Testing
     #expect(steps[2].command == .stopAudio)
 }
 
+@Test func parsesPickAppAndTimeout() throws {
+    let step = try #require(parseScript("pick-app \"afplay\" timeout 60s").first)
+    #expect(step.command == .pickApp("afplay"))
+    #expect(step.timeout == 60)
+    #expect(throws: ScriptError.self) { try parseScript("pick-app afplay") }
+    #expect(throws: ScriptError.self) { try parseScript("pick-app \"afplay\" timeout soon") }
+}
+
 @Test func rejectsBadPlay() throws {
     for line in ["play", "play a.wav", "play \"a.wav\" forever", "play \"a.wav\" loop loop"] {
         #expect(throws: ScriptError(line: 1, message: "usage: play \"file\" [loop]")) { try parseScript(line) }

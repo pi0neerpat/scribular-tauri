@@ -17,18 +17,26 @@ public struct RunOptions {
     public var runDir: URL
     public var recordingPath: String
     public var secrets: [String]
+    public var pace: Double
+    public var sleep: (Double) -> Void
+    public var onStep: ((Step, Date) -> Void)?
 
-    public init(timeout: Double = 10, poll: Double = 0.25, runDir: URL, recordingPath: String, secrets: [String] = []) {
+    public init(timeout: Double = 10, poll: Double = 0.25, runDir: URL, recordingPath: String, secrets: [String] = [], pace: Double = 0, sleep: @escaping (Double) -> Void = { Thread.sleep(forTimeInterval: $0) }, onStep: ((Step, Date) -> Void)? = nil) {
         self.timeout = timeout
         self.poll = poll
         self.runDir = runDir
         self.recordingPath = recordingPath
         self.secrets = secrets
+        self.pace = pace
+        self.sleep = sleep
+        self.onStep = onStep
     }
 }
 
 public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: (String) -> Void) -> Bool {
     var passed = 0
+    var pace = options.pace
+    var visibleChange = false
 
     func emit(_ line: String) {
         out(options.secrets.reduce(line) { result, secret in
@@ -59,10 +67,26 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
     }
 
     for step in steps {
-        var started: Date?  // the wait window opens at the first retryable failure, not before the first attempt
+        if case .pace(let seconds) = step.command {
+            pace = seconds
+            options.onStep?(step, Date())
+            passed += 1
+            emit("✓ \(step.line) \(step.source)")
+            continue
+        }
+        if case .pause(let seconds) = step.command {
+            if seconds > 0 { options.sleep(seconds) }
+            options.onStep?(step, Date())
+            passed += 1
+            emit("✓ \(step.line) \(step.source)")
+            continue
+        }
+        var started: Date? = if case .pickApp = step.command { Date() } else { nil }
+        var attempts = 0
         let limit = step.timeout ?? options.timeout
         let detail: String?
         while true {
+            attempts += 1
             do {
                 detail = try execute(step)
                 break
@@ -70,7 +94,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                 switch error {
                 case .fatal(let message):
                     fail(step, message)
-                    emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
+                    emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                     return false
                 case .retryable(let message):
                     if started == nil { started = Date() }
@@ -79,8 +103,13 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                         let timeout = limit == floor(limit)
                             ? String(Int(limit))
                             : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
-                        fail(step, "\(message) after \(timeout)s")
-                        emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
+                        let failure = if case .pickApp(let app) = step.command {
+                            pickAppTimeoutMessage(app: app, timeout: timeout, attempts: attempts, lastFailure: message)
+                        } else {
+                            "\(message) after \(timeout)s"
+                        }
+                        fail(step, failure)
+                        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
                     Thread.sleep(forTimeInterval: min(options.poll, remaining))
@@ -88,7 +117,28 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             }
         }
         passed += 1
-        emit("✓ \(step.line) \(step.source)\(detail.map { " \($0)" } ?? "")")
+        let completedAt = Date()
+        options.onStep?(step, completedAt)
+        let changed = switch step.command {
+        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain: true
+        default: false
+        }
+        if changed {
+            if pace > 0 { options.sleep(pace) }
+            visibleChange = true
+        } else if case .expect = step.command, visibleChange {
+            options.sleep(1)
+            visibleChange = false
+        } else if case .expectNot = step.command, visibleChange {
+            options.sleep(1)
+            visibleChange = false
+        }
+        let resultDetail = if case .pickApp(let app) = step.command {
+            pickAppSuccessDetail(app: app, attempts: attempts)
+        } else {
+            detail
+        }
+        emit("✓ \(step.line) \(step.source)\(resultDetail.map { " \($0)" } ?? "")")
     }
 
     emit("PASS \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
