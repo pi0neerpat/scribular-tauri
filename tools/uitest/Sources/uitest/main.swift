@@ -97,15 +97,15 @@ private func runCLI() -> Int32 {
     let start = Date()
     let finalizeLock = NSLock()
     var finalized = false
-    func finalizeOnce(_ result: String) {
+    func finalizeOnce(_ value: String) -> Bool {
         finalizeLock.lock()
         defer { finalizeLock.unlock() }
-        guard !finalized else { return }
+        guard !finalized else { return true }
         finalized = true
-        guard let result = RecordingResult(rawValue: result) else { return }
+        guard let result = RecordingResult(rawValue: value) else { return false }
         guard let finalizer else {
             if result != .pass { print("recording: no recording") }
-            return
+            return true
         }
         do {
             if let output = try finalizer.finish(result: result, duration: Date().timeIntervalSince(start)), result != .pass {
@@ -113,7 +113,11 @@ private func runCLI() -> Int32 {
             } else if result != .pass {
                 print("recording: no recording")
             }
-        } catch { print("warning: could not finalize recording: \(error.localizedDescription)") }
+            return true
+        } catch {
+            print("FAIL recording finalization: \(error.localizedDescription)")
+            return false
+        }
     }
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
@@ -142,8 +146,8 @@ private func runCLI() -> Int32 {
                           out: { print($0) })
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
     cleanup.run()
-    finalizeOnce(passed ? "pass" : "fail")
-    return passed ? 0 : 1
+    let recordingSaved = finalizeOnce(passed ? "pass" : "fail")
+    return passed && recordingSaved ? 0 : 1
 }
 
 private func appBuildTime(_ appPath: URL) -> String {
