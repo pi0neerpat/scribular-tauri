@@ -19,7 +19,8 @@ git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm base
 base=$(git rev-parse HEAD)
 printf 'new\n' > tools/uitest/scenarios/new.uitest
-printf '| `new-command` | Additive. |\n' >> tools/uitest/README.md
+awk '/\| `quit` \|/ { print "| `new-command` | Additive. |" } { print }' tools/uitest/README.md > README.tmp
+mv README.tmp tools/uitest/README.md
 git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm additive
 bash "$script" "$base"
@@ -28,6 +29,13 @@ git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm modifying
 if bash "$script" HEAD~1; then
   echo 'expected modifying commit to fail additive guard' >&2
+  exit 1
+fi
+sed -i '' 's/| `launch` | Start. |/| `launch` | Changed. |/' tools/uitest/README.md
+git add tools/uitest/README.md
+GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm 'modify README command row'
+if bash "$script" HEAD~1; then
+  echo 'expected README command row modification to fail additive guard' >&2
   exit 1
 fi
 echo 'additive self-test: ok'

@@ -71,6 +71,9 @@ import Testing
 
 @Test func duplicateScreenshotNamesRejected() {
     #expect(throws: ScriptError.self) { try parseScript("screenshot \"a\"\nscreenshot \"a\"") }
+    #expect(throws: ScriptError.self) { try parseScript("screenshot \"menubar-2\"\nscreenshot-menubar") }
+    #expect(throws: ScriptError.self) { try parseScript("screenshot-screen \"step-2\"\nscreenshot") }
+    #expect(throws: ScriptError.self) { try parseScript("screenshot \"screen-2\"\nscreenshot-screen") }
 }
 
 @Test func parsesExpectNotWaitMsAndEscapedQuote() throws {

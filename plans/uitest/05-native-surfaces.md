@@ -104,9 +104,9 @@ Unit (`swift test --package-path tools/uitest`, all existing tests unchanged and
 
 Real runs on the VM (release build of current `main`, after `trust-build.sh`):
 - AS4 `uitest doctor --app <release app>` prints all `ok`, exit 0.
-- AS5 `tray-status-item.uitest` passes; `tray-icon.png` is 40 px tall and shows the Scribular glyph; `tray-menu.png` shows `Show Scribular`, `Start Recording`, `Quit` (reviewer checks the image; not AX-asserted).
+- AS5 `tray-status-item.uitest` passes for status-item discovery and capture. Menu contents and Escape dismissal remain unverified because the native menu did not open on the VM.
 - AS6 `close-hides-dock-restore.uitest` passes.
-- AS7 `(sleep 8; osascript -e 'display notification "uitest-notification-probe" with title "uitest"') & swift run --package-path tools/uitest uitest tools/uitest/scenarios/notification-probe.uitest --app <release app>` passes.
+- AS7 `swift build --package-path tools/uitest && (log=$(mktemp); swift run --skip-build --package-path tools/uitest uitest tools/uitest/scenarios/notification-probe.uitest --app <release app> >"$log" 2>&1 & pid=$!; until grep -Fq '✓ 1 launch --keep-data' "$log"; do kill -0 "$pid" || { cat "$log"; exit 1; }; sleep 0.1; done; osascript -e 'display notification "uitest-notification-probe" with title "uitest"'; wait "$pid"; result=$?; cat "$log"; rm "$log"; exit "$result")` passes; the runner is prebuilt and the notification fires after launch, while the expectation is polling.
 - AS8 `dev-controls-release.uitest` passes on the release bundle and `dev-controls-debug.uitest` passes on the R6 debug bundle.
 - AS9 `notification-summary-ready.uitest`: passes if Patrick granted Notifications; otherwise reported as unverified with the `needs_human` record.
 - AS10 `keychain-after-rebuild.uitest` (existing, unchanged) still passes after the rebuild.

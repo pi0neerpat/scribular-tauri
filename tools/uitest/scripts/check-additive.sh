@@ -19,12 +19,12 @@ done < <(git diff --no-renames --numstat "$base...HEAD" -- tools/uitest/Tests to
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 git show "$base:tools/uitest/README.md" | awk '
-  /^\| `launch / { inside=1 }
+  /^\| `launch/ { inside=1 }
   inside && /^\| `/ { print }
   /^\| `quit` \|/ { exit }
 ' > "$tmp/base-command-rows"
 git show HEAD:tools/uitest/README.md | awk '
-  /^\| `launch / { inside=1 }
+  /^\| `launch/ { inside=1 }
   inside && /^\| `/ { print }
   /^\| `quit` \|/ { exit }
 ' > "$tmp/head-command-rows"

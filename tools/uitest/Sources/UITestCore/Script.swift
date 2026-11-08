@@ -184,6 +184,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         if timeout != nil, !["launch", "click", "pick-app", "expect", "expect-not", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
             throw fail("timeout only applies to launch, click, pick-app, expect, expect-not, expect-status-item, expect-notification and close-window")
         }
+        if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {
+            throw fail("duplicate screenshot name: \(name)")
+        }
         steps.append(Step(line: lineNumber, source: source, command: command, timeout: timeout))
     }
     guard !steps.isEmpty else { throw ScriptError(line: 0, message: "script has no steps") }
@@ -196,9 +199,6 @@ private func screenshotCommand(_ args: [Token], steps: [Step], fail: (String) ->
             guard args.isEmpty || name.map({ !$0.isEmpty && !$0.contains("/") && !$0.hasPrefix(".") }) == true else {
                 throw fail("screenshot name must be a quoted file name without / or a leading .")
             }
-            if let name, steps.contains(where: { screenshotName($0.command) == name }) {
-                throw fail("duplicate screenshot name: \(name)")
-            }
             switch kind {
             case "screenshot": return .screenshot(name: name)
             case "screenshot-menubar": return .screenshotMenubar(name: name)
@@ -206,9 +206,11 @@ private func screenshotCommand(_ args: [Token], steps: [Step], fail: (String) ->
             }
 }
 
-private func screenshotName(_ command: Command) -> String? {
+private func screenshotName(_ command: Command, line: Int) -> String? {
     switch command {
-    case .screenshot(let name), .screenshotMenubar(let name), .screenshotScreen(let name): return name
+    case .screenshot(let name): return name ?? "step-\(line)"
+    case .screenshotMenubar(let name): return name ?? "menubar-\(line)"
+    case .screenshotScreen(let name): return name ?? "screen-\(line)"
     default: return nil
     }
 }

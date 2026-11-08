@@ -194,7 +194,11 @@ final class AXDriver: Driver {
     }
 
     private func notificationTexts() -> [String] {
-        processElements(bundleID: "com.apple.notificationcenterui").compactMap { element in
+        let elements = processElements(bundleID: "com.apple.notificationcenterui")
+        let banners = elements.filter {
+            ["AXNotificationCenterBanner", "AXNotificationCenterAlert", "AXNotificationCenterAlertStack"].contains(attribute($0, kAXSubroleAttribute) as? String ?? "")
+        }
+        return banners.flatMap { allElements(from: $0) }.compactMap { element in
             guard attribute(element, kAXRoleAttribute) as? String == "AXStaticText" else { return nil }
             return attribute(element, kAXValueAttribute) as? String
         }
@@ -205,7 +209,7 @@ final class AXDriver: Driver {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         if menubar {
-            guard let screen = NSScreen.main, screen.frame.width > 0 else { throw .fatal("main display width is unavailable") }
+            guard let screen = NSScreen.screens.first, screen.frame.width > 0 else { throw .fatal("menu bar display width is unavailable") }
             process.arguments = ["-x", "-R0,0,\(Int(screen.frame.width)),40", url.path]
         } else {
             process.arguments = ["-x", url.path]

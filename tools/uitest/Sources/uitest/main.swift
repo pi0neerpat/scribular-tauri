@@ -33,7 +33,7 @@ private final class Cleanup {
 private func runCLI() -> Int32 {
     setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
-    if args.first == "doctor" { return runDoctor(Array(args.dropFirst())) }
+    if args.first == "doctor", !FileManager.default.fileExists(atPath: args[0]) { return runDoctor(Array(args.dropFirst())) }
     let cli: UITestOptions
     do { cli = try UITestOptions.parse(args) }
     catch {
@@ -178,8 +178,12 @@ private func runDoctor(_ args: [String]) -> Int32 {
     ]
     var info = [String]()
     if let appPath {
-        checks.append(DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' TAURI_SIGNING_PRIVATE_KEY=<key> npm run tauri -- build --bundles app", passed: FileManager.default.fileExists(atPath: appPath)))
-        info.append("info after each rebuild run: bash tools/uitest/trust-build.sh \(appPath)")
+        let bundleURL = URL(fileURLWithPath: appPath, isDirectory: true)
+        let bundle = Bundle(url: bundleURL)
+        let bundleExists = bundleURL.pathExtension == "app" && bundle?.executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } == true
+        checks.append(DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' TAURI_SIGNING_PRIVATE_KEY=<key> npm run tauri -- build --bundles app", passed: bundleExists))
+        let quotedAppPath = "'\(appPath.replacingOccurrences(of: "'", with: "'\\''"))'"
+        info.append("info after each rebuild run: bash tools/uitest/trust-build.sh \(quotedAppPath)")
     }
     let report = DoctorReport(checks: checks, info: info)
     report.lines.forEach { print($0) }

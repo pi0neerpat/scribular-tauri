@@ -28,4 +28,5 @@ jobs:
       - name: Additive guard
         run: |
           git fetch origin main
-          bash tools/uitest/scripts/check-additive.sh origin/main
+          base_ref="${{ github.event_name == 'push' && github.event.before || 'origin/main' }}"
+          bash tools/uitest/scripts/check-additive.sh "$base_ref"
