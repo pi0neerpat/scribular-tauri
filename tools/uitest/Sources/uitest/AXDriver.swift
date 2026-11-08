@@ -105,6 +105,8 @@ final class AXDriver: Driver {
         case .wait(let seconds):
             Thread.sleep(forTimeInterval: seconds)
             return nil
+        case .pause, .pace:
+            throw .fatal("pacing commands are handled by the runner")
         case .closeWindow:
             guard let app = appElement(), let focused = axElement(attribute(app, kAXFocusedWindowAttribute)),
                   let close = axElement(attribute(focused, kAXCloseButtonAttribute)),

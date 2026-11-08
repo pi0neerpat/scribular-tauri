@@ -1,6 +1,6 @@
 # Native UI test runner
 
-`uitest` drives the built macOS app with Accessibility and real mouse/keyboard events. Each run records the screen locally in `runs/<timestamp>/recording.mp4`; failed steps also save a screenshot there. Nothing is uploaded.
+`uitest` drives the built macOS app with Accessibility and real mouse/keyboard events. Screen recording is opt-in; without `--record`, no ffmpeg recorder starts. Failed steps still save a screenshot in `runs/<timestamp>/`. Nothing is uploaded.
 
 ## One-time setup
 
@@ -18,7 +18,12 @@ Build the signed app separately; `launch` never builds. `launch` runs `trust-bui
 ```sh
 APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
+swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
 ```
+
+Use `--record <name>` only for a happy path or an issue that cannot be reproduced reliably. Use names like `04-system-audio-happy-path`; recordings are written as `<record-dir>/<name>.mp4` with a matching JSON metadata file. Failed recorded runs use `<name>-FAILED.mp4`. `--record-dir <dir>` overrides `CWF_RECORDINGS_DIR`; otherwise a clone with a sibling `scribular-tauri` checkout writes there, falling back to `./runs/`. Recordings are not committed.
+
+Recorded runs default to 2.5 seconds of pacing after UI actions. `--pace 2s` overrides it (`--pace 0` disables it); unrecorded runs default to no pacing. In scripts, `pause 3s` pauses for reading and `pace 2s` changes the action pace from that point. An `expect` or `expect-not` after an action waits one extra second for the new state to be read.
 
 Generate a local throwaway updater key with `npm run tauri signer generate -- -w <path>` and use its private key value for `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
 
@@ -39,7 +44,7 @@ Clear it with `rm -rf ~/Library/Caches/scribular-uitest` only to free disk space
 
 ### Recording tests
 
-Record a fixture file through App audio, never the microphone. `system-audio-smoke.uitest` is the template:
+Use a recording only for a happy path or an issue that cannot be reproduced reliably. Record a fixture file through App audio, never the microphone. `system-audio-smoke.uitest` is the template:
 
 1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
 2. In Settings choose `App audio`, click `Refresh`, `wait 6s`, then open `Choose an app…` and click `afplay`. The open menu does not update, so the list must load first. Add `wait 1s` after picking, because the first click after the menu closes is swallowed.
@@ -62,6 +67,8 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `expect "text"` | Wait until visible text contains the value. |
 | `expect-not "text"` | Wait until visible text no longer contains the value. |
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
+| `pause 3s` | Pause for reading without changing the configured action pace. |
+| `pace 2s` | Change the delay after UI actions for the rest of the script. |
 | `<step> timeout 300s` | End a `launch`, `click`, `expect`, `expect-not` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
@@ -84,14 +91,14 @@ quit
 
 ## Output
 
-Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. The final line includes the result and recording path:
+Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. The final line includes the result and recording path (or `no recording`):
 
 ```text
 ✓ 1 launch /path/to/Scribular.app (built 2026-11-05T20:00:00Z)
 ✗ 6 expect "Bullet recap": not found after 10s
   screenshot: runs/<timestamp>/fail-6.png
   visible: "Settings", "Note styles", ...
-FAIL 5/6 steps — recording: runs/<timestamp>/recording.mp4
+FAIL 5/6 steps — recording: no recording
 ```
 
 Exit codes: `0` for pass, `1` for a failed step, and `2` for a parse or preflight error. `as12-regenerate-picker.uitest` is a placeholder until spec 09 lands. Scenario labels were taken from the app source; the manual Accessibility-tree and screen-recording checks still need to be run on a desktop session.

@@ -22,6 +22,8 @@ public enum Command: Equatable {
     case expect(String)
     case expectNot(String)
     case wait(seconds: Double)
+    case pause(seconds: Double)
+    case pace(seconds: Double)
     case closeWindow
     case handleKeychain
     case labels
@@ -127,9 +129,10 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "expect", "expect-not":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: \(first.text) \"label\"") }
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
-        case "wait":
-            guard args.count == 1, !args[0].quoted else { throw fail("usage: wait 30s or wait 500ms") }
-            command = .wait(seconds: try seconds(args[0]))
+        case "wait", "pause", "pace":
+            guard args.count == 1, !args[0].quoted else { throw fail("usage: \(first.text) 3s or \(first.text) 500ms") }
+            let duration = try seconds(args[0])
+            command = first.text == "wait" ? .wait(seconds: duration) : first.text == "pause" ? .pause(seconds: duration) : .pace(seconds: duration)
         case "labels":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = .labels
