@@ -33,7 +33,7 @@ final class Recorder {
         self.output = output
         self.marker = output.deletingLastPathComponent().appendingPathComponent(".uitest-recorder-\(UUID().uuidString).json")
         process.executableURL = Preflight.executable("ffmpeg")
-        process.arguments = ["-y", "-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "\(Recorder.screenIndex()):none",
+        process.arguments = ["-n", "-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "\(Recorder.screenIndex()):none",
                              // libx264 yuv420p needs even dimensions; some displays (e.g. 1495x1297 VMs) are odd
                              "-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p",
                              // fragmented MP4 stays playable if uitest or ffmpeg dies without finalizing
@@ -89,8 +89,18 @@ final class Recorder {
                 for file in markers {
                     guard let data = try? Data(contentsOf: file), let item = try? JSONDecoder().decode(Marker.self, from: data),
                           roots.contains(where: { item.outputPath.hasPrefix($0.path + "/") }),
-                          kill(item.parentPID, 0) == -1, errno == ESRCH,
-                          let command = processCommand(item.pid), command.contains("ffmpeg"), command.contains(item.outputPath) else { continue }
+                          kill(item.parentPID, 0) == -1, errno == ESRCH else { continue }
+                    guard kill(item.pid, 0) == 0 else {
+                        if errno == ESRCH { try? manager.removeItem(at: file) }
+                        continue
+                    }
+                    guard let command = processCommand(item.pid),
+                          let executable = command.split(whereSeparator: \.isWhitespace).first,
+                          URL(fileURLWithPath: String(executable)).lastPathComponent == "ffmpeg",
+                          command.split(whereSeparator: \.isWhitespace).last.map(String.init) == item.outputPath else {
+                        try? manager.removeItem(at: file)
+                        continue
+                    }
                     _ = kill(item.pid, SIGTERM)
                     let deadline = Date().addingTimeInterval(2)
                     while Date() < deadline && kill(item.pid, 0) == 0 { Thread.sleep(forTimeInterval: 0.05) }

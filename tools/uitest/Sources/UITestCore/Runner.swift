@@ -92,7 +92,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                 switch error {
                 case .fatal(let message):
                     fail(step, message)
-                    emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
+                    emit("FAIL \(passed)/\(steps.count) steps")
                     return false
                 case .retryable(let message):
                     if started == nil { started = Date() }
@@ -102,7 +102,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                             ? String(Int(limit))
                             : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
                         fail(step, "\(message) after \(timeout)s")
-                        emit("FAIL \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")
+                        emit("FAIL \(passed)/\(steps.count) steps")
                         return false
                     }
                     Thread.sleep(forTimeInterval: min(options.poll, remaining))
@@ -110,6 +110,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             }
         }
         passed += 1
+        let completedAt = Date()
         let changed = switch step.command {
         case .click, .type, .key, .closeWindow, .handleKeychain: true
         default: false
@@ -124,7 +125,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             options.sleep(1)
             visibleChange = false
         }
-        options.onStep?(step, Date())
+        options.onStep?(step, completedAt)
         emit("✓ \(step.line) \(step.source)\(detail.map { " \($0)" } ?? "")")
     }
 

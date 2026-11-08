@@ -19,7 +19,9 @@ private struct PaceDriver: Driver {
     #expect(recorded.pace == 2)
     #expect(recorded.recordingDirectory == "/tmp/records")
     #expect(try UITestOptions.parse(["scenario.uitest", "--record", "smoke"]).pace == 2.5)
+    #expect(try UITestOptions.parse(["scenario.uitest", "--pace", "0"]).pace == 0)
     #expect(throws: UITestOptionsError.self) { try UITestOptions.parse(["scenario.uitest", "--record", "../bad"]) }
+    #expect(throws: UITestOptionsError.self) { try UITestOptions.parse(["scenario.uitest", "--record", "smoke\n"]) }
 }
 
 @Test func recorderFactoryIsNotCalledWithoutRecordFlag() throws {

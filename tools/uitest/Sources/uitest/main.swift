@@ -42,6 +42,23 @@ private struct RecordingMetadata: Encodable {
     let steps: [Step]
 }
 
+private func finalizeRecording(name: String, url: URL, directory: URL, scenario: String, appBuildTime: String,
+                               result: String, duration: Double,
+                               stepCount: Int, steps: [RecordingMetadata.Step]) {
+    let finalURL = result == "pass" ? url : directory.appendingPathComponent("\(name)-FAILED.mp4")
+    if result != "pass", FileManager.default.fileExists(atPath: url.path) {
+        do { try FileManager.default.moveItem(at: url, to: finalURL) }
+        catch { print("warning: could not rename failed recording: \(error.localizedDescription)") }
+    }
+    let metadata = RecordingMetadata(scenario: scenario, appBuildTime: appBuildTime,
+                                     stepCount: stepCount, duration: duration, result: result, steps: steps)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    do { try encoder.encode(metadata).write(to: directory.appendingPathComponent("\(name).json"), options: .atomic) }
+    catch { print("warning: could not write recording metadata: \(error.localizedDescription)") }
+    if result != "pass" { print("recording: \(finalURL.path)") }
+}
+
 private func runCLI() -> Int32 {
     setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
@@ -80,6 +97,12 @@ private func runCLI() -> Int32 {
     do {
         try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
         if let recordDir { try FileManager.default.createDirectory(at: recordDir, withIntermediateDirectories: true) }
+        if let name = cli.recordingName {
+            let reserved = ["\(name).mp4", "\(name).json", "\(name)-FAILED.mp4"]
+            if let existing = reserved.first(where: { FileManager.default.fileExists(atPath: recordingsBase.appendingPathComponent($0).path) }) {
+                throw NSError(domain: "uitest.recorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "recording already exists: \(recordingsBase.appendingPathComponent(existing).path)"])
+            }
+        }
         try Preflight.check(appPath: appPath)
     } catch let error as PreflightError {
         print("preflight error: \(error.message)")
@@ -101,12 +124,21 @@ private func runCLI() -> Int32 {
     let lifecycle = AppLifecycle(appPath: appPath)
     let player = Player()
     let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder, player: player)
+    let start = Date()
+    let builtAt = appBuildTime(appPath)
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let signals = [SIGINT, SIGTERM].map { value -> DispatchSourceSignal in
         let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
         source.setEventHandler {
             cleanup.run()
+            if let name = cli.recordingName, let recordingURL {
+                print("FAIL interrupted — recording run stopped by signal")
+                finalizeRecording(name: name, url: recordingURL, directory: recordingsBase,
+                                  scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent, appBuildTime: builtAt,
+                                  result: "interrupted",
+                                  duration: Date().timeIntervalSince(start), stepCount: steps.count, steps: [])
+            }
             Darwin.exit(value == SIGINT ? 130 : 143)
         }
         source.resume()
@@ -118,36 +150,24 @@ private func runCLI() -> Int32 {
     }
 
     let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"], player: player)
-    let start = Date()
     var stepTimes = [RecordingMetadata.Step]()
-    let builtAt = appBuildTime(appPath)
     let passed = runSteps(steps, driver: driver,
                           options: RunOptions(runDir: runDir, recordingPath: recordingURL?.path ?? "no recording",
                                               secrets: [ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"]].compactMap { $0 },
                                               pace: cli.pace,
                                               onStep: { step, date in
-                                                  stepTimes.append(.init(line: step.line, source: step.source, timestamp: ISO8601DateFormatter().string(from: date)))
+                                                  let formatter = ISO8601DateFormatter()
+                                                  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                                                  stepTimes.append(.init(line: step.line, source: step.source, timestamp: formatter.string(from: date)))
                                               }),
                           out: { print($0) })
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
     let duration = Date().timeIntervalSince(start)
     cleanup.run()
     if let name = cli.recordingName, let recordingURL {
-        let finalURL = passed ? recordingURL : recordingsBase.appendingPathComponent("\(name)-FAILED.mp4")
-        if !passed {
-            do {
-                if FileManager.default.fileExists(atPath: finalURL.path) { try FileManager.default.removeItem(at: finalURL) }
-                try FileManager.default.moveItem(at: recordingURL, to: finalURL)
-            } catch { print("warning: could not rename failed recording: \(error.localizedDescription)") }
-        }
-        let metadata = RecordingMetadata(scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent,
-                                         appBuildTime: builtAt, stepCount: steps.count,
-                                         duration: duration, result: passed ? "pass" : "fail", steps: stepTimes)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        do { try encoder.encode(metadata).write(to: recordingsBase.appendingPathComponent("\(name).json"), options: .atomic) }
-        catch { print("warning: could not write recording metadata: \(error.localizedDescription)") }
-        if !passed { print("recording: \(finalURL.path)") }
+        finalizeRecording(name: name, url: recordingURL, directory: recordingsBase,
+                          scenario: URL(fileURLWithPath: cli.scriptPath).lastPathComponent, appBuildTime: builtAt,
+                          result: passed ? "pass" : "fail", duration: duration, stepCount: steps.count, steps: stepTimes)
     }
     return passed ? 0 : 1
 }

@@ -25,7 +25,7 @@ public struct UITestOptions {
             switch flag {
             case "--app" where app == nil: app = value
             case "--record" where name == nil:
-                guard !value.isEmpty, value.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil else {
+                guard !value.isEmpty, value.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*\z"#, options: .regularExpression) != nil else {
                     throw UITestOptionsError("record name must contain only letters, numbers, dots, underscores or hyphens")
                 }
                 name = value
@@ -47,6 +47,7 @@ public struct UITestOptions {
     }
 
     private static func duration(_ value: String) throws -> Double {
+        if value == "0" { return 0 }
         let number: Double?
         if value.hasSuffix("ms"), let ms = Double(value.dropLast(2)) { number = ms / 1000 }
         else if value.hasSuffix("s"), let seconds = Double(value.dropLast()) { number = seconds }

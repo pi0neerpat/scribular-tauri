@@ -64,7 +64,7 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(output[0] == "✗ 1 expect \"X\": not found after 0.05s")
     #expect(output[1].contains("screenshot: "))
     #expect(output[2] == "  visible: \"Settings\", \"Note styles\"")
-    #expect(output[3] == "FAIL 0/1 steps — recording: r.mp4")
+    #expect(output[3] == "FAIL 0/1 steps")
     #expect(driver.screenshots == [runDir.appendingPathComponent("fail-1.png")])
 }
 
