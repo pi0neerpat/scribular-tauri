@@ -1,0 +1,4 @@
+launch --keep-data
+expect-notification "uitest-notification-probe" timeout 30s
+screenshot-screen "notification"
+quit

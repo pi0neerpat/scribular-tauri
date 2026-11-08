@@ -147,7 +147,79 @@ final class AXDriver: Driver {
             return labelListing()
         case .screenshot:
             throw .fatal("screenshot is handled by the runner")
+        case .expectStatusItem(let help):
+            guard statusItem(help) != nil else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
+            return nil
+        case .statusItemClick(let help):
+            guard let item = statusItem(help) else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
+            guard AXUIElementPerformAction(item, "AXPress" as CFString) == .success else { throw .fatal("could not press status item \"\(help)\"") }
+            return nil
+        case .expectNotification(let text):
+            guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }
+            return nil
+        case .dockClick(let title):
+            let items = processElements(bundleID: "com.apple.dock").filter {
+                attribute($0, kAXRoleAttribute) as? String == "AXDockItem"
+            }
+            let matches = items.filter { attribute($0, kAXTitleAttribute) as? String == title }
+            guard matches.count == 1 else {
+                let titles = (matches.isEmpty ? items : matches).compactMap { attribute($0, kAXTitleAttribute) as? String }
+                throw .fatal("Dock item \"\(title)\" matched \(matches.count) items; matching titles: \(titles)")
+            }
+            guard AXUIElementPerformAction(matches[0], "AXPress" as CFString) == .success else { throw .fatal("could not press Dock item \"\(title)\"") }
+            return nil
+        case .screenshotMenubar(let name):
+            return try surfaceScreenshot(name: name ?? "menubar", menubar: true)
+        case .screenshotScreen(let name):
+            return try surfaceScreenshot(name: name ?? "screen", menubar: false)
         }
+    }
+
+    private func statusItem(_ help: String) -> AXUIElement? {
+        guard let app = appElement(), let extras = axElement(attribute(app, "AXExtrasMenuBar")),
+              let children = attribute(extras, kAXChildrenAttribute) as? [AXUIElement] else { return nil }
+        return children.first { attribute($0, "AXHelp") as? String == help }
+    }
+
+    private func statusItemHelpValues() -> [String] {
+        guard let app = appElement(), let extras = axElement(attribute(app, "AXExtrasMenuBar")),
+              let children = attribute(extras, kAXChildrenAttribute) as? [AXUIElement] else { return [] }
+        return children.compactMap { attribute($0, "AXHelp") as? String }
+    }
+
+    private func processElements(bundleID: String) -> [AXUIElement] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).flatMap { app in
+            allElements(from: AXUIElementCreateApplication(app.processIdentifier))
+        }
+    }
+
+    private func notificationTexts() -> [String] {
+        let elements = processElements(bundleID: "com.apple.notificationcenterui")
+        let banners = elements.filter {
+            ["AXNotificationCenterBanner", "AXNotificationCenterAlert", "AXNotificationCenterAlertStack"].contains(attribute($0, kAXSubroleAttribute) as? String ?? "")
+        }
+        return banners.flatMap { allElements(from: $0) }.compactMap { element in
+            guard attribute(element, kAXRoleAttribute) as? String == "AXStaticText" else { return nil }
+            return attribute(element, kAXValueAttribute) as? String
+        }
+    }
+
+    private func surfaceScreenshot(name: String, menubar: Bool) throws(DriverError) -> String {
+        let url = runDir.appendingPathComponent("\(name).png")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        if menubar {
+            guard let screen = NSScreen.screens.first, screen.frame.width > 0 else { throw .fatal("menu bar display width is unavailable") }
+            process.arguments = ["-x", "-R0,0,\(Int(screen.frame.width)),40", url.path]
+        } else {
+            process.arguments = ["-x", url.path]
+        }
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { throw .fatal("screencapture failed: \(error.localizedDescription)") }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw .fatal("screencapture exited \(process.terminationStatus)") }
+        return url.path
     }
 
     func visibleLabels() -> [String] {

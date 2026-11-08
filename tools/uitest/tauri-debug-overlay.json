@@ -1,0 +1,4 @@
+{
+  "build": { "beforeBuildCommand": "NODE_ENV=development npm run build -- --mode development" },
+  "bundle": { "createUpdaterArtifacts": false }
+}

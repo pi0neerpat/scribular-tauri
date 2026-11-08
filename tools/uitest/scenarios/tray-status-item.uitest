@@ -1,0 +1,7 @@
+launch
+expect-status-item "Scribular"
+screenshot-menubar "tray-icon"
+status-item click "Scribular"
+screenshot-screen "tray-menu"
+key escape
+quit

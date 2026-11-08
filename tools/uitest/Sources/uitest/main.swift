@@ -1,4 +1,6 @@
 import AppKit
+import ApplicationServices
+import CoreGraphics
 import Darwin
 import Dispatch
 import Foundation
@@ -31,6 +33,7 @@ private final class Cleanup {
 private func runCLI() -> Int32 {
     setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
+    if args.first == "doctor", !FileManager.default.fileExists(atPath: args[0]) { return runDoctor(Array(args.dropFirst())) }
     let cli: UITestOptions
     do { cli = try UITestOptions.parse(args) }
     catch {
@@ -150,6 +153,52 @@ private func runCLI() -> Int32 {
     cleanup.run(logURL: finalizer?.logURL(for: passed ? .pass : .fail))
     let recordingSaved = finalizeOnce(passed ? "pass" : "fail", duration: duration)
     return passed && recordingSaved ? 0 : 1
+}
+
+private func runDoctor(_ args: [String]) -> Int32 {
+    var appPath: String?
+    guard args.count <= 2 else {
+        print("usage: uitest doctor [--app <path>]")
+        return 2
+    }
+    if !args.isEmpty {
+        guard args.count == 2, args[0] == "--app", !args[1].isEmpty else {
+            print("usage: uitest doctor [--app <path>]")
+            return 2
+        }
+        appPath = args[1]
+    }
+    let host = ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "the terminal app running uitest"
+    var checks = [
+        DoctorCheck(name: "Accessibility", fix: "System Settings → Privacy & Security → Accessibility (allow \(host))", passed: AXIsProcessTrusted()),
+        DoctorCheck(name: "Screen Recording", fix: "System Settings → Privacy & Security → Screen Recording (allow \(host))", passed: CGPreflightScreenCaptureAccess()),
+        DoctorCheck(name: "Automation (System Events)", fix: "System Settings → Privacy & Security → Automation → allow System Events", passed: commandSucceeded("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of first process"])),
+        DoctorCheck(name: "ffmpeg", fix: "brew install ffmpeg", passed: Preflight.executable("ffmpeg") != nil),
+        DoctorCheck(name: "Keychain password", fix: "bash tools/uitest/trust-build.sh --store-password", passed: commandSucceeded("/usr/bin/security", ["find-generic-password", "-s", "scribular-uitest", "-a", "login-password"])),
+    ]
+    var info = [String]()
+    if let appPath {
+        let bundleURL = URL(fileURLWithPath: appPath, isDirectory: true)
+        let bundle = Bundle(url: bundleURL)
+        let bundleExists = bundleURL.pathExtension == "app" && bundle?.executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } == true
+        checks.append(DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' TAURI_SIGNING_PRIVATE_KEY=<key> npm run tauri -- build --bundles app", passed: bundleExists))
+        let quotedAppPath = "'\(appPath.replacingOccurrences(of: "'", with: "'\\''"))'"
+        info.append("info after each rebuild run: bash tools/uitest/trust-build.sh \(quotedAppPath)")
+    }
+    let report = DoctorReport(checks: checks, info: info)
+    report.lines.forEach { print($0) }
+    return report.exitCode
+}
+
+private func commandSucceeded(_ path: String, _ arguments: [String]) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: path)
+    process.arguments = arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return false }
+    process.waitUntilExit()
+    return process.terminationStatus == 0
 }
 
 private func appBuildTime(_ appPath: URL) -> String {

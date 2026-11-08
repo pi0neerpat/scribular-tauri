@@ -60,10 +60,20 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
     }
 
     func execute(_ step: Step) throws(DriverError) -> String? {
-        guard case .screenshot(let name) = step.command else { return try driver.perform(step.command) }
-        let url = options.runDir.appendingPathComponent("\(name ?? "step-\(step.line)").png")
-        do { try driver.screenshot(to: url) } catch { throw .fatal("screenshot failed: \(error.localizedDescription)") }
-        return screenshotPath(url)
+        switch step.command {
+        case .screenshot(let name):
+            let url = options.runDir.appendingPathComponent("\(name ?? "step-\(step.line)").png")
+            do { try driver.screenshot(to: url) } catch { throw .fatal("screenshot failed: \(error.localizedDescription)") }
+            return screenshotPath(url)
+        case .screenshotMenubar(let name):
+            let path = try driver.perform(.screenshotMenubar(name: name ?? "menubar-\(step.line)"))
+            return path.map { screenshotPath(URL(fileURLWithPath: $0)) }
+        case .screenshotScreen(let name):
+            let path = try driver.perform(.screenshotScreen(name: name ?? "screen-\(step.line)"))
+            return path.map { screenshotPath(URL(fileURLWithPath: $0)) }
+        default:
+            return try driver.perform(step.command)
+        }
     }
 
     for step in steps {
@@ -112,7 +122,11 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                         emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
-                    Thread.sleep(forTimeInterval: min(options.poll, remaining))
+                    let poll = switch step.command {
+                    case .expectStatusItem, .expectNotification: min(options.poll, 0.2)
+                    default: options.poll
+                    }
+                    Thread.sleep(forTimeInterval: min(poll, remaining))
                 }
             }
         }
@@ -120,7 +134,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let completedAt = Date()
         options.onStep?(step, completedAt)
         let changed = switch step.command {
-        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain: true
+        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .dockClick: true
         default: false
         }
         if changed {

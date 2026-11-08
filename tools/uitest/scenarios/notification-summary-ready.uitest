@@ -1,0 +1,19 @@
+# Requires Notifications permission and a signed app build. The banner is emitted after the window is hidden.
+launch
+expect-not "Getting Scribular ready" timeout 900s
+click "Settings"
+click "General"
+click "Show summarization complete alert"
+# loop keeps afplay available in the App picker
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "App audio" index 1
+pick-app "afplay" timeout 60s
+click "Record" index 1
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+click "Stop"
+stop-audio
+key cmd+w
+expect-notification "Summary ready" timeout 900s
+quit

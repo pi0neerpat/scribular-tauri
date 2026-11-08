@@ -1,0 +1,7 @@
+launch
+expect "Settings"
+key cmd+w
+expect-not "Settings"
+dock click "Scribular"
+expect "Settings"
+quit
