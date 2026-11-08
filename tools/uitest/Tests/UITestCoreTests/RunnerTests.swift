@@ -155,7 +155,7 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(output[0] == "✗ 1 expect \"X\" timeout 0.1s: not found after 0.1s")
 }
 
-@Test func pickAppRetriesAndTimesOutWithRefreshCount() {
+@Test func pickAppTimesOutWithAttemptCount() {
     let driver = FakeDriver()
     driver.results = Array(repeating: .failure(.retryable("picker still shows \"assistantd\"")), count: 4)
     var output = [String]()
@@ -172,6 +172,8 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(pickAppSuccessDetail(app: "afplay", attempts: 3) == "selected \"afplay\" after 3 attempt(s)")
     #expect(pickAppTimeoutMessage(app: "afplay", timeout: "60", attempts: 13, lastFailure: "picker still shows \"assistantd\"") ==
             "pick-app \"afplay\": picker still shows \"assistantd\" after 60s (13 attempts); is `play ... loop` running?")
+    #expect(pickAppTimeoutMessage(app: "Music", timeout: "10", attempts: 1, lastFailure: "picker not found") ==
+            "pick-app \"Music\": picker not found after 10s (1 attempt)")
 }
 
 @Test func pickAppRetriesAndPacesAsOneAction() {
