@@ -154,3 +154,33 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(!passed)
     #expect(output[0] == "✗ 1 expect \"X\" timeout 0.1s: not found after 0.1s")
 }
+
+@Test func pickAppRetriesAndTimesOutWithRefreshCount() {
+    let driver = FakeDriver()
+    driver.results = Array(repeating: .failure(.retryable("picker still shows \"assistantd\"")), count: 4)
+    var output = [String]()
+    let passed = runSteps([Step(line: 1, source: "pick-app \"afplay\" timeout 0s", command: .pickApp("afplay"), timeout: 0)], driver: driver,
+                          options: RunOptions(runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4"),
+                          out: { output.append($0) })
+    #expect(!passed)
+    #expect(driver.calls == [.pickApp("afplay")])
+    #expect(output[0] == "✗ 1 pick-app \"afplay\" timeout 0s: pick-app \"afplay\": picker still shows \"assistantd\" after 0s (1 attempt); is `play ... loop` running?")
+    #expect(driver.screenshots == [URL(fileURLWithPath: "/tmp/run/fail-1.png")])
+}
+
+@Test func pickAppAttemptDetails() {
+    #expect(pickAppSuccessDetail(app: "afplay", attempts: 3) == "selected \"afplay\" after 3 attempt(s)")
+    #expect(pickAppTimeoutMessage(app: "afplay", timeout: "60", attempts: 13, lastFailure: "picker still shows \"assistantd\"") ==
+            "pick-app \"afplay\": picker still shows \"assistantd\" after 60s (13 attempts); is `play ... loop` running?")
+}
+
+@Test func pickAppRetriesAndPacesAsOneAction() {
+    let driver = FakeDriver()
+    driver.results = [.failure(.retryable("app not listed")), .success(nil)]
+    var sleeps = [Double]()
+    #expect(runSteps([Step(line: 1, source: "pick-app \"afplay\"", command: .pickApp("afplay"))], driver: driver,
+                      options: RunOptions(timeout: 1, poll: 0, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4", pace: 2.5,
+                                          sleep: { sleeps.append($0) }), out: { _ in }))
+    #expect(driver.calls == [.pickApp("afplay"), .pickApp("afplay")])
+    #expect(sleeps == [2.5])
+}

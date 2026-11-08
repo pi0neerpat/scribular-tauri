@@ -37,6 +37,8 @@ final class Recorder {
         self.marker = output.deletingLastPathComponent().appendingPathComponent(".uitest-recorder-\(UUID().uuidString).json")
         process.executableURL = Preflight.executable("ffmpeg")
         process.arguments = ["-n", "-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "\(Recorder.screenIndex()):none",
+                             // Faster encoding keeps CPU free for real-time work in the app under test, at the cost of larger files.
+                             "-c:v", "libx264", "-preset", "ultrafast",
                              // libx264 yuv420p needs even dimensions; some displays (e.g. 1495x1297 VMs) are odd
                              "-vf", "crop=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p",
                              // fragmented MP4 stays playable if uitest or ffmpeg dies without finalizing

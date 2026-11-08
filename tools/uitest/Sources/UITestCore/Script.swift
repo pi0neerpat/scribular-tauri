@@ -17,6 +17,7 @@ public struct KeyCombo: Equatable {
 public enum Command: Equatable {
     case launch(keepData: Bool)
     case click(label: String, index: Int?, within: String?)
+    case pickApp(String)
     case type(String)
     case key(KeyCombo)
     case expect(String)
@@ -114,6 +115,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 }
             }
             command = .click(label: label, index: index, within: within)
+        case "pick-app":
+            guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-app \"app name\"") }
+            command = .pickApp(app)
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
@@ -163,8 +167,8 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "expect", "expect-not", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, expect, expect-not and close-window")
+        if timeout != nil, !["launch", "click", "pick-app", "expect", "expect-not", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, pick-app, expect, expect-not and close-window")
         }
         steps.append(Step(line: lineNumber, source: source, command: command, timeout: timeout))
     }

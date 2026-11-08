@@ -81,10 +81,12 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             emit("✓ \(step.line) \(step.source)")
             continue
         }
-        var started: Date?  // the wait window opens at the first retryable failure, not before the first attempt
+        var started: Date? = if case .pickApp = step.command { Date() } else { nil }
+        var attempts = 0
         let limit = step.timeout ?? options.timeout
         let detail: String?
         while true {
+            attempts += 1
             do {
                 detail = try execute(step)
                 break
@@ -101,7 +103,12 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                         let timeout = limit == floor(limit)
                             ? String(Int(limit))
                             : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
-                        fail(step, "\(message) after \(timeout)s")
+                        let failure = if case .pickApp(let app) = step.command {
+                            pickAppTimeoutMessage(app: app, timeout: timeout, attempts: attempts, lastFailure: message)
+                        } else {
+                            "\(message) after \(timeout)s"
+                        }
+                        fail(step, failure)
                         emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
@@ -113,7 +120,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let completedAt = Date()
         options.onStep?(step, completedAt)
         let changed = switch step.command {
-        case .click, .type, .key, .closeWindow, .handleKeychain: true
+        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain: true
         default: false
         }
         if changed {
@@ -126,7 +133,12 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             options.sleep(1)
             visibleChange = false
         }
-        emit("✓ \(step.line) \(step.source)\(detail.map { " \($0)" } ?? "")")
+        let resultDetail = if case .pickApp(let app) = step.command {
+            pickAppSuccessDetail(app: app, attempts: attempts)
+        } else {
+            detail
+        }
+        emit("✓ \(step.line) \(step.source)\(resultDetail.map { " \($0)" } ?? "")")
     }
 
     emit("PASS \(passed)/\(steps.count) steps — recording: \(options.recordingPath)")

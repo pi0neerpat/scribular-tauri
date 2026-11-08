@@ -21,7 +21,7 @@ swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-st
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
 ```
 
-Use `--record <name>` only for a happy path or an issue that cannot be reproduced reliably. Use names like `04-system-audio-happy-path`; recordings are written as `<record-dir>/<name>.mp4` with a matching JSON metadata file. Failed recorded runs use `<name>-FAILED.mp4`. `--record-dir <dir>` overrides `CWF_RECORDINGS_DIR`; otherwise a clone with a sibling `scribular-tauri` checkout writes there, falling back to `./runs/`. Recordings are not committed.
+Use `--record <name>` only for a happy path or an issue that cannot be reproduced reliably. The recorder uses libx264's ultrafast preset to keep CPU free for the app (files are larger). Use names like `04-system-audio-happy-path`; recordings are written as `<record-dir>/<name>.mp4` with a matching JSON metadata file. Failed recorded runs use `<name>-FAILED.mp4`. `--record-dir <dir>` overrides `CWF_RECORDINGS_DIR`; otherwise a clone with a sibling `scribular-tauri` checkout writes there, falling back to `./runs/`. Recordings are not committed.
 
 Recorded runs default to 2.5 seconds of pacing after UI actions. `--pace 2s` overrides it (`--pace 0` disables it); unrecorded runs default to no pacing. In scripts, `pause 3s` pauses for reading and `pace 2s` changes the action pace from that point. An `expect` or `expect-not` after an action waits one extra second for the new state to be read.
 
@@ -47,7 +47,7 @@ Clear it with `rm -rf ~/Library/Caches/scribular-uitest` only to free disk space
 Use a recording only for a happy path or an issue that cannot be reproduced reliably. Record a fixture file through App audio, never the microphone. `system-audio-smoke.uitest` is the template:
 
 1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
-2. In Settings choose `App audio`, click `Refresh`, `wait 6s`, then open `Choose an app…` and click `afplay`. The open menu does not update, so the list must load first. Add `wait 1s` after picking, because the first click after the menu closes is swallowed.
+2. In Settings choose `App audio`, then run `pick-app "afplay" timeout 60s`. Each attempt closes any open menu, refreshes the list, waits 2.5 seconds, and opens the App picker. It waits for the menu to open and close, detected through the window server, types `afplay`, presses Return, waits 1 second, and verifies the picker's value; a mismatch is retried. The native menu does not update while open, and its items are not exposed to Accessibility, so selection cannot rely on reading its menu items. The 1-second wait accounts for the first click after the menu closes being swallowed.
 3. Go to Record and run `play "fixture.wav"` once more without `loop`, right before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
 4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
 5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists.
@@ -62,6 +62,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | --- | --- |
 | `launch [--keep-data]` | Start the built app. By default, move its app data into the run folder first. |
 | `click "Label" [index N] [in "Scope"]` | Click the unique exact label; use a 1-based index or scope to disambiguate. |
+| `pick-app "afplay" timeout 60s` | Close any menu left open, refresh the App-audio list, wait 2.5 seconds, open the App picker, and wait for the menu to open and close as detected by the window server. Type-select the name, press Return, wait 1 second, verify the picker value, and retry if it differs. |
 | `type "text"` | Type into the focused control. |
 | `key cmd+shift+s` | Press a key with optional `cmd`, `shift`, `option`, or `ctrl` modifiers. |
 | `expect "text"` | Wait until visible text contains the value. |
@@ -69,7 +70,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `pause 3s` | Pause for reading without changing the configured action pace. |
 | `pace 2s` | Change the delay after UI actions for the rest of the script. |
-| `<step> timeout 300s` | End a `launch`, `click`, `expect`, `expect-not` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). |
+| `<step> timeout 300s` | End a `launch`, `click`, `pick-app`, `expect`, `expect-not` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). `pick-app` reports the last picker value and attempt count if it times out. |
 | `close-window` | Click the front window's close control. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
 | `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Button, link, menu and similar actionable labels are printed in full; values and other text are cut at 80 characters; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
