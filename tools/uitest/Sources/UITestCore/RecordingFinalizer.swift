@@ -19,9 +19,16 @@ public struct RecordingMetadata: Codable {
     public let steps: [Step]
 }
 
-public enum RecordingFinalizerError: Error {
+public enum RecordingFinalizerError: LocalizedError {
     case outputExists
     case recordingMissing
+
+    public var errorDescription: String? {
+        switch self {
+        case .outputExists: "recording output already exists"
+        case .recordingMissing: "ffmpeg did not create a recording"
+        }
+    }
 }
 
 public final class RecordingFinalizer {
@@ -69,14 +76,19 @@ public final class RecordingFinalizer {
         defer { lock.unlock() }
         if self.result != nil { return finalURL }
 
-        let destination = result == .pass ? recordingURL : failedURL
-        if FileManager.default.fileExists(atPath: temporaryURL.path) {
-            try FileManager.default.moveItem(at: temporaryURL, to: destination)
-            finalURL = destination
-        } else if result == .pass {
-            throw RecordingFinalizerError.recordingMissing
+        if finalURL == nil {
+            let destination = result == .pass ? recordingURL : failedURL
+            if FileManager.default.fileExists(atPath: temporaryURL.path) {
+                do { try FileManager.default.moveItem(at: temporaryURL, to: destination) }
+                catch {
+                    if FileManager.default.fileExists(atPath: destination.path) { throw RecordingFinalizerError.outputExists }
+                    throw error
+                }
+                finalURL = destination
+            } else if result == .pass {
+                throw RecordingFinalizerError.recordingMissing
+            }
         }
-        self.result = result
 
         let metadata = RecordingMetadata(scenario: scenario, appBuildTime: appBuildTime, stepCount: stepCount,
                                          duration: duration, result: result, steps: steps)
@@ -91,6 +103,7 @@ public final class RecordingFinalizer {
             try? FileManager.default.removeItem(at: temporaryMetadataURL)
             throw error
         }
+        self.result = result
         return finalURL
     }
 }

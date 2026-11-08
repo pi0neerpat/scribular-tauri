@@ -126,7 +126,7 @@ private func runCLI() -> Int32 {
         source.setEventHandler {
             cleanup.run()
             print("FAIL interrupted — recording run stopped by signal")
-            finalizeOnce("interrupted")
+            _ = finalizeOnce("interrupted")
             Darwin.exit(value == SIGINT ? 130 : 143)
         }
         source.resume()

@@ -36,6 +36,34 @@ import Testing
     #expect(try Data(contentsOf: finalizer.recordingURL) == original)
 }
 
+@Test func recordingFinalizerRejectsAnOutputCreatedAfterPreflight() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let finalizer = RecordingFinalizer(name: "04-smoke", directory: directory,
+                                       scenario: "smoke.uitest", appBuildTime: "build", stepCount: 0)
+    try finalizer.validateAvailable()
+    let original = Data("keep me".utf8)
+    try original.write(to: finalizer.recordingURL)
+    try Data("new video".utf8).write(to: finalizer.temporaryURL)
+    var threw = false
+    do { try finalizer.finish(result: .pass, duration: 1) }
+    catch { threw = true }
+    #expect(threw)
+    #expect(try Data(contentsOf: finalizer.recordingURL) == original)
+}
+
+@Test func successfulRecordingCannotFinalizeWithoutVideo() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let finalizer = RecordingFinalizer(name: "04-smoke", directory: directory,
+                                       scenario: "smoke.uitest", appBuildTime: "build", stepCount: 0)
+    #expect(throws: RecordingFinalizerError.self) { try finalizer.finish(result: .pass, duration: 1) }
+}
+
 @Test func recorderProcessMustMatchExecutableAndExactOutputArgument() {
     let executable = "/opt/homebrew/bin/ffmpeg"
     let output = "/tmp/test recording.mp4"
