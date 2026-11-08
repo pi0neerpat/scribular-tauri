@@ -61,8 +61,8 @@ final class Recorder {
     }
 
     func stop() {
-        defer { try? FileManager.default.removeItem(at: marker) }
         guard process.isRunning else {
+            try? FileManager.default.removeItem(at: marker)
             FileHandle.standardError.write(Data("warning: ffmpeg exited early (status \(process.terminationStatus)); recording may be incomplete, see \(output.deletingPathExtension().lastPathComponent).ffmpeg.log\n".utf8))
             return
         }
@@ -70,8 +70,12 @@ final class Recorder {
         try? input.fileHandleForWriting.close()
         if finished.wait(timeout: .now() + 10) == .timedOut {
             process.terminate()
-            _ = finished.wait(timeout: .now() + 2)
+            if finished.wait(timeout: .now() + 2) == .timedOut {
+                _ = kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 2)
+            }
         }
+        if !process.isRunning { try? FileManager.default.removeItem(at: marker) }
     }
 
     static func reapOrphans(in roots: [URL]) {
