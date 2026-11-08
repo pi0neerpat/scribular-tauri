@@ -17,13 +17,13 @@ private final class Cleanup {
         self.player = player
     }
 
-    func run() {
+    func run(logURL: URL? = nil) {
         lock.lock()
         defer { lock.unlock() }  // a concurrent caller blocks until the first finishes cleaning
         guard !finished else { return }
         finished = true
         player.stop()  // runs at run end (pass or fail) and on SIGINT/SIGTERM, so afplay never outlives uitest
-        recorder?.stop()
+        recorder?.stop(logURL: logURL)
         lifecycle.quit()
     }
 }
@@ -125,7 +125,7 @@ private func runCLI() -> Int32 {
         let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
         source.setEventHandler {
             let duration = Date().timeIntervalSince(start)
-            cleanup.run()
+            cleanup.run(logURL: finalizer?.logURL(for: .interrupted))
             print(recorder == nil ? "FAIL interrupted — run stopped by signal" : "FAIL interrupted — recording run stopped by signal")
             _ = finalizeOnce("interrupted", duration: duration)
             Darwin.exit(value == SIGINT ? 130 : 143)
@@ -147,7 +147,7 @@ private func runCLI() -> Int32 {
                           out: { print($0) })
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
     let duration = Date().timeIntervalSince(start)
-    cleanup.run()
+    cleanup.run(logURL: finalizer?.logURL(for: passed ? .pass : .fail))
     let recordingSaved = finalizeOnce(passed ? "pass" : "fail", duration: duration)
     return passed && recordingSaved ? 0 : 1
 }

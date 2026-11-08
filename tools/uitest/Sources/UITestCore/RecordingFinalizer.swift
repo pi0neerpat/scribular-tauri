@@ -61,6 +61,10 @@ public final class RecordingFinalizer {
         }
     }
 
+    public func logURL(for result: RecordingResult) -> URL {
+        (result == .pass ? recordingURL : failedURL).deletingPathExtension().appendingPathExtension("ffmpeg.log")
+    }
+
     public func record(_ step: UITestCore.Step, at date: Date) {
         lock.lock()
         defer { lock.unlock() }
@@ -80,7 +84,7 @@ public final class RecordingFinalizer {
             let destination = result == .pass ? recordingURL : failedURL
             // Recorder writes the log beside the temp MP4; give it the final name so it is discoverable.
             let log = temporaryURL.deletingPathExtension().appendingPathExtension("ffmpeg.log")
-            let finalLog = destination.deletingPathExtension().appendingPathExtension("ffmpeg.log")
+            let finalLog = logURL(for: result)
             if FileManager.default.fileExists(atPath: log.path) {
                 try? FileManager.default.removeItem(at: finalLog)
                 try? FileManager.default.moveItem(at: log, to: finalLog)

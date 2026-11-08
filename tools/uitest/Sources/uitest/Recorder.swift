@@ -65,10 +65,11 @@ final class Recorder {
         }
     }
 
-    func stop() {
+    func stop(logURL: URL? = nil) {
         guard process.isRunning else {
             try? FileManager.default.removeItem(at: marker)
-            FileHandle.standardError.write(Data("warning: ffmpeg exited early (status \(process.terminationStatus)); recording may be incomplete, see the .ffmpeg.log beside the recording\n".utf8))
+            let logPath = logURL?.path ?? output.deletingPathExtension().appendingPathExtension("ffmpeg.log").path
+            FileHandle.standardError.write(Data("warning: ffmpeg exited early (status \(process.terminationStatus)); recording may be incomplete, see \(logPath)\n".utf8))
             return
         }
         try? input.fileHandleForWriting.write(contentsOf: Data("q\n".utf8))

@@ -87,6 +87,8 @@ import Testing
 
     let finalizer = RecordingFinalizer(name: "04-smoke", directory: directory,
                                        scenario: "smoke.uitest", appBuildTime: "build", stepCount: 0)
+    #expect(finalizer.logURL(for: .pass).lastPathComponent == "04-smoke.ffmpeg.log")
+    #expect(finalizer.logURL(for: .fail).lastPathComponent == "04-smoke-FAILED.ffmpeg.log")
     try Data("v".utf8).write(to: finalizer.temporaryURL)
     let log = finalizer.temporaryURL.deletingPathExtension().appendingPathExtension("ffmpeg.log")
     try Data("l".utf8).write(to: log)
