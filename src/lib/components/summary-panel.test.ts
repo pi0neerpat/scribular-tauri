@@ -5,6 +5,7 @@ import type { Session } from '../types/Session';
 
 const api = vi.hoisted(() => ({
   cancelJob: vi.fn(), copyText: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
+  getSummaryAvailability: vi.fn().mockResolvedValue('ready'), onSummaryAvailability: vi.fn(async () => () => {}),
   onSummaryDelta: vi.fn(), regenerateSummary: vi.fn(), undoSummary: vi.fn(), delta: undefined as ((d: unknown) => void) | undefined,
 }));
 vi.mock('../api', () => ({
@@ -59,5 +60,16 @@ it('copies the transcript when the saved summary is empty', async () => {
   } });
   target.querySelector('button')!.click();
   await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('transcript text'));
+  unmount(app);
+});
+
+it('keeps an existing summary visible and disables regeneration when summaries are unavailable', async () => {
+  api.getSummaryAvailability.mockResolvedValueOnce('loadFailed');
+  api.listSummaryModels.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] } });
+  await vi.waitFor(() => expect(target.textContent).toContain("This Mac can't write summaries because of its hardware."));
+  expect(target.textContent).toContain('saved summary');
+  expect([...target.querySelectorAll('button')].find((b) => b.textContent === 'Regenerate')?.disabled).toBe(true);
   unmount(app);
 });

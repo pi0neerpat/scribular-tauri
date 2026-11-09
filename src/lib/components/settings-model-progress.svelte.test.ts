@@ -17,16 +17,19 @@ const onUpdateState = vi.fn().mockResolvedValue(() => {});
 const requestNotificationPermission = vi.fn();
 const setAppSettings = vi.fn();
 const getTelemetrySetting = vi.fn().mockResolvedValue('off');
+const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
+const onSummaryAvailability = vi.fn().mockResolvedValue(() => {});
+const retrySummaryModel = vi.fn();
 vi.mock('../api', () => ({
   appVersion, checkForUpdates, getAppSettings, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
   setAppSettings, setRecordingSettings, getTelemetrySetting,
+  getSummaryAvailability, onSummaryAvailability, retrySummaryModel,
 }));
 import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.
 vi.mock('./NoteStyles.svelte', () => ({ default: () => {} }));
-vi.mock('./SummaryModel.svelte', () => ({ default: () => {} }));
 const { default: Settings } = await import('./Settings.svelte');
 
 const settings = { inputMode: 'mic', targetApp: null, multiSpeaker: false, promptId: 'default', keepAudio: false };
@@ -97,6 +100,17 @@ it('loads core settings and the model status snapshot when progress listener set
   await vi.waitFor(() => expect(target.textContent).toContain('Identify speakers'));
   expect(getRecordingSettings).toHaveBeenCalledOnce();
   expect(modelsStatus).toHaveBeenCalledOnce();
+  unmount(app);
+});
+
+it('shows the plain summary limitation and retry on a load failure', async () => {
+  getSummaryAvailability.mockResolvedValueOnce('loadFailed');
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([ready]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain("This Mac can't write summaries because of its hardware."));
+  expect(target.textContent).toContain('Try again');
   unmount(app);
 });
 

@@ -12,11 +12,14 @@ const onSessionProgress = vi.fn();
 const onSessionSegments = vi.fn();
 const startRecording = vi.fn();
 const stopRecording = vi.fn();
+const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
+const onSummaryAvailability = vi.fn(async () => () => {});
 let emitProgress: ((progress: SessionProgress) => void) | undefined;
 vi.mock('../api', () => ({
   accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
   onSessionProgress, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
+  getSummaryAvailability, onSummaryAvailability,
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
 

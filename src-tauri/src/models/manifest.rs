@@ -36,10 +36,10 @@ pub struct ModelSpec {
 }
 
 pub const WHISPER_BASE: &str = "whisper-base";
-pub const GEMMA_2_2B: &str = "gemma-2-2b-it-q4km";
+pub const GEMMA_4_E2B: &str = "gemma-4-e2b-it-q4km";
 pub const SPEAKER_CAMPPLUS: &str = "speaker-campplus";
 /// The summary model used until the user picks another (spec 03 R18).
-pub const DEFAULT_LLM: &str = GEMMA_2_2B;
+pub const DEFAULT_LLM: &str = GEMMA_4_E2B;
 
 /// Download order: the speech model first, so recording works as soon as
 /// possible while the larger LLM is still arriving.
@@ -62,19 +62,19 @@ pub fn manifest() -> Vec<ModelSpec> {
             caution: None,
         },
         ModelSpec {
-            id: GEMMA_2_2B.into(),
+            id: GEMMA_4_E2B.into(),
             kind: ModelKind::Llm,
-            display_name: "Gemma 2 2B Instruct (Q4_K_M)".into(),
-            file_name: "gemma-2-2b-it-Q4_K_M.gguf".into(),
-            url: "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/\
-                  855f67caed130e1befc571b52bd181be2e858883/gemma-2-2b-it-Q4_K_M.gguf"
+            display_name: "Gemma 4 E2B Instruct (Q4_K_M)".into(),
+            file_name: "gemma-4-E2B-it-GGUF-Q4_K_M.gguf".into(),
+            url: "https://huggingface.co/axteam/gemma-4-E2B-it-GGUF/resolve/\
+                  21d0b2296fd0fd4726c83e3015b086add5fa99d8/gemma-4-E2B-it-GGUF-Q4_K_M.gguf"
                 .into(),
-            size: 1_708_582_752,
-            sha256: "e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787".into(),
+            size: 3_427_879_936,
+            sha256: "0f1a91a281de002438842f54b4a186d7ea913be290c22ba2d10314e67e0e193a".into(),
             license: "Gemma Terms of Use".into(),
             license_url: "https://ai.google.dev/gemma/terms".into(),
             optional: false,
-            description: "Fast and small. The default summary model.".into(),
+            description: "Writes summaries on this Mac.".into(),
             caution: None,
         },
         ModelSpec {
@@ -132,6 +132,10 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), llms.len());
         assert_eq!(llms.iter().filter(|m| m.id == DEFAULT_LLM).count(), 1);
+        assert_eq!(llms.len(), 1);
+        assert_eq!(llms[0].id, GEMMA_4_E2B);
+        assert_eq!(llms[0].sha256.len(), 64);
+        assert!(!manifest().iter().any(|m| m.id == "gemma-2-2b-it-q4km"));
         assert!(llms
             .iter()
             .all(|m| !m.optional && !m.description.is_empty()));

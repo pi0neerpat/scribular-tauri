@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { downloadModels, getTelemetrySetting, modelsStatus, onModelsProgress, openPrivacySettings, setTelemetrySetting } from '../api';
+  import { downloadModels, getSummaryAvailability, getTelemetrySetting, modelsStatus, onModelsProgress, onSummaryAvailability, openPrivacySettings, setTelemetrySetting } from '../api';
   import { mergeSnapshot } from '../models';
   import type { ModelProgress } from '../types/ModelProgress';
+  import type { SummaryAvailability } from '../types/SummaryAvailability';
+  import SummaryUnavailable from './SummaryUnavailable.svelte';
   import SpeechModelStatus from './SpeechModelStatus.svelte';
 
   const SPEECH_MODEL = 'whisper-base';
@@ -10,6 +12,7 @@
   let models = $state<ModelProgress[]>([]);
   let telemetry = $state<boolean | null>(null);
   let telemetryError = $state<string | null>(null);
+  let summaryAvailability = $state<SummaryAvailability>('downloading');
   let telemetryChosen = false;
   let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
 
@@ -34,15 +37,20 @@
     // Listen before the snapshot and download, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
+    let summaryVersion = 0;
+    const summaryListener = onSummaryAvailability((state) => { summaryVersion++; summaryAvailability = state; });
+    summaryListener.then(() => getSummaryAvailability()).then((state) => {
+      if (summaryVersion === 0) summaryAvailability = state;
+    }).catch(() => {});
     unlisten
       .then(() => modelsStatus())
       .then((s) => update(mergeSnapshot(s, models)))
       .finally(downloadModels);
-    return () => { unlisten.then((fn) => fn()); };
+    return () => { unlisten.then((fn) => fn()); summaryListener.then((fn) => fn()); };
   });
 </script>
 
-{#if !speechReady || telemetry === null}
+{#if !speechReady || telemetry === null || summaryAvailability !== 'ready'}
   <section aria-labelledby={!speechReady ? 'first-run-title' : 'telemetry-title'}>
     {#if !speechReady}
       <h2 id="first-run-title">Getting Scribular ready</h2>
@@ -58,6 +66,11 @@
         <SpeechModelStatus {speech} />
       </ol>
       <p>Recording becomes available when the speech model is ready.</p>
+    {/if}
+    {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
+      <SummaryUnavailable />
+    {:else if summaryAvailability === 'downloading'}
+      <p>Waiting for the summary model download…</p>
     {/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">

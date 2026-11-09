@@ -24,6 +24,9 @@
     getDiagnostics,
     getTelemetrySetting,
     setTelemetrySetting,
+    getSummaryAvailability,
+    onSummaryAvailability,
+    retrySummaryModel,
     viewLogs,
     reportTestError,
     triggerTestPanic,
@@ -31,13 +34,14 @@
   import { appSettings } from '../app-settings';
   import LicenseSettings from './LicenseSettings.svelte';
   import NoteStyles from './NoteStyles.svelte';
-  import SummaryModel from './SummaryModel.svelte';
+  import SummaryUnavailable from './SummaryUnavailable.svelte';
   import type { AudioApp } from '../types/AudioApp';
   import type { InputMode } from '../types/InputMode';
   import type { Privacy } from '../types/Privacy';
   import type { RecordingSettings } from '../types/RecordingSettings';
   import type { ModelProgress } from '../types/ModelProgress';
   import type { UpdateState } from '../types/UpdateState';
+  import type { SummaryAvailability } from '../types/SummaryAvailability';
   import { updateStatus } from './update-status';
 
   let { navigationLocked = false }: { navigationLocked?: boolean } = $props();
@@ -65,6 +69,7 @@
   let telemetryKnown = $state(false);
   let telemetrySaving = $state(false);
   let diagnosticsStatus = $state<string | null>(null);
+  let summaryAvailability = $state<SummaryAvailability>('downloading');
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
     if (noteStyles) noteStyles.requestLeave(action, opener);
@@ -88,10 +93,18 @@
   onMount(() => {
     let unlisten: (() => void) | undefined;
     let updateUnlisten: (() => void) | undefined;
+    let summaryUnlisten: (() => void) | undefined;
     let disposed = false;
     let progressVersion = 0;
+    let summaryVersion = 0;
     let sawUpdate = false;
     void (async () => {
+      try {
+        const removeListener = await onSummaryAvailability((state) => { summaryVersion++; summaryAvailability = state; });
+        if (disposed) removeListener(); else summaryUnlisten = removeListener;
+        const current = await getSummaryAvailability();
+        if (summaryVersion === 0) summaryAvailability = current;
+      } catch { /* The status is also read when the Note styles pane mounts. */ }
       try {
         const app = await getAppSettings();
         appSettings.set(app);
@@ -133,7 +146,7 @@
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); };
+    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); };
   });
 
   async function refreshApps() {
@@ -218,6 +231,11 @@
     } catch { diagnosticsStatus = 'Failed to copy diagnostics'; }
   }
 
+  async function retrySummary() {
+    try { await retrySummaryModel(); }
+    catch (e) { error = String(e); }
+  }
+
   async function openLogs() {
     try { await viewLogs(); diagnosticsStatus = null; }
     catch { diagnosticsStatus = 'Failed to open logs'; }
@@ -231,6 +249,12 @@
       <button aria-pressed={category === item} disabled={navigationLocked} onclick={(e) => chooseCategory(item as typeof category, e.currentTarget)}>{item}</button>
     {/each}
   </nav>
+  {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
+    <SummaryUnavailable />
+    {#if summaryAvailability === 'loadFailed'}<button onclick={retrySummary}>Try again</button>{/if}
+  {:else if summaryAvailability === 'downloading'}
+    <p>Waiting for the summary model download…</p>
+  {/if}
   {#if settings}
   {#if category === 'Session'}
     <fieldset>
@@ -339,7 +363,6 @@
 
   {#if category === 'Note styles'}
     <NoteStyles bind:this={noteStyles} />
-    <SummaryModel />
   {/if}
 
   {#if category === 'License'}<LicenseSettings />{/if}

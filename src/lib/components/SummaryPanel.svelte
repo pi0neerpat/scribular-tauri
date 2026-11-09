@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, regenerateSummary, undoSummary } from '../api';
+  import { cancelJob, copyText, getPromptList, getSession, getSummaryAvailability, listSummaryModels, onSummaryAvailability, onSummaryDelta, regenerateSummary, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
+  import type { SummaryAvailability } from '../types/SummaryAvailability';
   import type { Session } from '../types/Session';
   import SessionAudio from './SessionAudio.svelte';
   import SpeakersCard from './SpeakersCard.svelte';
   import StylePicker from './StylePicker.svelte';
+  import SummaryUnavailable from './SummaryUnavailable.svelte';
 
   // `active` is false while the record view is hidden behind Settings.
   let {
@@ -26,6 +28,7 @@
   let copied = $state(false);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let summaryAvailability = $state<SummaryAvailability>('downloading');
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -59,12 +62,15 @@
   });
 
   onMount(() => {
-    if (!management) return;
-    if (!prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
-    if (!models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
-    const unlisten = onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; });
+    let summaryVersion = 0;
+    const availability = onSummaryAvailability((state) => { summaryVersion++; summaryAvailability = state; });
+    getSummaryAvailability().then((state) => { if (summaryVersion === 0) summaryAvailability = state; }).catch(() => {});
+    if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
+    if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
+    const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
     return () => {
-      unlisten.then((fn) => fn());
+      availability.then((fn) => fn());
+      unlisten?.then((fn) => fn());
       clearTimeout(deleteTimer);
       clearTimeout(copyTimer);
     };
@@ -113,7 +119,9 @@
 
 <article>
   <h3>{session.title}</h3>
-  {#if session.status === 'awaitingModel'}
+  {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
+    <SummaryUnavailable />
+  {:else if summaryAvailability === 'downloading' || session.status === 'awaitingModel'}
     <p>Waiting for the summary model download…</p>
   {:else if session.status === 'failed'}
     <p role="alert">{session.error}</p>
@@ -126,7 +134,7 @@
     {#if prompts}
       <StylePicker prompts={prompts.prompts} selectedId={selectedPrompt} includeId={session.promptId} onSelect={(id) => (selectedPrompt = id)} />
     {/if}
-    <button onclick={regenerate} disabled={working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
+    <button onclick={regenerate} disabled={summaryAvailability !== 'ready' || working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
     {#if session.status === 'summarizing'}<button onclick={stop}>Stop</button>{/if}
     {#if session.status === 'awaitingModel'}<button onclick={stop}>Cancel</button>{/if}
     {#if session.previousSummary}<button onclick={undo}>Undo</button>{/if}

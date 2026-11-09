@@ -25,6 +25,7 @@ import type { SessionPatch } from './types/SessionPatch';
 import type { SessionProgress } from './types/SessionProgress';
 import type { SessionSegments } from './types/SessionSegments';
 import type { SummaryDelta } from './types/SummaryDelta';
+import type { SummaryAvailability } from './types/SummaryAvailability';
 import type { SummaryModel } from './types/SummaryModel';
 import type { TranscriptSegment } from './types/TranscriptSegment';
 import type { UpdateState } from './types/UpdateState';
@@ -179,6 +180,18 @@ export function listSummaryModels(): Promise<SummaryModel[]> {
 /** Switches the summary model; a missing one downloads via `onModelsProgress`. */
 export function setSummaryModel(modelId: string): Promise<void> {
   return invoke<void>('set_summary_model', { modelId });
+}
+
+export function getSummaryAvailability(): Promise<SummaryAvailability> {
+  return invoke<SummaryAvailability>('get_summary_availability');
+}
+
+export function retrySummaryModel(): Promise<void> {
+  return invoke<void>('retry_summary_model');
+}
+
+export function onSummaryAvailability(handler: (state: SummaryAvailability) => void): Promise<UnlistenFn> {
+  return listen<SummaryAvailability>('summary-availability', (event) => handler(event.payload));
 }
 
 /** The pinned models with their license terms, in download order. */

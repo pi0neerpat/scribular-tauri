@@ -37,7 +37,7 @@ mod real {
         JobEvents, JobQueue, SessionProgress, SessionSegments, SummaryDelta,
     };
     use scribular_lib::llm::llama::LlamaLoader;
-    use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_2_2B};
+    use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_4_E2B};
     use scribular_lib::store::{InputMode, NewSession, SessionStatus, Store, Timings};
     use scribular_lib::text::{clean_transcript, merge_diarized_segments, Segment};
 
@@ -157,18 +157,18 @@ mod real {
 
         let models = Arc::new(ModelManager::new(args.models.clone(), models::manifest()));
         models.scan();
-        if models.readiness.get(GEMMA_2_2B) != ModelState::Ready {
+        if models.readiness.get(GEMMA_4_E2B) != ModelState::Ready {
             if !args.download {
                 return Err(format!(
-                    "{GEMMA_2_2B} isn't in {}; open the app once or pass --download",
+                    "{GEMMA_4_E2B} isn't in {}; open the app once or pass --download",
                     args.models.display()
                 )
                 .into());
             }
             eprintln!("downloading models to {}", args.models.display());
             tauri::async_runtime::block_on(models.ensure_all(&|_| {}));
-            if models.readiness.get(GEMMA_2_2B) != ModelState::Ready {
-                return Err(format!("{GEMMA_2_2B} download failed").into());
+            if models.readiness.get(GEMMA_4_E2B) != ModelState::Ready {
+                return Err(format!("{GEMMA_4_E2B} download failed").into());
             }
         }
 

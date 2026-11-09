@@ -140,13 +140,8 @@ fn abandon(sources: Vec<Source>, cancel: &AtomicBool, wait: bool) -> Option<Stri
 /// Whether this Mac has 8 GB of memory or less, where whisper is unloaded
 /// before the summary model runs. Unknown counts as low.
 fn low_memory() -> bool {
-    std::process::Command::new("/usr/sbin/sysctl")
-        .args(["-n", "hw.memsize"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .is_none_or(|bytes| bytes <= 8 << 30)
+    crate::hardware::physical_memory_bytes()
+        .is_none_or(|bytes| bytes <= crate::models::MIN_SUMMARY_RAM_BYTES)
 }
 
 #[derive(Default)]

@@ -13,7 +13,8 @@ use std::{
 };
 
 use scribular_lib::commands::{
-    revert_summary_model, summary_models, switch_summary_model, MODEL_SWITCH_BUSY,
+    restore_summary_model_setting, revert_summary_model, summary_models, switch_summary_model,
+    MODEL_SWITCH_BUSY,
 };
 use scribular_lib::models::{
     ensure, manifest, DownloadError, ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState,
@@ -651,6 +652,24 @@ fn bundled_manifest_keeps_the_declared_default_even_if_order_changes() {
     let dir = TempDir::new();
     let manager = ModelManager::new(dir.0.clone(), manifest());
     assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+}
+
+#[test]
+fn startup_rewrites_an_unavailable_saved_model_to_the_default_without_falling_back_silently() {
+    let dir = TempDir::new();
+    let store = store_in(&dir);
+    store
+        .set_setting(SUMMARY_MODEL_ID, "gemma-2-2b-it-q4km")
+        .unwrap();
+    let manager = ModelManager::new(dir.0.clone(), manifest());
+
+    restore_summary_model_setting(&store, &manager).unwrap();
+
+    assert_eq!(manager.selected_llm(), DEFAULT_LLM);
+    assert_eq!(
+        store.get_setting(SUMMARY_MODEL_ID).unwrap().as_deref(),
+        Some(DEFAULT_LLM)
+    );
 }
 
 #[test]

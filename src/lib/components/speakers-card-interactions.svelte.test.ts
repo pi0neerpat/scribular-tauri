@@ -7,7 +7,9 @@ const confirmSpeakerLabels = vi.fn();
 const getSession = vi.fn();
 const skipDiarization = vi.fn();
 const updateSpeakerMap = vi.fn();
-vi.mock('../api', () => ({ confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap }));
+const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
+const onSummaryAvailability = vi.fn(async () => () => {});
+vi.mock('../api', () => ({ confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap, getSummaryAvailability, onSummaryAvailability }));
 const { default: SpeakersCard } = await import('./SpeakersCard.svelte');
 const { default: SummaryPanel } = await import('./SummaryPanel.svelte');
 
