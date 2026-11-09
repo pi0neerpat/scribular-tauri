@@ -14,6 +14,8 @@
   let telemetryError = $state<string | null>(null);
   let summaryAvailabilityError = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
+  let summaryAvailabilityUnlisten: (() => void) | null = null;
+  let summaryAvailabilityDisposed = false;
   let telemetryChosen = false;
   let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
 
@@ -33,20 +35,38 @@
     }
   }
 
+  async function listenForSummaryAvailability() {
+    summaryAvailabilityError = null;
+    summaryAvailabilityUnlisten?.();
+    summaryAvailabilityUnlisten = null;
+    try {
+      const unlisten = await subscribeSummaryAvailability((state) => {
+        summaryAvailability = state;
+        summaryAvailabilityError = null;
+      });
+      if (summaryAvailabilityDisposed) unlisten();
+      else summaryAvailabilityUnlisten = unlisten;
+    } catch (e) {
+      if (!summaryAvailabilityDisposed) summaryAvailabilityError = String(e);
+    }
+  }
+
   onMount(() => {
+    summaryAvailabilityDisposed = false;
     getTelemetrySetting().then((value) => { if (!telemetryChosen) telemetry = value === 'undecided' ? null : value === 'on'; }).catch((e) => (telemetryError = String(e)));
     // Listen before the snapshot and download, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
-    const summaryListener = subscribeSummaryAvailability((state) => {
-      summaryAvailability = state;
-      summaryAvailabilityError = null;
-    }).catch((e) => { summaryAvailabilityError = String(e); return () => {}; });
+    void listenForSummaryAvailability();
     unlisten
       .then(() => modelsStatus())
       .then((s) => update(mergeSnapshot(s, models)))
       .finally(downloadModels);
-    return () => { unlisten.then((fn) => fn()); summaryListener.then((fn) => fn()); };
+    return () => {
+      summaryAvailabilityDisposed = true;
+      summaryAvailabilityUnlisten?.();
+      unlisten.then((fn) => fn());
+    };
   });
 </script>
 
@@ -72,7 +92,10 @@
     {:else if summaryAvailability === 'downloading' && !summaryAvailabilityError}
       <p>Waiting for the summary model download…</p>
     {/if}
-    {#if summaryAvailabilityError}<p role="alert">Couldn't check summary availability.</p>{/if}
+    {#if summaryAvailabilityError}
+      <p role="alert">Couldn't check whether summaries are ready.</p>
+      <button aria-label="Try summary availability again" onclick={listenForSummaryAvailability}>Try again</button>
+    {/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">
         <h2 id="telemetry-title">Help improve Scribular?</h2>

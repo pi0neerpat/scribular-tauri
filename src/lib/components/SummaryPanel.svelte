@@ -29,6 +29,7 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
+  let summaryAvailabilityError = $state(false);
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -62,8 +63,10 @@
   });
 
   onMount(() => {
-    const availability = subscribeSummaryAvailability((state) => { summaryAvailability = state; })
-      .catch((e) => { error = String(e); return () => {}; });
+    const availability = subscribeSummaryAvailability((state) => {
+      summaryAvailability = state;
+      summaryAvailabilityError = false;
+    }).catch(() => { summaryAvailabilityError = true; return () => {}; });
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
@@ -120,9 +123,10 @@
   <h3>{session.title}</h3>
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
     <SummaryUnavailable />
-  {:else if summaryAvailability === 'downloading' || session.status === 'awaitingModel'}
+  {:else if (summaryAvailability === 'downloading' || session.status === 'awaitingModel') && !summaryAvailabilityError}
     <p>Waiting for the summary model download…</p>
   {/if}
+  {#if summaryAvailabilityError}<p role="alert">Couldn't check whether summaries are ready. Restart Scribular to try again.</p>{/if}
   {#if session.status === 'failed'}
     <p role="alert">{session.error}</p>
   {:else if session.status === 'cancelled'}

@@ -69,6 +69,7 @@
   let telemetrySaving = $state(false);
   let diagnosticsStatus = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
+  let summaryAvailabilityError = $state(false);
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
     if (noteStyles) noteStyles.requestLeave(action, opener);
@@ -97,8 +98,10 @@
     let progressVersion = 0;
     let sawUpdate = false;
     void (async () => {
-      const summarySubscription = subscribeSummaryAvailability((state) => { summaryAvailability = state; })
-        .catch((e) => { error = String(e); return () => {}; });
+      const summarySubscription = subscribeSummaryAvailability((state) => {
+        summaryAvailability = state;
+        summaryAvailabilityError = false;
+      }).catch(() => { summaryAvailabilityError = true; return () => {}; });
       summarySubscription.then((remove) => { if (disposed) remove(); else summaryUnlisten = remove; });
       try {
         const app = await getAppSettings();
@@ -247,9 +250,10 @@
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
     <SummaryUnavailable />
     {#if summaryAvailability === 'loadFailed'}<button onclick={retrySummary}>Try again</button>{/if}
-  {:else if summaryAvailability === 'downloading'}
+  {:else if summaryAvailability === 'downloading' && !summaryAvailabilityError}
     <p>Waiting for the summary model download…</p>
   {/if}
+  {#if summaryAvailabilityError}<p role="alert">Couldn't check whether summaries are ready. Restart Scribular to try again.</p>{/if}
   {#if settings}
   {#if category === 'Session'}
     <fieldset>
