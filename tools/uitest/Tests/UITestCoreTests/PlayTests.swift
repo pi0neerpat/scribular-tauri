@@ -23,13 +23,13 @@ import Testing
     }
 }
 
-@Test func playUnplayableFileFails() throws {
+@Test func playFailsWhenPlayerExitsNonzero() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    let bad = root.appendingPathComponent("bad.wav")
-    try Data("RIFF".utf8).write(to: bad)  // exists, but afplay rejects it and exits 1
-    let player = Player()
+    let audio = root.appendingPathComponent("audio.wav")
+    try Data("fixture".utf8).write(to: audio)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/false"))
     defer { player.stop() }
 
-    #expect(throws: DriverError.self) { try player.start(bad, loop: true) }
+    #expect(throws: DriverError.self) { try player.start(audio, loop: true) }
 }

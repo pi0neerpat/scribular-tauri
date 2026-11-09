@@ -3,10 +3,13 @@ import Foundation
 /// Plays a file through /usr/bin/afplay so the app can capture it in App-audio mode.
 public final class Player: @unchecked Sendable {
     private let lock = NSLock()
+    private let executableURL: URL
     private var process: Process?
     private var generation = 0  // bumped by start/stop so a stale loop never restarts
 
-    public init() {}
+    public convenience init() { self.init(executableURL: URL(fileURLWithPath: "/usr/bin/afplay")) }
+
+    init(executableURL: URL) { self.executableURL = executableURL }
 
     public func start(_ file: URL, loop: Bool) throws {
         stop()
@@ -37,7 +40,7 @@ public final class Player: @unchecked Sendable {
     @discardableResult
     private func spawn(_ file: URL, loop: Bool, generation current: Int) throws -> Process {
         let child = Process()
-        child.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+        child.executableURL = executableURL
         child.arguments = [file.path]
         if loop {
             child.terminationHandler = { [weak self] ended in
