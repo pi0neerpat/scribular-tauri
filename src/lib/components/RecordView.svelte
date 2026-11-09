@@ -294,13 +294,14 @@
       {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
     </p>
     <button bind:this={stopButton} onclick={stop} disabled={busy || askSpeakerCount}>Stop</button>
-  {:else if working && status !== 'awaitingModel'}
-    <p>
-      {progress?.message ?? 'Working…'}
-      {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
-    </p>
-    <button onclick={cancel}>Cancel</button>
   {:else}
+    {#if working && status !== 'awaitingModel'}
+      <p>
+        {progress?.message ?? 'Working…'}
+        {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
+      </p>
+      <button onclick={cancel}>Cancel</button>
+    {/if}
     {#if status === 'awaitingModel'}
       <p>{progress?.message ?? 'Waiting for the summary model download…'}</p>
       <button onclick={cancel}>Cancel</button>

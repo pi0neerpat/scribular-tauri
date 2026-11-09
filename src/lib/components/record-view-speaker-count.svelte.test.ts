@@ -58,6 +58,21 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it('allows starting a recording while a summary is running', async () => {
+    sessionStorage.setItem('scribular.inFlightSession', 'summary-1');
+    getSession.mockResolvedValueOnce({ id: 'summary-1', status: 'summarizing', inputMode: 'mic', createdAt: 0 });
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect(target.textContent).toContain('Working…'));
+    expect([...target.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Start recording', 'Cancel']),
+    );
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    expect(startRecording).toHaveBeenCalledTimes(1);
+    unmount(app);
+    target.remove();
+  });
+
   it('keeps Start available and offers Cancel while awaiting the summary model', async () => {
     sessionStorage.setItem('scribular.inFlightSession', 'waiting-1');
     getSession.mockResolvedValueOnce({ id: 'waiting-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });
