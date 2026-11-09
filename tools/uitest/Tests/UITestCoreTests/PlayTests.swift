@@ -72,3 +72,11 @@ import Testing
         #expect(message == "play: invalid WAV header: \(bad.path)")
     }
 }
+
+@Test func playPropagatesWaveReadFailure() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/true"))
+    defer { player.stop() }
+
+    #expect(throws: CocoaError.self) { try player.start(file, loop: false) }
+}

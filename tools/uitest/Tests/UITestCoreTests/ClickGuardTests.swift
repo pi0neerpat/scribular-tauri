@@ -31,5 +31,5 @@ import Testing
 
 @Test func clickGuardRejectsAnotherWindowInSameProcess() {
     #expect(ClickGuard.failure(targetPID: 10, hitPID: 10, hitName: "Scribular", keychainPromptOpen: false,
-                               hitBelongsToTarget: false) == .covered("another Scribular window"))
+                               hitBelongsToTarget: false) == .covered("another Scribular element"))
 }

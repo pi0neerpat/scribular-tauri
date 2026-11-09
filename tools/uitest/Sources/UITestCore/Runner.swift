@@ -63,13 +63,13 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         emit("  screenshot: \(screenshotPath(screenshot))")
         let visible = driver.visibleLabels().prefix(40).map { "\"\($0)\"" }.joined(separator: ", ")
         emit("  visible: \(visible)")
-        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
         if let screen = try? driver.perform(.screenshotScreen(name: "fail-\(step.line)-screen")) {
             emit("  screen: \(screenshotPath(URL(fileURLWithPath: screen)))")
         } else {
             emit("  screen: (not saved)")
         }
         emit("  frontmost: \(driver.frontmostApplicationName() ?? "(unknown)")")
+        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
     }
 
     func execute(_ step: Step) throws(DriverError) -> String? {
@@ -122,7 +122,10 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                     if started == nil { started = Date() }
                     let remaining = limit - Date().timeIntervalSince(started ?? Date())
                     if remaining <= 0 {
-                        fail(step, "\(failure.message) after \(Int(limit))s")
+                        let timeout = limit == floor(limit)
+                            ? String(Int(limit))
+                            : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+                        fail(step, "\(failure.message) after \(timeout)s")
                         return false
                     }
                     Thread.sleep(forTimeInterval: min(options.poll, remaining))

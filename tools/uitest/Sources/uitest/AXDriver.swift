@@ -446,12 +446,13 @@ final class AXDriver: Driver {
             throw blocked(.covered("unknown app"), target: target)
         }
         let hitName = NSRunningApplication(processIdentifier: hitPID)?.localizedName
+        let hitBelongsToTarget = hitPID == app.processIdentifier
+            ? target.map { target in CFEqual(hit, target) || allElements(from: target).contains { CFEqual($0, hit) } } ?? true
+            : false
         if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: hitPID,
                                            hitName: hitName,
                                            keychainPromptOpen: false, hitTestComplete: true,
-                                           hitBelongsToTarget: target.map { target in
-                                               CFEqual(hit, target) || allElements(from: target).contains { CFEqual($0, hit) }
-                                           } ?? true) {
+                                           hitBelongsToTarget: hitBelongsToTarget) {
             throw blocked(reason, target: target)
         }
     }

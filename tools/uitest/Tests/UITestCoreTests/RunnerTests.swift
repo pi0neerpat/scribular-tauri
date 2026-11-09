@@ -65,7 +65,9 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(output[0] == "✗ 1 expect \"X\": not found after 0.05s")
     #expect(output[1].contains("screenshot: "))
     #expect(output[2] == "  visible: \"Settings\", \"Note styles\"")
-    #expect(output[3] == "FAIL 0/1 steps — recording: no recording")
+    #expect(output[3] == "  screen: /tmp/run/fail-1-screen.png")
+    #expect(output[4] == "  frontmost: (unknown)")
+    #expect(output[5] == "FAIL 0/1 steps — recording: no recording")
     #expect(driver.screenshots == [runDir.appendingPathComponent("fail-1.png")])
 }
 
@@ -112,8 +114,22 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
                        options: RunOptions(timeout: 0, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "no recording"),
                        out: { output.append($0) }))
     #expect(output[2] == "  visible: ")
-    #expect(output[3] == "FAIL 0/1 steps — recording: no recording")
-    #expect(output[4] == "  screen: (not saved)")
+    #expect(output[3] == "  screen: (not saved)")
+    #expect(output[4] == "  frontmost: (unknown)")
+    #expect(output[5] == "FAIL 0/1 steps — recording: no recording")
+}
+
+@Test func clickBlockedRetriesAndReportsFractionalTimeout() {
+    let driver = FakeDriver()
+    driver.results = Array(repeating: .failure(.clickBlocked(.covered("X"))), count: 20)
+    var output = [String]()
+    let passed = runSteps([step(1, .click(label: "Save", index: nil, within: nil), source: "click \"Save\"")], driver: driver,
+                          options: RunOptions(timeout: 0.03, poll: 0.005, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "r.mp4"),
+                          out: { output.append($0) })
+    #expect(!passed)
+    #expect(driver.calls.count > 1)
+    #expect(output[0] == "✗ 1 click \"Save\": click point is covered by X after 0.03s")
+    #expect(output.last == "FAIL 0/1 steps")
 }
 
 @Test func fatalStopsImmediately() {

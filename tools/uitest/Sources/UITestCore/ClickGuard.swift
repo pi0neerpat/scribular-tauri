@@ -29,7 +29,7 @@ public enum ClickGuard {
         guard hitTestComplete else { return nil }
         guard let hitPID else { return .covered("unknown app") }
         guard hitPID == targetPID else { return .covered(hitName ?? "unknown app") }
-        guard hitBelongsToTarget else { return .covered("another Scribular window") }
+        guard hitBelongsToTarget else { return .covered("another Scribular element") }
         return nil
     }
 }

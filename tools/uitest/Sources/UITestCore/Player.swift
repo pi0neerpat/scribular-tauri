@@ -14,7 +14,7 @@ public final class Player: @unchecked Sendable {
     public func start(_ file: URL, loop: Bool) throws {
         stop()
         if file.pathExtension.lowercased() == "wav" {
-            let header = (try? Data(contentsOf: file, options: .mappedIfSafe)).map { Data($0.prefix(12)) } ?? Data()
+            let header = try Data(contentsOf: file, options: .mappedIfSafe).prefix(12)
             if header.count != 12 || header.prefix(4) != Data("RIFF".utf8) || header.suffix(4) != Data("WAVE".utf8) {
                 throw DriverError.fatal("play: invalid WAV header: \(file.path)")
             }
