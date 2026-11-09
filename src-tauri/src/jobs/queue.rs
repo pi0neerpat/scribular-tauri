@@ -233,9 +233,19 @@ impl JobQueue {
     pub fn while_transcription_safe<T>(
         &self,
         cancel: &AtomicBool,
+        on_wait: impl FnOnce(),
         operation: impl FnOnce() -> T,
     ) -> Option<T> {
         let mut state = self.shared.lock();
+        let waiting = state.running.is_some()
+            || (!state.pending.is_empty() && self.shared.loader.ready())
+            || state.whisper_loading;
+        if waiting {
+            // Lock order: release the queue before callbacks that may lock recording or emit events.
+            drop(state);
+            on_wait();
+            state = self.shared.lock();
+        }
         while !cancel.load(Ordering::Relaxed)
             && (state.running.is_some()
                 || (!state.pending.is_empty() && self.shared.loader.ready())

@@ -245,6 +245,7 @@ Security check for the model download (in the PR description):
 
 ### This task (p1)
 - This task = p1, model swap (PR1 in the split above): manifest swap to Gemma 4 E2B, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup. Covers AS1-AS11 (AS11 is a report only, no fixes).
+- **AS10a** (manual real-app, 8 GB Mac VM, plus automated cargo test + vitest) Given a summary is running, when a recording starts on a low-memory Mac, then the live-transcript area shows "Live transcript will start when the current summary finishes." while the header still shows Recording; with mic+system input it appears once and clears once. If Stop is pressed during the wait, the message may remain under "Transcribing…" until transcription starts, then disappears; the final transcript is still complete. After the summary finishes, the buffered live transcript catches up with the final transcript complete (assert the expected phrases and no lost audio). On a Mac above the threshold (`unload_whisper` false), no message appears and live text starts immediately. A window reload during the wait does not restore the message.
 - Other PRs' scope (coach engine, `style_spec` migration, coach commands, practice job, coach UI, AS12-AS32) is out of bounds for this task.
 - PR base = `main`.
 - Before the real Gemma 4 download for AS10, check `df -h /System/Volumes/Data` shows >= 6 GB free; never delete `~/Library/Caches/scribular-uitest` or `~/cargo-target/scribular-tauri`.

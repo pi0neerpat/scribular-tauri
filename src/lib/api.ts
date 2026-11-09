@@ -24,6 +24,7 @@ import type { SessionListItem } from './types/SessionListItem';
 import type { SessionPatch } from './types/SessionPatch';
 import type { SessionProgress } from './types/SessionProgress';
 import type { SessionSegments } from './types/SessionSegments';
+import type { TranscriptWaiting } from './types/TranscriptWaiting';
 import type { SummaryDelta } from './types/SummaryDelta';
 import type { SummaryAvailability } from './types/SummaryAvailability';
 import type { SummaryModel } from './types/SummaryModel';
@@ -343,6 +344,13 @@ export function onSessionSegments(
   handler: (segments: SessionSegments) => void,
 ): Promise<UnlistenFn> {
   return listen<SessionSegments>('session://segments', (event) => handler(event.payload));
+}
+
+/** Whether live transcription is waiting for summary work. */
+export function onSessionTranscriptWaiting(
+  handler: (waiting: TranscriptWaiting) => void,
+): Promise<UnlistenFn> {
+  return listen<TranscriptWaiting>('session://transcript-waiting', (event) => handler(event.payload));
 }
 
 /** Trial or licence state, from the last check; changes arrive through `onLicenseChanged`. */

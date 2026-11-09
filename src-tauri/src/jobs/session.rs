@@ -4,7 +4,7 @@
 //! audio with it) and queues the summary, whose model starts loading at Stop.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -16,7 +16,7 @@ use std::{
 };
 
 use super::summarize::ms;
-use super::{JobEvents, JobQueue, SessionProgress, SessionSegments};
+use super::{JobEvents, JobQueue, SessionProgress, SessionSegments, TranscriptWaiting};
 use crate::audio::{chunk_writer, AudioError, Capture, Microphone, SystemAudio};
 use crate::diarize::SpeakerEmbedderLoader;
 use crate::store::{
@@ -168,6 +168,10 @@ struct Inner {
     model: Mutex<Option<Arc<dyn Transcriber>>>,
     /// Drop whisper once a transcript is done, before the summary loads.
     unload_whisper: AtomicBool,
+    /// Sessions already shown as waiting; the first source to acquire Whisper clears it.
+    transcript_waiting: Mutex<HashSet<String>>,
+    /// A second source must not re-show the wait after the first source acquires Whisper.
+    transcript_started: Mutex<HashSet<String>>,
 }
 
 struct UnavailableSpeakerLoader;
@@ -236,6 +240,8 @@ impl Recorder {
                 transcribing: Mutex::default(),
                 model: Mutex::default(),
                 unload_whisper: AtomicBool::new(low_memory()),
+                transcript_waiting: Mutex::default(),
+                transcript_started: Mutex::default(),
             }),
             finalizers: Mutex::default(),
             install_gate: Arc::new(Mutex::new(())),
@@ -270,7 +276,8 @@ impl Recorder {
     }
 
     pub fn is_busy(&self) -> bool {
-        lock(&self.inner.recording).is_some()
+        let recording = lock(&self.inner.recording).is_some();
+        recording
             || !lock(&self.inner.state).finalizing.is_empty()
             || self.inner.jobs.is_busy()
             || lock(&self.finalizers)
@@ -283,7 +290,8 @@ impl Recorder {
 
     /// Whether quitting would interrupt recording, transcription or summary work.
     pub fn quit_confirmation_needed(&self) -> bool {
-        lock(&self.inner.recording).is_some()
+        let recording = lock(&self.inner.recording).is_some();
+        recording
             || !lock(&self.inner.state).finalizing.is_empty()
             || self.inner.jobs.is_busy()
             || lock(&self.finalizers)
@@ -374,6 +382,8 @@ impl Recorder {
             }
             return Err(e.into());
         }
+        lock(&inner.transcript_waiting).clear();
+        lock(&inner.transcript_started).clear();
         *recording = Some(Recording {
             session_id: session.id.clone(),
             multi_speaker,
@@ -606,7 +616,7 @@ impl Inner {
                 if cancel.load(Ordering::Relaxed) {
                     return failed(self, store::INTERRUPTED);
                 }
-                let stt = match self.transcriber(cancel) {
+                let stt = match self.transcriber(id, cancel) {
                     Ok(s) => s,
                     Err(e) => return failed(self, &e),
                 };
@@ -769,14 +779,43 @@ impl Inner {
     }
 
     /// Whisper, loading it if no recording has yet.
-    fn transcriber(&self, cancel: &AtomicBool) -> Result<Arc<dyn Transcriber>, String> {
+    fn transcriber(&self, id: &str, cancel: &AtomicBool) -> Result<Arc<dyn Transcriber>, String> {
         if self.unload_whisper.load(Ordering::Relaxed) {
-            return self
+            let result = self
                 .jobs
-                .while_transcription_safe(cancel, || self.load_transcriber())
+                .while_transcription_safe(
+                    cancel,
+                    || self.transcript_waiting(id, true),
+                    || self.load_transcriber(),
+                )
                 .unwrap_or_else(|| Err("cancelled".into()));
+            self.transcript_waiting(id, false);
+            return result;
         }
         self.load_transcriber()
+    }
+
+    fn transcript_waiting(&self, id: &str, waiting: bool) {
+        if waiting
+            && !lock(&self.recording)
+                .as_ref()
+                .is_some_and(|r| r.session_id == id)
+        {
+            return;
+        }
+        let mut shown = lock(&self.transcript_waiting);
+        let mut started = lock(&self.transcript_started);
+        let changed = if waiting {
+            !started.contains(id) && shown.insert(id.to_owned())
+        } else {
+            started.insert(id.to_owned()) && shown.remove(id)
+        };
+        if changed {
+            self.events.transcript_waiting(TranscriptWaiting {
+                session_id: id.into(),
+                waiting,
+            });
+        }
     }
 
     fn load_transcriber(&self) -> Result<Arc<dyn Transcriber>, String> {
@@ -798,7 +837,7 @@ impl Inner {
         audio: &mpsc::Receiver<Vec<f32>>,
         cancel: &AtomicBool,
     ) -> Result<Stream, String> {
-        let stt = match self.transcriber(cancel) {
+        let stt = match self.transcriber(id, cancel) {
             Ok(stt) => stt,
             Err(_) if cancel.load(Ordering::Relaxed) => return Ok(Stream::default()),
             Err(e) => return Err(e),
@@ -1113,7 +1152,7 @@ impl Inner {
                 }
                 // Loaded on demand: a recording that streamed every window
                 // needs no model here.
-                let stt = self.transcriber(cancel)?;
+                let stt = self.transcriber(id, cancel)?;
                 partial = !self.window(id, source, &mut stream, &window, &*stt, cancel)?;
             }
         }

@@ -14,7 +14,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
-use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
+use crate::jobs::{
+    JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta,
+    TranscriptWaiting,
+};
 use crate::license::{AccessState, ActivationResult, Licensing};
 use crate::models::{
     ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState, SummaryAvailability,
@@ -39,6 +42,7 @@ pub const EVENTS: &[&str] = &[
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
+    SESSION_TRANSCRIPT_WAITING_EVENT,
     LICENSE_CHANGED_EVENT,
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
@@ -72,6 +76,8 @@ pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
 /// Transcript segments as a recording transcribes, one [`SessionSegments`]
 /// per window that had speech.
 pub const SESSION_SEGMENTS_EVENT: &str = "session://segments";
+
+pub const SESSION_TRANSCRIPT_WAITING_EVENT: &str = "session://transcript-waiting";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +119,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     SessionProgress::export_all(cfg)?;
     SummaryDelta::export_all(cfg)?;
     SessionSegments::export_all(cfg)?;
+    TranscriptWaiting::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
     AudioApp::export_all(cfg)?;
     RecordingSettings::export_all(cfg)?;
@@ -1220,6 +1227,10 @@ impl JobEvents for TauriJobEvents {
 
     fn segments(&self, segments: SessionSegments) {
         let _ = self.0.emit(SESSION_SEGMENTS_EVENT, segments);
+    }
+
+    fn transcript_waiting(&self, waiting: TranscriptWaiting) {
+        let _ = self.0.emit(SESSION_TRANSCRIPT_WAITING_EVENT, waiting);
     }
 }
 

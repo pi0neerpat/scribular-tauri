@@ -416,8 +416,11 @@ fn whisper_load_does_not_wait_for_a_summary_waiting_on_its_download() {
     h.queue.regenerate(&id, PROMPT_ID).unwrap();
 
     assert_eq!(
-        h.queue
-            .while_transcription_safe(&AtomicBool::new(false), || "loaded"),
+        h.queue.while_transcription_safe(
+            &AtomicBool::new(false),
+            || panic!("idle queue waited"),
+            || "loaded"
+        ),
         Some("loaded")
     );
     assert_eq!(h.get(&id).status, SessionStatus::AwaitingModel);
@@ -438,18 +441,90 @@ fn whisper_load_waits_for_a_running_summary_but_stops_when_cancelled() {
 
     let cancelled = Arc::new(AtomicBool::new(false));
     std::thread::scope(|scope| {
+        let (wait_tx, wait_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let worker_cancel = Arc::clone(&cancelled);
         let queue = &h.queue;
+        let callback_queue = &h.queue;
         scope.spawn(move || {
-            let result = queue.while_transcription_safe(&worker_cancel, || "loaded");
+            let result = queue.while_transcription_safe(
+                &worker_cancel,
+                || {
+                    assert!(callback_queue.is_busy());
+                    wait_tx.send(()).unwrap();
+                },
+                || "loaded",
+            );
             done_tx.send(result).unwrap();
         });
-        std::thread::sleep(Duration::from_millis(50));
+        wait_rx.recv_timeout(WAIT).unwrap();
         cancelled.store(true, Ordering::Relaxed);
         assert_eq!(done_rx.recv_timeout(WAIT).unwrap(), None);
     });
     h.wait_idle();
+}
+
+#[test]
+fn whisper_load_wait_callback_runs_and_operation_resumes_after_summary() {
+    let h = Harness::with_budget(100, |fake| {
+        fake.token_delay = Duration::from_millis(100);
+    });
+    let id = h.session(&words(20), "");
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.events
+        .wait_for(|p| p.session_id == id && p.state == SessionStatus::Summarizing);
+
+    let (wait_tx, wait_rx) = mpsc::channel();
+    let result = h.queue.while_transcription_safe(
+        &AtomicBool::new(false),
+        || wait_tx.send(()).unwrap(),
+        || "loaded",
+    );
+    assert!(wait_rx.recv_timeout(WAIT).is_ok());
+    assert_eq!(result, Some("loaded"));
+    assert_eq!(h.get(&id).status, SessionStatus::Done);
+}
+
+#[test]
+fn whisper_load_wait_callback_runs_for_ready_pending_job_and_active_whisper_load() {
+    let h = Harness::with_budget(100, |_| {});
+    let id = h.session(&words(20), "");
+    let queue = &h.queue;
+    let (load_tx, load_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(move || {
+            assert_eq!(
+                queue.while_transcription_safe(
+                    &AtomicBool::new(false),
+                    || {},
+                    || {
+                        load_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    }
+                ),
+                Some(())
+            );
+        });
+        load_rx.recv_timeout(WAIT).unwrap();
+        h.queue.regenerate(&id, PROMPT_ID).unwrap();
+
+        let (wait_tx, wait_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let queue = &h.queue;
+        scope.spawn(move || {
+            let result = queue.while_transcription_safe(
+                &AtomicBool::new(false),
+                || wait_tx.send(()).unwrap(),
+                || "ready",
+            );
+            done_tx.send(result).unwrap();
+        });
+        wait_rx.recv_timeout(WAIT).unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(done_rx.recv_timeout(WAIT).unwrap(), Some("ready"));
+    });
+    assert!(h.queue.wait_idle(WAIT));
 }
 
 #[test]
@@ -464,10 +539,14 @@ fn summary_execution_waits_until_whisper_loading_finishes() {
         let queue = &h.queue;
         scope.spawn(move || {
             assert_eq!(
-                queue.while_transcription_safe(&cancel, || {
-                    loading_tx.send(()).unwrap();
-                    release_rx.recv().unwrap();
-                }),
+                queue.while_transcription_safe(
+                    &cancel,
+                    || {},
+                    || {
+                        loading_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    }
+                ),
                 Some(())
             );
         });
