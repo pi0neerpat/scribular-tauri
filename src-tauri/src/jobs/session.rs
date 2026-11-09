@@ -137,11 +137,13 @@ fn abandon(sources: Vec<Source>, cancel: &AtomicBool, wait: bool) -> Option<Stri
     error
 }
 
-/// Whether this Mac has 8 GB of memory or less, where whisper is unloaded
-/// before the summary model runs. Unknown counts as low.
+/// Whisper is unloaded at 8 GiB regardless of the summary model's RAM gate.
+const WHISPER_UNLOAD_RAM_BYTES: u64 = 8 << 30;
+
+/// Whether this Mac has 8 GiB of memory or less. Unknown counts as low.
 fn low_memory() -> bool {
     crate::hardware::physical_memory_bytes()
-        .is_none_or(|bytes| bytes <= crate::models::MIN_SUMMARY_RAM_BYTES)
+        .is_none_or(|bytes| bytes <= WHISPER_UNLOAD_RAM_BYTES)
 }
 
 #[derive(Default)]

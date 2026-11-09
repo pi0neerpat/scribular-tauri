@@ -67,8 +67,9 @@ sha256 before renaming the download into place.
 |---|---|---|---|---|
 | Whisper base | `huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin` | 147 951 465 | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` | MIT |
 | Gemma 2 2B IT Q4_K_M | `huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/855f67caed130e1befc571b52bd181be2e858883/gemma-2-2b-it-Q4_K_M.gguf` | 1 708 582 752 | `e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787` | Gemma Terms of Use |
+| Gemma 4 E2B IT Q4_K_M | `huggingface.co/axteam/gemma-4-E2B-it-GGUF/resolve/21d0b2296fd0fd4726c83e3015b086add5fa99d8/gemma-4-E2B-it-GGUF-Q4_K_M.gguf` | 3 427 879 936 | `0f1a91a281de002438842f54b4a186d7ea913be290c22ba2d10314e67e0e193a` | Apache-2.0 |
 
-⚠️ **Gemma is not under an OSI license.** The Gemma Terms of Use allow redistribution
+⚠️ **Gemma 2 is not under an OSI license.** The Gemma Terms of Use allow redistribution
 and commercial use but carry a prohibited-use policy that passes on to users. The
 manifest records the license name and URL, and the download UI should show it. This
 matches the model choice already in the plan; flagging it so the approval covers it.

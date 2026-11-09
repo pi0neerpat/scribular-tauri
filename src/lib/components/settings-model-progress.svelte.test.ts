@@ -19,13 +19,17 @@ const setAppSettings = vi.fn();
 const getTelemetrySetting = vi.fn().mockResolvedValue('off');
 const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
 const onSummaryAvailability = vi.fn().mockResolvedValue(() => {});
+const subscribeSummaryAvailability = vi.fn(async (callback: (state: string) => void) => {
+  callback(await getSummaryAvailability());
+  return () => {};
+});
 const retrySummaryModel = vi.fn();
 vi.mock('../api', () => ({
   appVersion, checkForUpdates, getAppSettings, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
   setAppSettings, setRecordingSettings, getTelemetrySetting,
-  getSummaryAvailability, onSummaryAvailability, retrySummaryModel,
+  getSummaryAvailability, onSummaryAvailability, subscribeSummaryAvailability, retrySummaryModel,
 }));
 import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.
@@ -109,8 +113,10 @@ it('shows the plain summary limitation and retry on a load failure', async () =>
   modelsStatus.mockResolvedValue([ready]);
   const target = document.createElement('div');
   const app = mount(Settings, { target });
-  await vi.waitFor(() => expect(target.textContent).toContain("This Mac can't write summaries because of its hardware."));
+  await vi.waitFor(() => expect(target.textContent).toContain("Summaries aren't available on this Mac."));
   expect(target.textContent).toContain('Try again');
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Try again')?.click();
+  expect(retrySummaryModel).toHaveBeenCalledOnce();
   unmount(app);
 });
 

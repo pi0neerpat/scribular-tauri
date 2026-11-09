@@ -316,11 +316,11 @@ pub fn run() {
                 models::manifest(),
             ));
             models.set_availability_event(app.handle().clone());
-            if commands::restore_summary_model_setting(&store, &models).is_err() {
+            if let Err(error) = commands::restore_summary_model_setting(&store, &models) {
                 diag::log::log(
                     "ERROR",
                     "models",
-                    "restoring selected summary model failed",
+                    &format!("restoring selected summary model failed ({error})"),
                 );
             }
             app.manage(Arc::clone(&models));

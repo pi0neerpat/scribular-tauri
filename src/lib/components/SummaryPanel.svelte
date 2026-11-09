@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { cancelJob, copyText, getPromptList, getSession, getSummaryAvailability, listSummaryModels, onSummaryAvailability, onSummaryDelta, regenerateSummary, undoSummary } from '../api';
+  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
   import type { SummaryAvailability } from '../types/SummaryAvailability';
@@ -62,9 +62,7 @@
   });
 
   onMount(() => {
-    let summaryVersion = 0;
-    const availability = onSummaryAvailability((state) => { summaryVersion++; summaryAvailability = state; });
-    getSummaryAvailability().then((state) => { if (summaryVersion === 0) summaryAvailability = state; }).catch(() => {});
+    const availability = subscribeSummaryAvailability((state) => { summaryAvailability = state; });
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
@@ -123,7 +121,8 @@
     <SummaryUnavailable />
   {:else if summaryAvailability === 'downloading' || session.status === 'awaitingModel'}
     <p>Waiting for the summary model download…</p>
-  {:else if session.status === 'failed'}
+  {/if}
+  {#if session.status === 'failed'}
     <p role="alert">{session.error}</p>
   {:else if session.status === 'cancelled'}
     <p>Stopped.</p>

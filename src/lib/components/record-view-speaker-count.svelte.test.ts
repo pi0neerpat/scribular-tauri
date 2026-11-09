@@ -20,6 +20,7 @@ vi.mock('../api', () => ({
   onSessionProgress, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
   getSummaryAvailability, onSummaryAvailability,
+  subscribeSummaryAvailability: async (callback: (state: string) => void) => { callback(await getSummaryAvailability()); return () => {}; },
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
 

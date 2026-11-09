@@ -1,1 +1,1 @@
-<p>This Mac can't write summaries because of its hardware. Recording and transcription still work.</p>
+<p>Summaries aren't available on this Mac. Recording and transcription still work.</p>

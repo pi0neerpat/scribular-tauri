@@ -143,9 +143,6 @@ impl ModelManager {
             .map(|s| s.id.clone())
             .unwrap_or_default();
         let unsupported = memory_bytes.is_some_and(|bytes| bytes < MIN_SUMMARY_RAM_BYTES);
-        if unsupported {
-            remove_old_summary_model(&dir);
-        }
         Self {
             dir,
             running: specs
@@ -189,7 +186,6 @@ impl ModelManager {
             return;
         }
         *current = state;
-        drop(current);
         if let Some(app) = self.availability_event.get() {
             use tauri::Emitter;
             let _ = app.emit(SUMMARY_AVAILABILITY_EVENT, state);
@@ -424,7 +420,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn low_memory_deletes_old_summary_and_marks_unavailable() {
+    fn constructing_on_low_memory_does_not_delete_old_summary() {
         let dir = std::env::temp_dir().join(format!("scribular-model-gate-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let old = dir.join(OLD_SUMMARY_MODEL_FILE);
@@ -437,7 +433,7 @@ mod tests {
             manager.summary_availability(),
             SummaryAvailability::Unsupported
         );
-        assert!(!old.exists());
+        assert!(old.exists());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -455,8 +451,11 @@ mod tests {
     #[test]
     fn low_memory_keeps_speech_available_and_skips_the_llm_download() {
         let dir = std::env::temp_dir().join(format!("scribular-model-skip-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join(OLD_SUMMARY_MODEL_FILE);
+        fs::write(&old, b"old model").unwrap();
         let manager = ModelManager::new_with_memory(
-            dir,
+            dir.clone(),
             manifest(),
             Some(MIN_SUMMARY_RAM_BYTES - 1),
         );
@@ -471,5 +470,7 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), [WHISPER_BASE]);
         assert_eq!(manager.readiness.get(DEFAULT_LLM), ModelState::Missing);
         assert_eq!(manager.summary_availability(), SummaryAvailability::Unsupported);
+        assert!(!old.exists());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

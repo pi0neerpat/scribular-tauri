@@ -194,6 +194,19 @@ export function onSummaryAvailability(handler: (state: SummaryAvailability) => v
   return listen<SummaryAvailability>('summary-availability', (event) => handler(event.payload));
 }
 
+export async function subscribeSummaryAvailability(handler: (state: SummaryAvailability) => void): Promise<UnlistenFn> {
+  let version = 0;
+  let unlisten: UnlistenFn = () => {};
+  try {
+    unlisten = await onSummaryAvailability((state) => { version++; handler(state); });
+  } catch {}
+  try {
+    const current = await getSummaryAvailability();
+    if (version === 0) handler(current);
+  } catch {}
+  return unlisten;
+}
+
 /** The pinned models with their license terms, in download order. */
 export function listModels(): Promise<ModelSpec[]> {
   return invoke<ModelSpec[]>('list_models');

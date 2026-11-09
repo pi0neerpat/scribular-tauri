@@ -71,27 +71,6 @@ pub fn params(model_id: &str) -> Params {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gemma_4_uses_coach_sampling() {
-        let p = params(GEMMA_4_E2B);
-        assert_eq!(p.context_tokens, 8192);
-        assert_eq!(p.temperature, 0.2);
-        assert_eq!(p.top_p, 0.9);
-    }
-
-    #[test]
-    fn gemma_4_formats_a_user_turn_without_thinking() {
-        assert_eq!(
-            format_gemma4_user_prompt("  summarize this  "),
-            "<|turn>user\nsummarize this\n<turn|>\n<|turn>model\n"
-        );
-    }
-}
-
 fn engine(e: impl std::fmt::Display) -> LlmError {
     LlmError::Engine(e.to_string())
 }
@@ -135,10 +114,13 @@ impl SummarizerLoader for LlamaLoader {
 
     fn ready(&self) -> bool {
         self.models.readiness.get(&self.model_id()) == ModelState::Ready
+            && self.models.summary_availability() == crate::models::SummaryAvailability::Ready
     }
 
     fn load(&self, id: &str) -> Result<Arc<dyn Summarizer>> {
-        if self.models.readiness.get(id) != ModelState::Ready {
+        if self.models.readiness.get(id) != ModelState::Ready
+            || self.models.summary_availability() != crate::models::SummaryAvailability::Ready
+        {
             return Err(LlmError::NotReady);
         }
         let path = self.models.path(id).ok_or(LlmError::NotReady)?;
@@ -158,8 +140,10 @@ impl SummarizerLoader for LlamaLoader {
             }
             self.models.remove_legacy_summary_model();
         }
-        self.models
-            .set_summary_availability(crate::models::SummaryAvailability::Ready);
+        if self.models.summary_availability() != crate::models::SummaryAvailability::Unsupported {
+            self.models
+                .set_summary_availability(crate::models::SummaryAvailability::Ready);
+        }
         Ok(Arc::new(summarizer))
     }
 }
@@ -198,8 +182,7 @@ impl LlamaSummarizer {
         Ok(())
     }
 
-    /// `prompt` as the user turn of the GGUF chat template, ready for the
-    /// model's reply.
+    /// Encodes `prompt` as Gemma 4's user turn, ready for the model's reply.
     fn format(&self, prompt: &str) -> Result<Vec<LlamaToken>> {
         let text = format_gemma4_user_prompt(prompt);
         Ok(self.model.vocab().tokenize(text.as_bytes(), true, true))
@@ -399,5 +382,45 @@ impl Summarizer for LlamaSummarizer {
             decode(&mut ctx, &mut batch)?;
         }
         Ok(seqs.into_iter().map(|s| s.out).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemma_4_uses_coach_sampling() {
+        let p = params(GEMMA_4_E2B);
+        assert_eq!(p.context_tokens, 8192);
+        assert_eq!(p.temperature, 0.2);
+        assert_eq!(p.top_p, 0.9);
+    }
+
+    #[test]
+    fn gemma_4_formats_a_user_turn_without_thinking() {
+        assert_eq!(
+            format_gemma4_user_prompt("  summarize this  "),
+            "<|turn>user\nsummarize this\n<turn|>\n<|turn>model\n"
+        );
+    }
+
+    #[test]
+    fn unavailable_summary_states_block_ready_models() {
+        for state in [
+            crate::models::SummaryAvailability::Unsupported,
+            crate::models::SummaryAvailability::LoadFailed,
+        ] {
+            let models = Arc::new(ModelManager::new(
+                std::env::temp_dir().join(format!("scribular-loader-{state:?}")),
+                crate::models::manifest(),
+            ));
+            models.readiness.set(GEMMA_4_E2B, ModelState::Ready);
+            models.set_summary_availability(state);
+            let loader = LlamaLoader::new(models);
+
+            assert!(!loader.ready());
+            assert!(matches!(loader.load(GEMMA_4_E2B), Err(LlmError::NotReady)));
+        }
     }
 }

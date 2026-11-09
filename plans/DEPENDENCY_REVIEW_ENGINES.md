@@ -1,8 +1,8 @@
 # Dependency review: engines (whisper-rs, llama-cpp-2)
 
 **Date:** 2026-10-19; runtime follow-up 2026-11-08
-**Status:** Approved 2026-10-19 (fallback A pre-approved); `llama-cpp-2` and
-`llama-cpp-sys-2` upgraded to 0.1.160 for Gemma 4 E2B load compatibility under AS10.
+**Status:** The 2026-10-19 approval covers fallback A and llama.cpp 0.1.158. The
+0.1.160 upgrade is pending a separate dependency review.
 **Policy:** same as `DEPENDENCY_REVIEW_M0.md` (review, audit, exact pin, in-house
 check, read `build.rs` like an npm postinstall).
 

@@ -27,9 +27,9 @@ flowchart LR
   classDef changed fill:#fff3c4,stroke:#b58900
 ```
 **UX impact:**
-- Every user downloads a larger summary model once after updating; summaries wait for it, as they do on first run today. The model picker disappears from Settings.
+- Macs that pass the RAM gate download a larger summary model once after updating; summaries wait for it, as they do on first run today. The model picker disappears from Settings.
 - New three-step flow; practice notes take a model run each, may wait behind real notes, and never interrupt a recording.
-- New message on Macs below the hardware threshold or where the model fails to load: "This Mac can't write summaries because of its hardware. Recording and transcription still work."
+- New message when summaries are unavailable: "Summaries aren't available on this Mac. Recording and transcription still work."
 
 ---
 
@@ -45,7 +45,7 @@ The feature ships as two parts, in order:
 ### Summary model
 - Manifest: `GEMMA_2_2B = "gemma-2-2b-it-q4km"` (1,708,582,752 bytes) is the only LLM and `DEFAULT_LLM` (`src-tauri/src/models/manifest.rs:39-42,65-73`). Manifest tests assert exactly one default LLM (`manifest.rs:134`).
 - Sampling: one `Params` const `GEMMA_2` (context 8192, temp 0.8, top_p 0.9, top_k 40, repeat penalty 1.1); `params()` falls through to it for any id (`src-tauri/src/llm/llama.rs:46-74`). The prompt is formatted as a single user turn through the GGUF chat template (`llama.rs:144-153`).
-- Engine: `llama-cpp-2 =0.1.158` / `llama-cpp-sys-2 =0.1.158`, Metal, dynamic link (`src-tauri/Cargo.toml:38-39`).
+- Engine: `llama-cpp-2 =0.1.160` / `llama-cpp-sys-2 =0.1.160`, Metal, dynamic link (`src-tauri/Cargo.toml:38-39`).
 - Selection: setting `summary_model_id` (`store/settings.rs:14`); at startup an id missing from the manifest logs a warning and keeps the default (`src-tauri/src/lib.rs:316-334`). Commands `list_summary_models`, `set_summary_model`, `switch_summary_model`, `revert_summary_model` (`src-tauri/src/commands.rs:488-607`); UI `SummaryModel.svelte` mounted in `Settings.svelte:342`, test `summary-model.svelte.test.ts`.
 - Session provenance falls back to the raw model id when it is not in the manifest (`src/lib/components/SummaryPanel.svelte:37`).
 - RAM: `low_memory()` reads `hw.memsize`; on 8 GB or less (or unknown) whisper is unloaded before the summary model runs (`src-tauri/src/jobs/session.rs:140-150`). It is private to `jobs/session.rs`; nothing gates downloads on RAM.
@@ -91,7 +91,7 @@ The feature ships as two parts, in order:
 - **R3** At startup, a stored `summary_model_id` that is `gemma-2-2b-it-q4km` or otherwise not in the manifest is rewritten to `DEFAULT_LLM` (no warning log for the known old id).
 - **R4** The summary-model picker UI is removed (`SummaryModel.svelte`, its mount in `Settings.svelte`, its test). Backend selection commands and their tests stay.
 - **R5** No UI text names the old model or its 1.7 GB size. First run gets no new size text (it has none today).
-- **R6** Hardware gate: before any LLM download starts, physical RAM is compared with one constant `MIN_SUMMARY_RAM_BYTES`, set from the real-model measurements. Below it, the LLM is never downloaded; speech and speaker models still download. The `hw.memsize` read is shared with `low_memory()` (moved to one helper) so the two rules cannot read RAM differently. Unknown RAM passes the gate (load failure is still caught by `LoadFailed`); `low_memory()` keeps treating unknown as low.
+- **R6** Hardware gate: before any LLM download starts, physical RAM is compared with `MIN_SUMMARY_RAM_BYTES`, set from the real-model measurements. Below it, the LLM is never downloaded; speech and speaker models still download. Whisper unloading uses its own 8 GiB threshold so its sequencing rule can change independently. Unknown RAM passes the summary gate (load failure is caught by `LoadFailed`); it keeps triggering whisper unloading.
 - **R7** One backend state `SummaryAvailability` = `Ready | Downloading | Unsupported | LoadFailed`, exposed by command and event. `Unsupported` (gate) and `LoadFailed` (model fails to load on a Mac that passed) show the plain message in the session summary area, Note Styles (coach entry disabled), Settings and first run. Existing summaries stay viewable; regenerate is disabled; recording and transcription are unaffected. `LoadFailed` is not permanent: it clears on the next app launch, and Settings offers "Try again", which re-verifies the file's SHA-256 (re-downloading if it fails) and re-attempts the load. `Downloading` shows the existing "Waiting for the summary model download…" state.
 - **R8** On a Mac that passed the gate, the old 2B file is deleted only after Gemma 4 has downloaded, passed SHA-256 and produced one short test summary on that Mac. On a Mac that fails the gate, the 2B file is deleted at startup (it can no longer be used). A failed or interrupted update never deletes the 2B file before those conditions hold.
 - **R9** Existing sessions keep their stored `model_id`; regenerate uses the current model. The session view shows the stored id as today (`SummaryPanel.svelte:37`).
@@ -136,7 +136,7 @@ The feature ships as two parts, in order:
 - **AS7** (automated, vitest) Given `Downloading`, then the summary area shows the existing waiting message. Given `Unsupported` or `LoadFailed`, then the summary area, Note Styles, Settings and first run show the plain message, the coach entry is disabled, regenerate is disabled, and an existing summary is still visible. (R7, R24)
 - **AS8** (automated, cargo test) Given an old 2B file, when Gemma 4 is downloading, fails SHA-256, or has not yet produced its test summary, then the 2B file exists; when all three pass, then it is deleted; given a gate-failing Mac, then it is deleted at startup. (R8)
 - **AS9** (automated, cargo test) Given a session that already has a summary and `model_id = gemma-2-2b-it-q4km`, when it is regenerated (fake engine), then the summary is written with the current model id and the old id stays in `previous_model_id`. (R9)
-- **AS10** (manual real-app, 8 GB Mac VM) Given a fresh update from the current release, when the app starts, then Gemma 4 E2B downloads, loads through `llama-cpp-2 0.1.158`, runs under the existing 8 GB sequencing (whisper unloaded before the summary, `jobs/session.rs:140-150`), lets a new recording start while a summary is running without either failing, writes a fixture session's summary with no thinking text, and the 2B file is then removed. Record: peak RSS, load time, tokens/s, the transcript phrases asserted, and the value chosen for `MIN_SUMMARY_RAM_BYTES` with its reasoning. If loading fails, report it as a blocker (options: bump `llama-cpp-2` to 0.1.160, or return to Patrick). (R1, R2, R6, R8)
+- **AS10** (manual real-app, 8 GB Mac VM) Given a fresh update from the current release, when the app starts, then Gemma 4 E2B downloads, loads through `llama-cpp-2 0.1.160`, runs under the 8 GiB whisper-unload sequencing (whisper unloaded before the summary), lets a new recording start while a summary is running without either failing, writes a fixture session's summary with no thinking text, and the 2B file is then removed. Record: peak RSS, load time, tokens/s, the transcript phrases asserted, and the value chosen for `MIN_SUMMARY_RAM_BYTES` with its reasoning. Report load failure as a blocker. (R1, R2, R6, R8)
 - **AS11** (manual real-app, report only) Given the seven built-in styles, when each summarizes the bundled fixtures on Gemma 4 E2B, then list any that are clearly worse, with the reason, in the PR. No fixes. (Goal: existing styles)
 
 ### Part 2: engine
@@ -185,8 +185,8 @@ The feature ships as two parts, in order:
 **New dependencies: none.** The extraction and checks are ported with std string handling. If the builder needs regular expressions, use `regex =1.13.1` (MIT/Apache-2.0, already in `Cargo.lock` transitively) and record the check below in the PR.
 
 Security check for the model download (in the PR description):
-- [ ] **License** of Gemma 4 E2B allows shipping it as a download from a closed-source app; license URL recorded in the manifest.
-- [ ] **Downloaded artifact:** exact URL pinned to a commit, size and SHA-256 recorded in the manifest (R1).
+- [x] **License**: Gemma 4 E2B is Apache-2.0; license URL recorded in the manifest.
+- [ ] **Pinned artifact:** upstream pinned-file metadata matches the manifest size and SHA-256; full download verification remains for AS10 (R1).
 - [ ] **Known vulnerabilities:** `cargo audit` / `npm audit` unchanged by this work.
 - [ ] **Bundled data** from the MIT hackathon repo is fictional; copyright line kept in a NOTICE entry.
 

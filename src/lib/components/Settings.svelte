@@ -24,8 +24,7 @@
     getDiagnostics,
     getTelemetrySetting,
     setTelemetrySetting,
-    getSummaryAvailability,
-    onSummaryAvailability,
+    subscribeSummaryAvailability,
     retrySummaryModel,
     viewLogs,
     reportTestError,
@@ -96,15 +95,10 @@
     let summaryUnlisten: (() => void) | undefined;
     let disposed = false;
     let progressVersion = 0;
-    let summaryVersion = 0;
     let sawUpdate = false;
     void (async () => {
-      try {
-        const removeListener = await onSummaryAvailability((state) => { summaryVersion++; summaryAvailability = state; });
-        if (disposed) removeListener(); else summaryUnlisten = removeListener;
-        const current = await getSummaryAvailability();
-        if (summaryVersion === 0) summaryAvailability = current;
-      } catch { /* The status is also read when the Note styles pane mounts. */ }
+      const summarySubscription = subscribeSummaryAvailability((state) => { summaryAvailability = state; });
+      summarySubscription.then((remove) => { if (disposed) remove(); else summaryUnlisten = remove; });
       try {
         const app = await getAppSettings();
         appSettings.set(app);
