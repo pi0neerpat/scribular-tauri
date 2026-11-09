@@ -1,4 +1,8 @@
 public enum ClickGuard {
+    public static func shouldPressAccessibility(reason: String, keychainOpen: Bool) -> Bool {
+        !keychainOpen && (reason.hasPrefix("click point is covered by") || reason.hasPrefix("app is not frontmost"))
+    }
+
     public static func failure(targetPID: Int32, hitPID: Int32?,
                                hitName: String?, keychainPromptOpen: Bool,
                                appIsFrontmost: Bool = true, frontmostName: String? = nil,

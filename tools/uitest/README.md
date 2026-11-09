@@ -13,7 +13,7 @@
 
 ### Run safety and failure evidence
 
-Each run takes a non-blocking lock at `~/Library/Caches/scribular-uitest/uitest.lock`; a second run exits with code 2 and reports the active PID. The lock is held until the process exits. Before a mouse click, the runner waits up to 2 seconds for Scribular to become frontmost and checks the click point with the system Accessibility hit-test. Clicks retry on `keychain prompt is covering the app`, `app is not frontmost (frontmost: <name>)`, or `click point is covered by <app name>` until the step timeout.
+Each run takes a non-blocking lock at `~/Library/Caches/scribular-uitest/uitest.lock`; a second run exits with code 2 and reports the active PID. The lock is held until the process exits. Before a mouse click, the runner waits up to 2 seconds for Scribular to become frontmost and checks the click point with the system Accessibility hit-test. For `click` steps only, if the point is covered or Scribular is not frontmost, the runner presses the resolved target through Accessibility; the success log marks this as `pressed via Accessibility (...)`. An open keychain prompt remains a retryable failure. Other covered-click retries continue until the step timeout.
 
 Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fail-<line>-screen.png`, and print the frontmost app name. After quitting the app, every run copies its current log to `app.log` in that run directory when the source log exists.
 

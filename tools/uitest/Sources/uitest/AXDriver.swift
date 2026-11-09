@@ -64,8 +64,7 @@ final class AXDriver: Driver {
             // WebKit reports frames for off-screen content; scroll first so the click lands on the element
             if AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success { Thread.sleep(forTimeInterval: 0.2) }
             guard let frame = frame(of: element) else { throw .retryable("not found") }
-            try click(at: CGPoint(x: frame.midX, y: frame.midY))
-            return nil
+            return try click(element, at: CGPoint(x: frame.midX, y: frame.midY))
         case .pickApp(let app):
             if popupMenuOpen() {
                 _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
@@ -393,6 +392,21 @@ final class AXDriver: Driver {
     private func click(at point: CGPoint) throws(DriverError) {
         try guardClick(at: point)
         try postClick(at: point)
+    }
+
+    private func click(_ element: AXUIElement, at point: CGPoint) throws(DriverError) -> String? {
+        do {
+            try guardClick(at: point)
+            try postClick(at: point)
+            return nil
+        } catch let error {
+            guard case .retryable(let reason) = error,
+                  ClickGuard.shouldPressAccessibility(reason: reason, keychainOpen: keychainWindow() != nil) else {
+                throw error
+            }
+            guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else { throw error }
+            return "pressed via Accessibility (\(reason))"
+        }
     }
 
     private func guardClick(at point: CGPoint) throws(DriverError) {
