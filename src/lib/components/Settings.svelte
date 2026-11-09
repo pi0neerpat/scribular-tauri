@@ -263,7 +263,7 @@
   {/if}
   {#if summaryAvailabilityError}
     <p role="alert">Couldn't check summary availability.</p>
-    <button aria-label="Check summary availability again" onclick={() => retrySummaryAvailability?.()}>Check again</button>
+    <button onclick={() => retrySummaryAvailability?.()}>Check again</button>
   {/if}
   {#if settings}
   {#if category === 'Session'}

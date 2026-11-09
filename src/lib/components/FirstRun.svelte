@@ -95,7 +95,7 @@
     {/if}
     {#if summaryAvailabilityError}
       <p role="alert">Couldn't check summary availability.</p>
-      <button aria-label="Check summary availability again" onclick={listenForSummaryAvailability}>Check again</button>
+      <button onclick={listenForSummaryAvailability}>Check again</button>
     {/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">
