@@ -15,7 +15,7 @@ public final class Player: @unchecked Sendable {
         // A WAVE container needs its 12-byte RIFF/WAVE header; afplay can exit zero on a truncated prefix.
         if file.pathExtension.lowercased() == "wav",
            let fileSize = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           (fileSize ?? 0) < 12 {
+           fileSize < 12 {
             throw DriverError.fatal("play: invalid WAV header: \(file.path)")
         }
         stop()
