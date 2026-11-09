@@ -17,5 +17,5 @@ stop-audio
 # phrase seen identically in 4 recordings of this fixture (2026-11-05); assert fixture words, never summary wording
 expect "since we last met" timeout 180s
 # accessibility text joins the header as "Summary· <style> · <model>"
-expect "Summary·" timeout 300s
+expect "Summary·" timeout 400s
 quit

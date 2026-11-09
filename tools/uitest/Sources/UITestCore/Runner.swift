@@ -3,12 +3,18 @@ import Foundation
 public enum DriverError: Error {
     case retryable(String)
     case fatal(String)
+    case clickBlocked(ClickGuard.Failure)
 }
 
 public protocol Driver {
     func perform(_ command: Command) throws(DriverError) -> String?
     func visibleLabels() -> [String]
     func screenshot(to url: URL) throws
+    func frontmostApplicationName() -> String?
+}
+
+public extension Driver {
+    func frontmostApplicationName() -> String? { nil }
 }
 
 public struct RunOptions {
@@ -57,6 +63,13 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         emit("  screenshot: \(screenshotPath(screenshot))")
         let visible = driver.visibleLabels().prefix(40).map { "\"\($0)\"" }.joined(separator: ", ")
         emit("  visible: \(visible)")
+        if let screen = try? driver.perform(.screenshotScreen(name: "fail-\(step.line)-screen")) {
+            emit("  screen: \(screenshotPath(URL(fileURLWithPath: screen)))")
+        } else {
+            emit("  screen: (not saved)")
+        }
+        emit("  frontmost: \(driver.frontmostApplicationName() ?? "(unknown)")")
+        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
     }
 
     func execute(_ step: Step) throws(DriverError) -> String? {
@@ -104,8 +117,18 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                 switch error {
                 case .fatal(let message):
                     fail(step, message)
-                    emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                     return false
+                case .clickBlocked(let failure):
+                    if started == nil { started = Date() }
+                    let remaining = limit - Date().timeIntervalSince(started ?? Date())
+                    if remaining <= 0 {
+                        let timeout = limit == floor(limit)
+                            ? String(Int(limit))
+                            : String(format: "%.2f", limit).replacingOccurrences(of: #"0+$"#, with: "", options: .regularExpression).replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+                        fail(step, "\(failure.message) after \(timeout)s")
+                        return false
+                    }
+                    Thread.sleep(forTimeInterval: min(options.poll, remaining))
                 case .retryable(let message):
                     if started == nil { started = Date() }
                     let remaining = limit - Date().timeIntervalSince(started ?? Date())
@@ -119,7 +142,6 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                             "\(message) after \(timeout)s"
                         }
                         fail(step, failure)
-                        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
                     let poll = switch step.command {

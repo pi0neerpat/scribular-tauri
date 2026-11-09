@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import Darwin
 import UITestCore
 
 final class AXDriver: Driver {
@@ -63,8 +64,7 @@ final class AXDriver: Driver {
             // WebKit reports frames for off-screen content; scroll first so the click lands on the element
             if AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success { Thread.sleep(forTimeInterval: 0.2) }
             guard let frame = frame(of: element) else { throw .retryable("not found") }
-            try click(at: CGPoint(x: frame.midX, y: frame.midY))
-            return nil
+            return try click(element, at: CGPoint(x: frame.midX, y: frame.midY))
         case .pickApp(let app):
             if popupMenuOpen() {
                 _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
@@ -390,6 +390,78 @@ final class AXDriver: Driver {
     }
 
     private func click(at point: CGPoint) throws(DriverError) {
+        try guardClick(at: point)
+        try postClick(at: point)
+    }
+
+    private func click(_ element: AXUIElement, at point: CGPoint) throws(DriverError) -> String? {
+        do {
+            try guardClick(at: point, target: element)
+            try postClick(at: point)
+            return nil
+        } catch let error {
+            guard case .clickBlocked(let failure) = error,
+                  ClickGuard.shouldPressAccessibility(for: failure) else {
+                if case .clickBlocked(let failure) = error { throw .retryable(failure.message) }
+                throw error
+            }
+            guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else { throw error }
+            return "pressed via Accessibility (\(failure.message))"
+        }
+    }
+
+    private func guardClick(at point: CGPoint, target: AXUIElement? = nil) throws(DriverError) {
+        if keychainWindow() != nil { throw blocked(.keychainPrompt, target: target) }
+        guard let app = application.flatMap({ $0.isTerminated ? nil : $0 })
+                ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
+            throw blocked(.appNotFrontmost(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"), target: target)
+        }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            _ = AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            if let window = axElement(attribute(appElement, kAXMainWindowAttribute))
+                    ?? (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.first {
+                _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            }
+            _ = app.activate(options: [.activateAllWindows])
+            _ = waitUntil(timeout: 2) { NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier }
+        }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: nil,
+                                           hitName: nil,
+                                           keychainPromptOpen: false,
+                                           appIsFrontmost: frontmost?.processIdentifier == app.processIdentifier,
+                                           frontmostName: frontmost?.localizedName,
+                                           hitTestComplete: false) {
+            throw blocked(reason, target: target)
+        }
+        let system = AXUIElementCreateSystemWide()
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+              let hit else {
+            throw blocked(.covered("unknown app"), target: target)
+        }
+        var hitPID: pid_t = 0
+        guard AXUIElementGetPid(hit, &hitPID) == .success else {
+            throw blocked(.covered("unknown app"), target: target)
+        }
+        let hitName = NSRunningApplication(processIdentifier: hitPID)?.localizedName
+        let hitBelongsToTarget = hitPID == app.processIdentifier
+            ? target.map { target in CFEqual(hit, target) || allElements(from: target).contains { CFEqual($0, hit) } } ?? true
+            : false
+        if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: hitPID,
+                                           hitName: hitName,
+                                           keychainPromptOpen: false, hitTestComplete: true,
+                                           hitBelongsToTarget: hitBelongsToTarget) {
+            throw blocked(reason, target: target)
+        }
+    }
+
+    private func blocked(_ failure: ClickGuard.Failure, target: AXUIElement?) -> DriverError {
+        target == nil ? .retryable(failure.message) : .clickBlocked(failure)
+    }
+
+    private func postClick(at point: CGPoint) throws(DriverError) {
         for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else {
                 throw .fatal("could not create mouse event")
@@ -397,6 +469,8 @@ final class AXDriver: Driver {
             event.post(tap: .cghidEventTap)
         }
     }
+
+    func frontmostApplicationName() -> String? { NSWorkspace.shared.frontmostApplication?.localizedName }
 
     /// SecurityAgent can linger after a prompt closes, so only an open window counts as a prompt.
     private func keychainWindow() -> AXUIElement? {
@@ -427,7 +501,7 @@ final class AXDriver: Driver {
         case .found(let value): field = value
         }
         guard let fieldRect = frame(of: field) else { throw .fatal("keychain password field not found") }
-        try click(at: CGPoint(x: fieldRect.midX, y: fieldRect.midY))
+        try postClick(at: CGPoint(x: fieldRect.midX, y: fieldRect.midY))
         _ = try perform(.type(keychainPassword))
         let allow = allElements(from: window).filter { matches($0, exact: "Always Allow") }
         let button: AXUIElement
@@ -437,7 +511,7 @@ final class AXDriver: Driver {
         case .found(let value): button = value
         }
         guard let buttonRect = frame(of: button) else { throw .fatal("Always Allow button not found") }
-        try click(at: CGPoint(x: buttonRect.midX, y: buttonRect.midY))
+        try postClick(at: CGPoint(x: buttonRect.midX, y: buttonRect.midY))
         return nil
     }
 }
