@@ -661,16 +661,28 @@ pub fn retry_summary_model(
 
 pub fn restore_summary_model_setting(store: &Store, models: &ModelManager) -> Result<(), String> {
     let Some(id) = store.get_setting(SUMMARY_MODEL_ID).map_err(|e| {
-        format!("summary model setting read failed ({})", crate::diag::log::kind(&e))
+        format!(
+            "summary model setting read failed ({})",
+            crate::diag::log::kind(&e)
+        )
     })?
     else {
         return Ok(());
     };
     if models.select_llm(&id).is_err() {
-        crate::diag::log::log("WARN", "models", "resetting unknown summary model selection");
+        crate::diag::log::log(
+            "WARN",
+            "models",
+            "resetting unknown summary model selection",
+        );
         store
             .set_setting(SUMMARY_MODEL_ID, crate::models::DEFAULT_LLM)
-            .map_err(|e| format!("summary model setting reset failed ({})", crate::diag::log::kind(&e)))?;
+            .map_err(|e| {
+                format!(
+                    "summary model setting reset failed ({})",
+                    crate::diag::log::kind(&e)
+                )
+            })?;
     }
     Ok(())
 }

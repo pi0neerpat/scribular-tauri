@@ -1,7 +1,7 @@
 # Dependency review: M3 (model download)
 
-**Date:** 2026-10-19
-**Status:** Approved 2026-10-19.
+**Date:** 2026-11-08
+**Status:** Original M3 review approved 2026-10-19; Gemma 4 E2B model choice approved by Patrick 2026-11-07 (see `2026-11-07-note-style-coach-spec.md`, execution notes).
 **Policy:** `../notes-assistant-electron/CLAUDE.md` § Dependency Policy (review, audit,
 exact pin, in-house check).
 
@@ -58,21 +58,28 @@ reasonable to write in-house.
 
 ## Models (KTD8 manifest)
 
-Both files are public and ungated: anonymous requests work, and both redirect (302) to
-Hugging Face's CDN, which answers `Range` requests with `206`. URLs are pinned to a repo
-commit, not `main`, so the file under a URL can't change. The app also checks size and
-sha256 before renaming the download into place.
+The required Whisper and summary-model files are public and ungated: anonymous requests
+work, and both redirect (302) to Hugging Face's CDN, which answers `Range` requests with
+`206`. URLs are pinned to a repo commit, not `main`, so the file under a URL can't
+change. The app also checks size and sha256 before renaming the download into place.
+The optional speaker model is hosted separately and is not covered by these checks.
+Anonymous one-byte range requests to each required pinned URL returned `206` after one
+redirect.
 
 | Model | URL (pinned commit) | Size (bytes) | sha256 | License |
 |---|---|---|---|---|
 | Whisper base | `huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin` | 147 951 465 | `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe` | MIT |
-| Gemma 2 2B IT Q4_K_M | `huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/855f67caed130e1befc571b52bd181be2e858883/gemma-2-2b-it-Q4_K_M.gguf` | 1 708 582 752 | `e0aee85060f168f0f2d8473d7ea41ce2f3230c1bc1374847505ea599288a7787` | Gemma Terms of Use |
 | Gemma 4 E2B IT Q4_K_M | `huggingface.co/axteam/gemma-4-E2B-it-GGUF/resolve/21d0b2296fd0fd4726c83e3015b086add5fa99d8/gemma-4-E2B-it-GGUF-Q4_K_M.gguf` | 3 427 879 936 | `0f1a91a281de002438842f54b4a186d7ea913be290c22ba2d10314e67e0e193a` | Apache-2.0 |
 
-⚠️ **Gemma 2 is not under an OSI license.** The Gemma Terms of Use allow redistribution
-and commercial use but carry a prohibited-use policy that passes on to users. The
-manifest records the license name and URL, and the download UI should show it. This
-matches the model choice already in the plan; flagging it so the approval covers it.
+Hugging Face's pinned-revision file metadata at
+`https://huggingface.co/api/models/axteam/gemma-4-E2B-it-GGUF/tree/21d0b2296fd0fd4726c83e3015b086add5fa99d8?recursive=false`
+reports size
+`3,427,879,936` and LFS SHA-256
+`0f1a91a281de002438842f54b4a186d7ea913be290c22ba2d10314e67e0e193a`, matching the
+manifest. Full download hash verification remains part of AS10.
+The axteam model card describes the GGUF as a quantized derivative governed by Gemma 4's
+license. Google's [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4)
+lists Apache 2.0, and the manifest links to Google's [Apache 2.0 license](https://ai.google.dev/gemma/apache_2).
 
 ---
 
@@ -82,7 +89,7 @@ matches the model choice already in the plan; flagging it so the approval covers
 |---|---|
 | `reqwest =0.13.5` (no defaults, `native-tls`) | ✅ Approve |
 | `sha2 =0.10.9` | ✅ Approve (already in the tree) |
-| Model pins above | ✅ Approve, with the Gemma license shown in the UI |
+| Model pins above | ✅ Approved; Gemma 4 E2B choice approved by Patrick in the spec on 2026-11-07 |
 
 ## Lockfile check
 

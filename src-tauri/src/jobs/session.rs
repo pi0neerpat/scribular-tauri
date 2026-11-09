@@ -142,8 +142,7 @@ const WHISPER_UNLOAD_RAM_BYTES: u64 = 8 << 30;
 
 /// Whether this Mac has 8 GiB of memory or less. Unknown counts as low.
 fn low_memory() -> bool {
-    crate::hardware::physical_memory_bytes()
-        .is_none_or(|bytes| bytes <= WHISPER_UNLOAD_RAM_BYTES)
+    crate::hardware::physical_memory_bytes().is_none_or(|bytes| bytes <= WHISPER_UNLOAD_RAM_BYTES)
 }
 
 #[derive(Default)]
@@ -572,7 +571,11 @@ impl Inner {
                 store::INTERRUPTED
             };
             if let Err(e) = inner.store.fail_recovery(id, persisted) {
-                crate::diag::log::log("ERROR", "recover", &format!("recover {id} ({})", crate::diag::log::kind(&e)));
+                crate::diag::log::log(
+                    "ERROR",
+                    "recover",
+                    &format!("recover {id} ({})", crate::diag::log::kind(&e)),
+                );
             }
             inner.emit(id, SessionStatus::Failed, message);
         };
@@ -656,7 +659,14 @@ impl Inner {
                         }
                     }
                     Err(e) => {
-                        crate::diag::log::log("WARN", "recover", &format!("recover {id}: diarization data unavailable ({})", crate::diag::log::kind(&e)));
+                        crate::diag::log::log(
+                            "WARN",
+                            "recover",
+                            &format!(
+                                "recover {id}: diarization data unavailable ({})",
+                                crate::diag::log::kind(&e)
+                            ),
+                        );
                         self.emit(
                             id,
                             SessionStatus::Finalizing,
@@ -680,7 +690,14 @@ impl Inner {
             return failed(self, &e.to_string());
         }
         if let Err(e) = self.store.set_timings(id, &Timings::default()) {
-            crate::diag::log::log("WARN", "recover", &format!("recover {id}: saving timings failed ({})", crate::diag::log::kind(&e)));
+            crate::diag::log::log(
+                "WARN",
+                "recover",
+                &format!(
+                    "recover {id}: saving timings failed ({})",
+                    crate::diag::log::kind(&e)
+                ),
+            );
         }
         if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
             lock(&self.model).take();

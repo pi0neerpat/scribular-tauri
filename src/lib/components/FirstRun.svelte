@@ -12,6 +12,7 @@
   let models = $state<ModelProgress[]>([]);
   let telemetry = $state<boolean | null>(null);
   let telemetryError = $state<string | null>(null);
+  let summaryAvailabilityError = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let telemetryChosen = false;
   let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
@@ -37,7 +38,10 @@
     // Listen before the snapshot and download, so no progress event is missed;
     // entries already updated by an event are newer than the snapshot.
     const unlisten = onModelsProgress((p) => update([...models.filter((m) => m.modelId !== p.modelId), p]));
-    const summaryListener = subscribeSummaryAvailability((state) => { summaryAvailability = state; });
+    const summaryListener = subscribeSummaryAvailability((state) => {
+      summaryAvailability = state;
+      summaryAvailabilityError = null;
+    }).catch((e) => { summaryAvailabilityError = String(e); return () => {}; });
     unlisten
       .then(() => modelsStatus())
       .then((s) => update(mergeSnapshot(s, models)))
@@ -65,9 +69,10 @@
     {/if}
     {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
       <SummaryUnavailable />
-    {:else if summaryAvailability === 'downloading'}
+    {:else if summaryAvailability === 'downloading' && !summaryAvailabilityError}
       <p>Waiting for the summary model download…</p>
     {/if}
+    {#if summaryAvailabilityError}<p role="alert">Couldn't check summary availability.</p>{/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">
         <h2 id="telemetry-title">Help improve Scribular?</h2>

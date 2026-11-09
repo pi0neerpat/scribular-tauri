@@ -97,7 +97,8 @@
     let progressVersion = 0;
     let sawUpdate = false;
     void (async () => {
-      const summarySubscription = subscribeSummaryAvailability((state) => { summaryAvailability = state; });
+      const summarySubscription = subscribeSummaryAvailability((state) => { summaryAvailability = state; })
+        .catch((e) => { error = String(e); return () => {}; });
       summarySubscription.then((remove) => { if (disposed) remove(); else summaryUnlisten = remove; });
       try {
         const app = await getAppSettings();

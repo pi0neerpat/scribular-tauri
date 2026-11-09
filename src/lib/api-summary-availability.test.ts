@@ -41,3 +41,19 @@ it('keeps an event that arrives while the snapshot is pending', async () => {
   expect(state).toHaveBeenCalledOnce();
   expect(state).toHaveBeenCalledWith('ready');
 });
+
+it('unlistens and propagates a failed availability snapshot', async () => {
+  const unlisten = vi.fn();
+  mocks.listen.mockResolvedValue(unlisten);
+  mocks.invoke.mockRejectedValue(new Error('IPC failed'));
+
+  await expect(subscribeSummaryAvailability(vi.fn())).rejects.toThrow('IPC failed');
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it('propagates a failed listener setup', async () => {
+  mocks.listen.mockRejectedValue(new Error('listener failed'));
+
+  await expect(subscribeSummaryAvailability(vi.fn())).rejects.toThrow('listener failed');
+  expect(mocks.invoke).not.toHaveBeenCalled();
+});

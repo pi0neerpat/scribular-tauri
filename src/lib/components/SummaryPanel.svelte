@@ -62,7 +62,8 @@
   });
 
   onMount(() => {
-    const availability = subscribeSummaryAvailability((state) => { summaryAvailability = state; });
+    const availability = subscribeSummaryAvailability((state) => { summaryAvailability = state; })
+      .catch((e) => { error = String(e); return () => {}; });
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;

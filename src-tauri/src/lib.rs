@@ -212,7 +212,11 @@ pub fn run() {
         .setup(|app| {
             if let Ok(menu) = tauri::menu::Menu::default(&app.handle()) {
                 if let Err(e) = app.set_menu(menu) {
-                    diag::log::log("WARN", "shell", &format!("default app menu unavailable ({})", diag::log::kind(&e)));
+                    diag::log::log(
+                        "WARN",
+                        "shell",
+                        &format!("default app menu unavailable ({})", diag::log::kind(&e)),
+                    );
                 }
             }
             let data_dir = app.path().app_data_dir()?;
@@ -279,7 +283,11 @@ pub fn run() {
                 return Ok(());
             }
             if let Err(e) = shell::tray::install(app) {
-                diag::log::log("WARN", "shell", &format!("tray unavailable ({})", diag::log::kind(e.as_ref())));
+                diag::log::log(
+                    "WARN",
+                    "shell",
+                    &format!("tray unavailable ({})", diag::log::kind(e.as_ref())),
+                );
             }
             let store = Arc::new(opened?);
             store.seed_samples_if_needed()?;

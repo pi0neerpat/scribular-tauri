@@ -454,22 +454,23 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let old = dir.join(OLD_SUMMARY_MODEL_FILE);
         fs::write(&old, b"old model").unwrap();
-        let manager = ModelManager::new_with_memory(
-            dir.clone(),
-            manifest(),
-            Some(MIN_SUMMARY_RAM_BYTES - 1),
-        );
+        let manager =
+            ModelManager::new_with_memory(dir.clone(), manifest(), Some(MIN_SUMMARY_RAM_BYTES - 1));
         manager.readiness.set(WHISPER_BASE, ModelState::Ready);
         let seen = Mutex::new(Vec::new());
 
-        tauri::async_runtime::block_on(manager.ensure_all_with_memory(
-            Some(MIN_SUMMARY_RAM_BYTES - 1),
-            &|progress| seen.lock().unwrap().push(progress.model_id),
-        ));
+        tauri::async_runtime::block_on(
+            manager.ensure_all_with_memory(Some(MIN_SUMMARY_RAM_BYTES - 1), &|progress| {
+                seen.lock().unwrap().push(progress.model_id)
+            }),
+        );
 
         assert_eq!(*seen.lock().unwrap(), [WHISPER_BASE]);
         assert_eq!(manager.readiness.get(DEFAULT_LLM), ModelState::Missing);
-        assert_eq!(manager.summary_availability(), SummaryAvailability::Unsupported);
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::Unsupported
+        );
         assert!(!old.exists());
         fs::remove_dir_all(dir).unwrap();
     }

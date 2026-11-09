@@ -294,7 +294,15 @@ impl JobQueue {
                 Ok(true) => deleted += 1,
                 Ok(false) => skipped += 1,
                 Err(e) => {
-                    crate::diag::log::log("ERROR", "queue", &format!("clear sessions: deleting {} failed ({})", session.id, crate::diag::log::kind(&e)));
+                    crate::diag::log::log(
+                        "ERROR",
+                        "queue",
+                        &format!(
+                            "clear sessions: deleting {} failed ({})",
+                            session.id,
+                            crate::diag::log::kind(&e)
+                        ),
+                    );
                     skipped += 1;
                 }
             }
