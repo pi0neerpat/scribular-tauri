@@ -560,10 +560,9 @@ fn whisper_load_only_wait_does_not_call_wait_notice() {
             );
             done_tx.send(result).unwrap();
         });
-        let notice_was_shown = notice_rx.recv_timeout(Duration::from_millis(50)).is_ok();
         release_tx.send(()).unwrap();
         assert_eq!(done_rx.recv_timeout(WAIT).unwrap(), Some("ready"));
-        assert!(!notice_was_shown);
+        assert!(notice_rx.try_recv().is_err());
     });
 }
 
