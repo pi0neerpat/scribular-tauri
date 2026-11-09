@@ -55,3 +55,20 @@ import Testing
 
     #expect(throws: DriverError.self) { try player.start(bad, loop: true) }
 }
+
+@Test func playRejectsInvalidTwelveByteWaveHeader() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let bad = root.appendingPathComponent("bad.wav")
+    try Data("BAD!1234NOPE".utf8).write(to: bad)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/true"))
+    defer { player.stop() }
+
+    do {
+        try player.start(bad, loop: true)
+        Issue.record("expected an invalid WAV header error")
+    } catch let error as DriverError {
+        guard case .fatal(let message) = error else { Issue.record("expected .fatal"); return }
+        #expect(message == "play: invalid WAV header: \(bad.path)")
+    }
+}

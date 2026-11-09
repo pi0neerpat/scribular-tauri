@@ -29,6 +29,13 @@ sed -i '' 's/@Test func one() {}/@Test func one() { #expect(true) }/' tools/uite
 git add tools/uitest/Tests/UITestCoreTests/PlayTests.swift
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm 'replace test while preserving count'
 bash "$script" "$base"
+sed -i '' '/@Test func two() {}/d' tools/uitest/Tests/UITestCoreTests/PlayTests.swift
+git add tools/uitest/Tests/UITestCoreTests/PlayTests.swift
+GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm 'remove an existing test'
+if bash "$script" "$base"; then
+  echo 'expected deleting an existing test to fail additive guard' >&2
+  exit 1
+fi
 printf 'changed\n' > tools/uitest/Tests/Existing.swift
 git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm modifying

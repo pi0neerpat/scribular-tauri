@@ -12,13 +12,13 @@ public final class Player: @unchecked Sendable {
     init(executableURL: URL) { self.executableURL = executableURL }
 
     public func start(_ file: URL, loop: Bool) throws {
-        // A WAVE container needs its 12-byte RIFF/WAVE header; afplay can exit zero on a truncated prefix.
-        if file.pathExtension.lowercased() == "wav",
-           let fileSize = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           fileSize < 12 {
-            throw DriverError.fatal("play: invalid WAV header: \(file.path)")
-        }
         stop()
+        if file.pathExtension.lowercased() == "wav" {
+            let header = (try? Data(contentsOf: file, options: .mappedIfSafe)).map { Data($0.prefix(12)) } ?? Data()
+            if header.count != 12 || header.prefix(4) != Data("RIFF".utf8) || header.suffix(4) != Data("WAVE".utf8) {
+                throw DriverError.fatal("play: invalid WAV header: \(file.path)")
+            }
+        }
         lock.lock()
         let child: Process
         do { child = try spawn(file, loop: loop, generation: generation) } catch { lock.unlock(); throw error }
