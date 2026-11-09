@@ -23,8 +23,8 @@ Investigation on 2026-11-09 (VM, `/Users/admin/Projects/Scribular/scribular-taur
 
 ## Scope
 
-1. Cherry-pick the three investigation commits (already on this branch: e68bf84, 4304242,
-   6e4e617) that:
+1. Verify the three investigation commits already present on this branch (e68bf84, 4304242,
+   6e4e617), which:
    - refuse clicks while a Keychain prompt is open;
    - hit-test the click point; if the target is covered, press it via AXPress and log
      `covered by <app>; pressed via AX`;

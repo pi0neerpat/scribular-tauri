@@ -203,10 +203,19 @@ private func runCLI() -> Int32 {
 private func copyAppLog(to runDir: URL) {
     let source = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/com.app.scribular.tauri/logs/scribular.log")
-    guard FileManager.default.fileExists(atPath: source.path) else { return }
+    guard FileManager.default.fileExists(atPath: source.path) else {
+        print("app.log not copied: source log not found")
+        return
+    }
     let destination = runDir.appendingPathComponent("app.log")
-    try? FileManager.default.removeItem(at: destination)
-    try? FileManager.default.copyItem(at: source, to: destination)
+    do {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
+    } catch {
+        print("app.log copy failed: \(error.localizedDescription)")
+    }
 }
 
 private func runDoctor(_ args: [String]) -> Int32 {

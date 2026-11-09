@@ -7,7 +7,6 @@ click "App audio" index 1
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
 pick-app "afplay" timeout 60s
 click "Note styles"
-click "Record" index 1
 click "New style"
 click "Name" index 2
 type "UITest Recap"

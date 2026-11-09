@@ -396,24 +396,25 @@ final class AXDriver: Driver {
 
     private func click(_ element: AXUIElement, at point: CGPoint) throws(DriverError) -> String? {
         do {
-            try guardClick(at: point)
+            try guardClick(at: point, target: element)
             try postClick(at: point)
             return nil
         } catch let error {
-            guard case .retryable(let reason) = error,
-                  ClickGuard.shouldPressAccessibility(reason: reason, keychainOpen: keychainWindow() != nil) else {
+            guard case .clickBlocked(let failure) = error,
+                  ClickGuard.shouldPressAccessibility(for: failure) else {
+                if case .clickBlocked(let failure) = error { throw .retryable(failure.message) }
                 throw error
             }
             guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else { throw error }
-            return "pressed via Accessibility (\(reason))"
+            return "pressed via Accessibility (\(failure.message))"
         }
     }
 
-    private func guardClick(at point: CGPoint) throws(DriverError) {
-        if keychainWindow() != nil { throw .retryable("keychain prompt is covering the app") }
+    private func guardClick(at point: CGPoint, target: AXUIElement? = nil) throws(DriverError) {
+        if keychainWindow() != nil { throw blocked(.keychainPrompt, target: target) }
         guard let app = application.flatMap({ $0.isTerminated ? nil : $0 })
                 ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
-            throw .retryable("app is not frontmost (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"))")
+            throw blocked(.appNotFrontmost(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"), target: target)
         }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
             let appElement = AXUIElementCreateApplication(app.processIdentifier)
@@ -432,24 +433,31 @@ final class AXDriver: Driver {
                                            appIsFrontmost: frontmost?.processIdentifier == app.processIdentifier,
                                            frontmostName: frontmost?.localizedName,
                                            hitTestComplete: false) {
-            throw .retryable(reason)
+            throw blocked(reason, target: target)
         }
         let system = AXUIElementCreateSystemWide()
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
               let hit else {
-            throw .retryable("click point is covered by unknown app")
+            throw blocked(.covered("unknown app"), target: target)
         }
         var hitPID: pid_t = 0
         guard AXUIElementGetPid(hit, &hitPID) == .success else {
-            throw .retryable("click point is covered by unknown app")
+            throw blocked(.covered("unknown app"), target: target)
         }
         let hitName = NSRunningApplication(processIdentifier: hitPID)?.localizedName
         if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: hitPID,
                                            hitName: hitName,
-                                           keychainPromptOpen: false, hitTestComplete: true) {
-            throw .retryable(reason)
+                                           keychainPromptOpen: false, hitTestComplete: true,
+                                           hitBelongsToTarget: target.map { target in
+                                               CFEqual(hit, target) || allElements(from: target).contains { CFEqual($0, hit) }
+                                           } ?? true) {
+            throw blocked(reason, target: target)
         }
+    }
+
+    private func blocked(_ failure: ClickGuard.Failure, target: AXUIElement?) -> DriverError {
+        target == nil ? .retryable(failure.message) : .clickBlocked(failure)
     }
 
     private func postClick(at point: CGPoint) throws(DriverError) {

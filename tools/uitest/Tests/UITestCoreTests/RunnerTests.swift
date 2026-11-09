@@ -64,10 +64,8 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
     #expect(!passed)
     #expect(output[0] == "✗ 1 expect \"X\": not found after 0.05s")
     #expect(output[1].contains("screenshot: "))
-    #expect(output[2] == "  screen: /tmp/run/fail-1-screen.png")
-    #expect(output[3] == "  frontmost: (unknown)")
-    #expect(output[4] == "  visible: \"Settings\", \"Note styles\"")
-    #expect(output[5] == "FAIL 0/1 steps — recording: no recording")
+    #expect(output[2] == "  visible: \"Settings\", \"Note styles\"")
+    #expect(output[3] == "FAIL 0/1 steps — recording: no recording")
     #expect(driver.screenshots == [runDir.appendingPathComponent("fail-1.png")])
 }
 
@@ -96,6 +94,26 @@ private func step(_ line: Int, _ command: Command, source: String) -> Step {
                                          onStep: { _, _ in log.events.append("timestamp") }),
                      out: { _ in }))
     #expect(log.events == ["perform", "timestamp", "sleep", "perform", "timestamp", "sleep"])
+}
+
+@Test func failedScreenCaptureIsReportedAfterExistingFailureOutput() {
+    final class ScreenFailureDriver: Driver {
+        func perform(_ command: Command) throws(DriverError) -> String? {
+            if case .screenshotScreen = command { return nil }
+            throw .retryable("not found")
+        }
+        func visibleLabels() -> [String] { [] }
+        func screenshot(to url: URL) throws {}
+    }
+
+    var output = [String]()
+    #expect(!runSteps([step(1, .expect("X"), source: "expect \"X\"")],
+                       driver: ScreenFailureDriver(),
+                       options: RunOptions(timeout: 0, runDir: URL(fileURLWithPath: "/tmp/run"), recordingPath: "no recording"),
+                       out: { output.append($0) }))
+    #expect(output[2] == "  visible: ")
+    #expect(output[3] == "FAIL 0/1 steps — recording: no recording")
+    #expect(output[4] == "  screen: (not saved)")
 }
 
 @Test func fatalStopsImmediately() {

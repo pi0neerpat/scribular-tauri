@@ -3,6 +3,7 @@ import Foundation
 public enum DriverError: Error {
     case retryable(String)
     case fatal(String)
+    case clickBlocked(ClickGuard.Failure)
 }
 
 public protocol Driver {
@@ -60,12 +61,15 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let screenshot = options.runDir.appendingPathComponent("fail-\(step.line).png")
         try? driver.screenshot(to: screenshot)
         emit("  screenshot: \(screenshotPath(screenshot))")
-        if let screen = try? driver.perform(.screenshotScreen(name: "fail-\(step.line)-screen")) {
-            emit("  screen: \(screenshotPath(URL(fileURLWithPath: screen)))")
-        }
-        emit("  frontmost: \(driver.frontmostApplicationName() ?? "(unknown)")")
         let visible = driver.visibleLabels().prefix(40).map { "\"\($0)\"" }.joined(separator: ", ")
         emit("  visible: \(visible)")
+        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
+        if let screen = try? driver.perform(.screenshotScreen(name: "fail-\(step.line)-screen")) {
+            emit("  screen: \(screenshotPath(URL(fileURLWithPath: screen)))")
+        } else {
+            emit("  screen: (not saved)")
+        }
+        emit("  frontmost: \(driver.frontmostApplicationName() ?? "(unknown)")")
     }
 
     func execute(_ step: Step) throws(DriverError) -> String? {
@@ -113,8 +117,15 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                 switch error {
                 case .fatal(let message):
                     fail(step, message)
-                    emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                     return false
+                case .clickBlocked(let failure):
+                    if started == nil { started = Date() }
+                    let remaining = limit - Date().timeIntervalSince(started ?? Date())
+                    if remaining <= 0 {
+                        fail(step, "\(failure.message) after \(Int(limit))s")
+                        return false
+                    }
+                    Thread.sleep(forTimeInterval: min(options.poll, remaining))
                 case .retryable(let message):
                     if started == nil { started = Date() }
                     let remaining = limit - Date().timeIntervalSince(started ?? Date())
@@ -128,7 +139,6 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
                             "\(message) after \(timeout)s"
                         }
                         fail(step, failure)
-                        emit("FAIL \(passed)/\(steps.count) steps\(options.recordingPath == "no recording" ? " — recording: no recording" : "")")
                         return false
                     }
                     let poll = switch step.command {
