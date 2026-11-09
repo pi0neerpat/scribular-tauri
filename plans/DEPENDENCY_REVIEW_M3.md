@@ -76,7 +76,9 @@ Hugging Face's pinned-revision file metadata at
 reports size
 `3,427,879,936` and LFS SHA-256
 `0f1a91a281de002438842f54b4a186d7ea913be290c22ba2d10314e67e0e193a`, matching the
-manifest. Full download hash verification remains part of AS10.
+manifest. A stream-only download from the pinned URL also read exactly
+`3,427,879,936` bytes and produced that SHA-256; no local model file was retained. AS10
+still covers installing through the app and running inference.
 The axteam model card describes the GGUF as a quantized derivative governed by Gemma 4's
 license. Google's [Gemma 4 model card](https://ai.google.dev/gemma/docs/core/model_card_4)
 lists Apache 2.0, and the manifest links to Google's [Apache 2.0 license](https://ai.google.dev/gemma/apache_2).

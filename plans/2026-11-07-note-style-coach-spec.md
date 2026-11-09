@@ -186,7 +186,7 @@ The feature ships as two parts, in order:
 
 Security check for the model download (in the PR description):
 - [x] **License**: Gemma 4 E2B is Apache-2.0; license URL recorded in the manifest.
-- [x] **Pinned artifact:** Hugging Face pinned-revision metadata matches the manifest size and SHA-256; full download verification remains for AS10 (R1).
+- [x] **Pinned artifact:** Hugging Face pinned-revision metadata and a stream-only download match the manifest size and SHA-256; AS10 still verifies the app download and inference (R1).
 - [ ] **Known vulnerabilities:** `cargo audit` / `npm audit` unchanged by this work.
 - [ ] **Bundled data** from the MIT hackathon repo is fictional; copyright line kept in a NOTICE entry.
 
