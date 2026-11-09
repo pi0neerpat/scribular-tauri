@@ -116,8 +116,9 @@ cutoff, both moved with `cargo update --precise`:
 
 The historical full whole-lockfile recheck below covers the 2026-10-05 cutoff. The
 2026-11-08 follow-up against the 2026-10-25 cutoff is recorded in
-[`DEPENDENCY_REVIEW_ENGINES.md`](DEPENDENCY_REVIEW_ENGINES.md); crates.io throttled the
-current-tree recheck, so that follow-up is explicitly incomplete.
+[`DEPENDENCY_REVIEW_ENGINES.md`](DEPENDENCY_REVIEW_ENGINES.md): the later scan checked
+572 crates and found seven post-cutoff packages, all already present at the same
+versions in `origin/main`. The two llama 0.1.160 pins added here meet the cutoff.
 
 **Recheck (2026-10-19, real `src-tauri/Cargo.lock` after U4):** 446 crates checked,
 0 published after the 2026-10-05 cutoff.
