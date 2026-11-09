@@ -6,8 +6,8 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        mpsc, Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -401,6 +401,90 @@ fn a_second_regenerate_waits_for_the_first() {
     assert!(order[first_b..].iter().all(|s| *s == b));
     // The model loads once and stays loaded for the next job.
     assert_eq!(h.loader.loads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn whisper_load_does_not_wait_for_a_summary_waiting_on_its_download() {
+    let h = Harness::with_loader(
+        100,
+        |_| {},
+        |loader| {
+            loader.ready.store(false, Ordering::SeqCst);
+        },
+    );
+    let id = h.session(&words(20), "");
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+
+    assert_eq!(
+        h.queue
+            .while_transcription_safe(&AtomicBool::new(false), || "loaded"),
+        Some("loaded")
+    );
+    assert_eq!(h.get(&id).status, SessionStatus::AwaitingModel);
+
+    h.loader.ready.store(true, Ordering::SeqCst);
+    h.wait_idle();
+}
+
+#[test]
+fn whisper_load_waits_for_a_running_summary_but_stops_when_cancelled() {
+    let h = Harness::with_budget(100, |fake| {
+        fake.token_delay = Duration::from_millis(300);
+    });
+    let id = h.session(&words(20), "");
+    h.queue.regenerate(&id, PROMPT_ID).unwrap();
+    h.events
+        .wait_for(|p| p.session_id == id && p.state == SessionStatus::Summarizing);
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    std::thread::scope(|scope| {
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker_cancel = Arc::clone(&cancelled);
+        let queue = &h.queue;
+        scope.spawn(move || {
+            let result = queue.while_transcription_safe(&worker_cancel, || "loaded");
+            done_tx.send(result).unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        cancelled.store(true, Ordering::Relaxed);
+        assert_eq!(done_rx.recv_timeout(WAIT).unwrap(), None);
+    });
+    h.wait_idle();
+}
+
+#[test]
+fn summary_admission_waits_until_whisper_loading_finishes() {
+    let h = Harness::with_budget(100, |_| {});
+    let id = h.session(&words(20), "");
+    let cancel = AtomicBool::new(false);
+
+    std::thread::scope(|scope| {
+        let (loading_tx, loading_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let queue = &h.queue;
+        scope.spawn(move || {
+            assert_eq!(
+                queue.while_transcription_safe(&cancel, || {
+                    loading_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                }),
+                Some(())
+            );
+        });
+        loading_rx.recv_timeout(WAIT).unwrap();
+
+        let (admitted_tx, admitted_rx) = mpsc::channel();
+        let queue = &h.queue;
+        let id = id.clone();
+        scope.spawn(move || {
+            queue.regenerate(&id, PROMPT_ID).unwrap();
+            admitted_tx.send(()).unwrap();
+        });
+        assert!(admitted_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        release_tx.send(()).unwrap();
+        admitted_rx.recv_timeout(WAIT).unwrap();
+    });
+    h.wait_idle();
 }
 
 #[test]

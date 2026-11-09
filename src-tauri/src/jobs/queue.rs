@@ -216,6 +216,32 @@ impl JobQueue {
         Some(operation())
     }
 
+    /// Waits for active or ready summaries before loading Whisper, while
+    /// allowing transcription during a summary-model download. The queue
+    /// lock covers `operation` so a summary cannot start during the load.
+    pub fn while_transcription_safe<T>(
+        &self,
+        cancel: &AtomicBool,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let mut state = self.shared.lock();
+        while !cancel.load(Ordering::Relaxed)
+            && (state.running.is_some()
+                || (!state.pending.is_empty() && self.shared.loader.ready()))
+        {
+            state = self
+                .shared
+                .changed
+                .wait_timeout(state, Duration::from_millis(100))
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        Some(operation())
+    }
+
     /// Starts loading the summary model in the background, so a recording's
     /// summary doesn't wait for it after the transcript is done (M5b).
     pub fn preload(&self) {

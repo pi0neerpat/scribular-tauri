@@ -606,7 +606,7 @@ impl Inner {
                 if cancel.load(Ordering::Relaxed) {
                     return failed(self, store::INTERRUPTED);
                 }
-                let stt = match self.transcriber() {
+                let stt = match self.transcriber(cancel) {
                     Ok(s) => s,
                     Err(e) => return failed(self, &e),
                 };
@@ -769,10 +769,17 @@ impl Inner {
     }
 
     /// Whisper, loading it if no recording has yet.
-    fn transcriber(&self) -> Result<Arc<dyn Transcriber>, String> {
+    fn transcriber(&self, cancel: &AtomicBool) -> Result<Arc<dyn Transcriber>, String> {
         if self.unload_whisper.load(Ordering::Relaxed) {
-            while !self.jobs.wait_idle(Duration::from_secs(1)) {}
+            return self
+                .jobs
+                .while_transcription_safe(cancel, || self.load_transcriber())
+                .unwrap_or_else(|| Err("cancelled".into()));
         }
+        self.load_transcriber()
+    }
+
+    fn load_transcriber(&self) -> Result<Arc<dyn Transcriber>, String> {
         let mut model = lock(&self.model);
         if let Some(model) = &*model {
             return Ok(Arc::clone(model));
@@ -791,7 +798,7 @@ impl Inner {
         audio: &mpsc::Receiver<Vec<f32>>,
         cancel: &AtomicBool,
     ) -> Result<Stream, String> {
-        let stt = self.transcriber()?;
+        let stt = self.transcriber(cancel)?;
         let mut stream = Stream::default();
         let mut catching_up = false;
         loop {
@@ -1102,7 +1109,7 @@ impl Inner {
                 }
                 // Loaded on demand: a recording that streamed every window
                 // needs no model here.
-                let stt = self.transcriber()?;
+                let stt = self.transcriber(cancel)?;
                 partial = !self.window(id, source, &mut stream, &window, &*stt, cancel)?;
             }
         }
