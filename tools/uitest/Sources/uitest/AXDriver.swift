@@ -397,11 +397,17 @@ final class AXDriver: Driver {
 
     private func guardClick(at point: CGPoint) throws(DriverError) {
         if keychainWindow() != nil { throw .retryable("keychain prompt is covering the app") }
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
+        guard let app = application.flatMap({ $0.isTerminated ? nil : $0 })
+                ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
             throw .retryable("app is not frontmost (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"))")
         }
-        application = app
         if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            let appElement = AXUIElementCreateApplication(app.processIdentifier)
+            _ = AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            if let window = axElement(attribute(appElement, kAXMainWindowAttribute))
+                    ?? (attribute(appElement, kAXWindowsAttribute) as? [AXUIElement])?.first {
+                _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            }
             _ = app.activate(options: [.activateAllWindows])
             _ = waitUntil(timeout: 2) { NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier }
         }
