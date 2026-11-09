@@ -232,7 +232,7 @@ Security check for the model download (in the PR description):
 
 ## Execution notes (2026-11-08)
 
-- Approved by Patrick 2026-11-07. Every "Decisions for Patrick" item takes its stated default. Decision 8 (15-minute unaided-walkthrough criterion) still to be confirmed with Patrick before that manual check runs; until then AS32 is reported unverified.
+- Approved by Patrick 2026-11-07. Every "Decisions for Patrick" item takes its stated default. Patrick confirmed all defaults on 2026-11-08, including decision 8 (AS32 pass = a non-technical therapist saves a style that produces their sections on the practice session within 15 minutes, without asking for help).
 - Workflow: cwf, reviewer cubic, harness codex, review phase claude (`--harness codex --phase-harness review=claude`).
 - PR plan (one cwf task per PR, run one at a time, stacked branches):
   - p1 model swap (AS1-AS11), branch from origin/main with design + spec commits cherry-picked
@@ -241,3 +241,10 @@ Security check for the model download (in the PR description):
   - p4 coach UI (AS26-AS30), based on p3
   - p5 real-model evidence + walkthrough (AS31-AS32), based on p4
 - Each PR: uitest screenshot in body, local recording path (runs/<ts>/recording.mp4) on the first lines of the description. Never merged without Patrick's review.
+- Recordings and screenshots go under `runs/<ts>/` in the task clone (not committed).
+
+### This task (p1)
+- This task = p1, model swap (PR1 in the split above): manifest swap to Gemma 4 E2B, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup. Covers AS1-AS11 (AS11 is a report only, no fixes).
+- Other PRs' scope (coach engine, `style_spec` migration, coach commands, practice job, coach UI, AS12-AS32) is out of bounds for this task.
+- PR base = `main`.
+- Before the real Gemma 4 download for AS10, check `df -h /System/Volumes/Data` shows >= 6 GB free; never delete `~/Library/Caches/scribular-uitest` or `~/cargo-target/scribular-tauri`.
