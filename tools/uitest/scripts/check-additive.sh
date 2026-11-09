@@ -7,13 +7,8 @@ git rev-parse --verify "$base^{commit}" >/dev/null
 while IFS=$'\t' read -r added removed path; do
   [[ -n ${path:-} ]] || continue
   case "$path" in
-    tools/uitest/Tests/*)
+    tools/uitest/Tests/*|tools/uitest/scenarios/*.uitest)
       if git cat-file -e "$base:$path" 2>/dev/null && [[ ${removed:-0} != 0 ]]; then
-        if [[ "$path" == tools/uitest/Tests/UITestCoreTests/PlayTests.swift ]]; then
-          base_tests=$(git show "$base:$path" | grep -cE '^[[:space:]]*@Test')
-          head_tests=$(grep -cE '^[[:space:]]*@Test' "$path")
-          if (( head_tests >= base_tests )); then continue; fi
-        fi
         printf 'non-additive change in %s (removed %s lines)\n' "$path" "$removed" >&2
         exit 1
       fi

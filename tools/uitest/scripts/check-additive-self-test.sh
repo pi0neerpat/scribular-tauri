@@ -6,9 +6,8 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 cd "$tmp"
 git init -q
-mkdir -p tools/uitest/Tests/UITestCoreTests tools/uitest/scenarios
+mkdir -p tools/uitest/Tests tools/uitest/scenarios
 printf 'test\n' > tools/uitest/Tests/Existing.swift
-printf '@Test func one() {}\n@Test func two() {}\n' > tools/uitest/Tests/UITestCoreTests/PlayTests.swift
 printf 'launch\nquit\n' > tools/uitest/scenarios/existing.uitest
 cat > tools/uitest/README.md <<'EOF'
 | Command | Meaning |
@@ -25,17 +24,6 @@ mv README.tmp tools/uitest/README.md
 git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm additive
 bash "$script" "$base"
-sed -i '' 's/@Test func one() {}/@Test func one() { #expect(true) }/' tools/uitest/Tests/UITestCoreTests/PlayTests.swift
-git add tools/uitest/Tests/UITestCoreTests/PlayTests.swift
-GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm 'replace test while preserving count'
-bash "$script" "$base"
-sed -i '' '/@Test func two() {}/d' tools/uitest/Tests/UITestCoreTests/PlayTests.swift
-git add tools/uitest/Tests/UITestCoreTests/PlayTests.swift
-GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm 'remove an existing test'
-if bash "$script" "$base"; then
-  echo 'expected deleting an existing test to fail additive guard' >&2
-  exit 1
-fi
 printf 'changed\n' > tools/uitest/Tests/Existing.swift
 git add .
 GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.invalid git commit -qm modifying
