@@ -95,6 +95,7 @@ The feature ships as two parts, in order:
 - **R7** One backend state `SummaryAvailability` = `Ready | Downloading | Unsupported | LoadFailed`, exposed by command and event. `Unsupported` (gate) and `LoadFailed` (model fails to load on a Mac that passed) show the plain message in the session summary area, Note Styles (coach entry disabled), Settings and first run. Existing summaries stay viewable; regenerate is disabled; recording and transcription are unaffected. `LoadFailed` is not permanent: it clears on the next app launch, and Settings offers "Try again", which re-verifies the file's SHA-256 (re-downloading if it fails) and re-attempts the load. `Downloading` shows the existing "Waiting for the summary model download…" state.
 - **R8** On a Mac that passed the gate, the old 2B file is deleted only after Gemma 4 has downloaded, passed SHA-256 and produced one short test summary on that Mac. On a Mac that fails the gate, the 2B file is deleted at startup (it can no longer be used). A failed or interrupted update never deletes the 2B file before those conditions hold.
 - **R9** Existing sessions keep their stored `model_id`; regenerate uses the current model. The session view shows the stored id as today (`SummaryPanel.svelte:37`).
+- **R30** On Macs that unload Whisper, the live-transcript wait notice appears only while a summary is running or ready to start; waiting only for another source's Whisper load stays silent.
 
 ### Part 2: coach engine (`src-tauri/src/coach/`)
 - **R10** `extract`: deterministic port of `split_sections` / `extract_preferences`. Produces a `StyleSpec` (sections with name, required flag, guidance; sentence min/max; quotes max and required-when-available; pronouns; voice; emphasis list) plus a list of uncertain items. The `StyleSpec` stores headings and structural measures only, never sentences or facts from the example.
@@ -137,6 +138,7 @@ The feature ships as two parts, in order:
 - **AS8** (automated, cargo test) Given an old 2B file, when Gemma 4 is downloading, fails SHA-256, or has not yet produced its test summary, then the 2B file exists; when all three pass, then it is deleted; given a gate-failing Mac, then it is deleted at startup. (R8)
 - **AS9** (automated, cargo test) Given a session that already has a summary and `model_id = gemma-2-2b-it-q4km`, when it is regenerated (fake engine), then the summary is written with the current model id and the old id stays in `previous_model_id`. (R9)
 - **AS10** (manual real-app, 8 GB Mac VM) Given a fresh update from the current release, when the app starts, then Gemma 4 E2B downloads, loads through `llama-cpp-2 0.1.160`, runs under the 8 GiB whisper-unload sequencing (whisper unloaded before the summary), lets a new recording start while a summary is running without either failing, writes a fixture session's summary with no thinking text, and the 2B file is then removed. Record: peak RSS, load time, tokens/s, the transcript phrases asserted, and the value chosen for `MIN_SUMMARY_RAM_BYTES` with its reasoning. Report load failure as a blocker. (R1, R2, R6, R8)
+- **AS10a** (manual real-app, 8 GB Mac VM) Given a summary is running, when a recording starts on a low-memory Mac, then the live-transcript area shows "Live transcript will start when the current summary finishes." while the header still shows Recording; with mic+system input it appears once and clears once. If Stop is pressed during the wait, the message may remain under "Transcribing…" until transcription starts, then disappears; the final transcript is still complete. After the summary finishes, the buffered live transcript catches up with the final transcript complete (assert the expected phrases and no lost audio). On a Mac above the threshold (`unload_whisper` false), no message appears and live text starts immediately. A window reload during the wait does not restore the message. (R30)
 - **AS11** (manual real-app, report only) Given the seven built-in styles, when each summarizes the bundled fixtures on Gemma 4 E2B, then list any that are clearly worse, with the reason, in the PR. No fixes. (Goal: existing styles)
 
 ### Part 2: engine
@@ -224,7 +226,7 @@ Security check for the model download (in the PR description):
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR
 **L, about 9-12 days.**
-1. PR1 (M): model swap, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup — AS1-AS10, AS11 report.
+1. PR1 (M): model swap, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup — AS1-AS10, AS10a, AS11 report.
 2. PR2 (M): `coach/` engine and bundled data, no UI — AS12-AS19.
 3. PR3 (M): `style_spec` migration, coach commands, practice job and queue priority, privacy — AS20-AS25.
 4. PR4 (M): coach UI and Note Styles/editor changes — AS26-AS30.
@@ -235,7 +237,7 @@ Security check for the model download (in the PR description):
 - Approved by Patrick 2026-11-07. Every "Decisions for Patrick" item takes its stated default. Patrick confirmed all defaults on 2026-11-08, including decision 8 (AS32 pass = a non-technical therapist saves a style that produces their sections on the practice session within 15 minutes, without asking for help).
 - Workflow: cwf, reviewer cubic, harness codex, review phase claude (`--harness codex --phase-harness review=claude`).
 - PR plan (one cwf task per PR, run one at a time, stacked branches):
-  - p1 model swap (AS1-AS11), branch from origin/main with design + spec commits cherry-picked
+  - p1 model swap (AS1-AS11, AS10a), branch from origin/main with design + spec commits cherry-picked
   - p2 coach engine (AS12-AS19), based on p1
   - p3 data/commands/practice job (AS20-AS25), based on p2
   - p4 coach UI (AS26-AS30), based on p3
@@ -244,8 +246,7 @@ Security check for the model download (in the PR description):
 - Recordings and screenshots go under `runs/<ts>/` in the task clone (not committed).
 
 ### This task (p1)
-- This task = p1, model swap (PR1 in the split above): manifest swap to Gemma 4 E2B, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup. Covers AS1-AS11 (AS11 is a report only, no fixes).
-- **AS10a** (manual real-app, 8 GB Mac VM, plus automated cargo test + vitest) Given a summary is running, when a recording starts on a low-memory Mac, then the live-transcript area shows "Live transcript will start when the current summary finishes." while the header still shows Recording; with mic+system input it appears once and clears once. If Stop is pressed during the wait, the message may remain under "Transcribing…" until transcription starts, then disappears; the final transcript is still complete. After the summary finishes, the buffered live transcript catches up with the final transcript complete (assert the expected phrases and no lost audio). On a Mac above the threshold (`unload_whisper` false), no message appears and live text starts immediately. A window reload during the wait does not restore the message.
+- This task = p1, model swap (PR1 in the split above): manifest swap to Gemma 4 E2B, params, setting rewrite, picker removal, hardware gate, `SummaryAvailability`, 2B cleanup. Covers AS1-AS10, AS10a and AS11 (AS11 is a report only, no fixes).
 - Other PRs' scope (coach engine, `style_spec` migration, coach commands, practice job, coach UI, AS12-AS32) is out of bounds for this task.
 - PR base = `main`.
 - Before the real Gemma 4 download for AS10, check `df -h /System/Volumes/Data` shows >= 6 GB free; never delete `~/Library/Caches/scribular-uitest` or `~/cargo-target/scribular-tauri`.

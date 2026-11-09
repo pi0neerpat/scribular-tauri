@@ -405,7 +405,7 @@ fn low_memory_stream_announces_summary_wait_then_catches_up_without_losing_audio
     let h = Harness::with(
         |_| {},
         |loader| {
-            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(100);
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
         },
     );
     let first = h.start(InputMode::Mic);

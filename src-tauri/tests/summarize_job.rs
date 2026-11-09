@@ -528,6 +528,46 @@ fn whisper_load_wait_callback_runs_for_ready_pending_job_and_active_whisper_load
 }
 
 #[test]
+fn whisper_load_only_wait_does_not_call_wait_notice() {
+    let h = Harness::with_budget(100, |_| {});
+    let queue = &h.queue;
+    std::thread::scope(|scope| {
+        let (load_tx, load_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        scope.spawn(move || {
+            assert_eq!(
+                queue.while_transcription_safe(
+                    &AtomicBool::new(false),
+                    || panic!("no summary is waiting"),
+                    || {
+                        load_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    }
+                ),
+                Some(())
+            );
+        });
+        load_rx.recv_timeout(WAIT).unwrap();
+
+        let (notice_tx, notice_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let queue = &h.queue;
+        scope.spawn(move || {
+            let result = queue.while_transcription_safe(
+                &AtomicBool::new(false),
+                || notice_tx.send(()).unwrap(),
+                || "ready",
+            );
+            done_tx.send(result).unwrap();
+        });
+        let notice_was_shown = notice_rx.recv_timeout(Duration::from_millis(50)).is_ok();
+        release_tx.send(()).unwrap();
+        assert_eq!(done_rx.recv_timeout(WAIT).unwrap(), Some("ready"));
+        assert!(!notice_was_shown);
+    });
+}
+
+#[test]
 fn summary_execution_waits_until_whisper_loading_finishes() {
     let h = Harness::with_budget(100, |_| {});
     let id = h.session(&words(20), "");

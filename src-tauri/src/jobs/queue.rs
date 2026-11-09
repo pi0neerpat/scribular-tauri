@@ -237,13 +237,15 @@ impl JobQueue {
         operation: impl FnOnce() -> T,
     ) -> Option<T> {
         let mut state = self.shared.lock();
-        let waiting = state.running.is_some()
-            || (!state.pending.is_empty() && self.shared.loader.ready())
-            || state.whisper_loading;
+        let summary_waiting =
+            state.running.is_some() || (!state.pending.is_empty() && self.shared.loader.ready());
+        let waiting = summary_waiting || state.whisper_loading;
         if waiting {
             // Lock order: release the queue before callbacks that may lock recording or emit events.
             drop(state);
-            on_wait();
+            if summary_waiting {
+                on_wait();
+            }
             state = self.shared.lock();
         }
         while !cancel.load(Ordering::Relaxed)
