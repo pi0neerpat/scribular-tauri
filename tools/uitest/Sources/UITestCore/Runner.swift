@@ -9,6 +9,11 @@ public protocol Driver {
     func perform(_ command: Command) throws(DriverError) -> String?
     func visibleLabels() -> [String]
     func screenshot(to url: URL) throws
+    func frontmostApplicationName() -> String?
+}
+
+public extension Driver {
+    func frontmostApplicationName() -> String? { nil }
 }
 
 public struct RunOptions {
@@ -55,6 +60,10 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let screenshot = options.runDir.appendingPathComponent("fail-\(step.line).png")
         try? driver.screenshot(to: screenshot)
         emit("  screenshot: \(screenshotPath(screenshot))")
+        if let screen = try? driver.perform(.screenshotScreen(name: "fail-\(step.line)-screen")) {
+            emit("  screen: \(screenshotPath(URL(fileURLWithPath: screen)))")
+        }
+        emit("  frontmost: \(driver.frontmostApplicationName() ?? "(unknown)")")
         let visible = driver.visibleLabels().prefix(40).map { "\"\($0)\"" }.joined(separator: ", ")
         emit("  visible: \(visible)")
     }

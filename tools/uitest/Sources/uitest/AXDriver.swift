@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import Darwin
 import UITestCore
 
 final class AXDriver: Driver {
@@ -390,6 +391,48 @@ final class AXDriver: Driver {
     }
 
     private func click(at point: CGPoint) throws(DriverError) {
+        try guardClick(at: point)
+        try postClick(at: point)
+    }
+
+    private func guardClick(at point: CGPoint) throws(DriverError) {
+        if keychainWindow() != nil { throw .retryable("keychain prompt is covering the app") }
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
+            throw .retryable("app is not frontmost (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"))")
+        }
+        application = app
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            _ = app.activate(options: [.activateAllWindows])
+            _ = waitUntil(timeout: 2) { NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier }
+        }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: nil,
+                                           hitName: nil,
+                                           keychainPromptOpen: false,
+                                           appIsFrontmost: frontmost?.processIdentifier == app.processIdentifier,
+                                           frontmostName: frontmost?.localizedName,
+                                           hitTestComplete: false) {
+            throw .retryable(reason)
+        }
+        let system = AXUIElementCreateSystemWide()
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+              let hit else {
+            throw .retryable("click point is covered by unknown app")
+        }
+        var hitPID: pid_t = 0
+        guard AXUIElementGetPid(hit, &hitPID) == .success else {
+            throw .retryable("click point is covered by unknown app")
+        }
+        let hitName = NSRunningApplication(processIdentifier: hitPID)?.localizedName
+        if let reason = ClickGuard.failure(targetPID: app.processIdentifier, hitPID: hitPID,
+                                           hitName: hitName,
+                                           keychainPromptOpen: false, hitTestComplete: true) {
+            throw .retryable(reason)
+        }
+    }
+
+    private func postClick(at point: CGPoint) throws(DriverError) {
         for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else {
                 throw .fatal("could not create mouse event")
@@ -397,6 +440,8 @@ final class AXDriver: Driver {
             event.post(tap: .cghidEventTap)
         }
     }
+
+    func frontmostApplicationName() -> String? { NSWorkspace.shared.frontmostApplication?.localizedName }
 
     /// SecurityAgent can linger after a prompt closes, so only an open window counts as a prompt.
     private func keychainWindow() -> AXUIElement? {
@@ -427,7 +472,7 @@ final class AXDriver: Driver {
         case .found(let value): field = value
         }
         guard let fieldRect = frame(of: field) else { throw .fatal("keychain password field not found") }
-        try click(at: CGPoint(x: fieldRect.midX, y: fieldRect.midY))
+        try postClick(at: CGPoint(x: fieldRect.midX, y: fieldRect.midY))
         _ = try perform(.type(keychainPassword))
         let allow = allElements(from: window).filter { matches($0, exact: "Always Allow") }
         let button: AXUIElement
@@ -437,7 +482,7 @@ final class AXDriver: Driver {
         case .found(let value): button = value
         }
         guard let buttonRect = frame(of: button) else { throw .fatal("Always Allow button not found") }
-        try click(at: CGPoint(x: buttonRect.midX, y: buttonRect.midY))
+        try postClick(at: CGPoint(x: buttonRect.midX, y: buttonRect.midY))
         return nil
     }
 }
