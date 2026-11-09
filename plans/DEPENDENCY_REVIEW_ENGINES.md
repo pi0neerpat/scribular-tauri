@@ -255,6 +255,13 @@ the 2026-10-05 cutoff, a build-only dependency (bindgen → itertools), moved wi
 **Recheck (2026-10-20, real `src-tauri/Cargo.lock` after U5):** 465 crates checked,
 0 published after the 2026-10-05 cutoff.
 
+**Current-tree recheck attempt (2026-11-08, cutoff 2026-10-25):** crates.io returned
+HTTP 429 during the per-version lookups, so this attempt did not establish a whole-lockfile
+result and must not be read as a clean check. The exact 0.1.160 crate metadata was checked
+separately and both publish dates (2026-10-15) fall before the cutoff. Relative to
+`origin/main`, this branch changes only `llama-cpp-2` and `llama-cpp-sys-2`, from
+0.1.158 to 0.1.160.
+
 **Recheck (2026-11-08, current lockfile; 2026-10-25 cutoff):** 572 crates checked,
 7 published after the cutoff. All 7 are present at the same versions in `origin/main`
 (`async-executor 1.14.1`, `async-lock 3.5.0`, `tauri-plugin-single-instance 2.5.5`,

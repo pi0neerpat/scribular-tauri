@@ -114,8 +114,10 @@ cutoff, both moved with `cargo update --precise`:
 | `schannel` (Windows only) | 0.1.30 (2026-10-16) | 0.1.29 (2026-03-10) |
 | `zeroize` | 1.9.1 (2026-10-06) | 1.9.0 (2026-06-12) |
 
-The full whole-lockfile recheck is rerun on the real `Cargo.lock` when U2/U4 land the
-change, and its result is appended here.
+The historical full whole-lockfile recheck below covers the 2026-10-05 cutoff. The
+2026-11-08 follow-up against the 2026-10-25 cutoff is recorded in
+[`DEPENDENCY_REVIEW_ENGINES.md`](DEPENDENCY_REVIEW_ENGINES.md); crates.io throttled the
+current-tree recheck, so that follow-up is explicitly incomplete.
 
 **Recheck (2026-10-19, real `src-tauri/Cargo.lock` after U4):** 446 crates checked,
 0 published after the 2026-10-05 cutoff.
