@@ -3,6 +3,11 @@ click "Settings"
 expect "Note styles"
 # wait for the first-run section to go (speech model re-downloads each run) so it cannot shift the layout mid-click
 expect-not "Getting Scribular ready" timeout 300s
+click "App audio" index 1
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+pick-app "afplay" timeout 60s
+click "Note styles"
+click "Record" index 1
 click "New style"
 click "Name" index 2
 type "UITest Recap"
@@ -12,8 +17,11 @@ click "Save" index 1
 click "Toggle favourite for UITest Recap"
 click "Make default" index 1
 click "Record" index 1
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
 click "Start recording"
 wait 30s
 click "Stop"
-expect "Summary · UITest Recap"
+stop-audio
+expect "since we last met" timeout 180s
+expect "Summary · UITest Recap" timeout 400s
 quit

@@ -25,7 +25,7 @@ private final class RunLock {
             var buffer = [CChar](repeating: 0, count: 32)
             let count = buffer.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, $0.count - 1, 0) }
             let pid = count > 0
-                ? String(decoding: buffer.prefix(Int(count)).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+                ? trimmedRunLockPID(String(decoding: buffer.prefix(Int(count)).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
                 : "unknown"
             close(descriptor)
             throw NSError(domain: "uitest.lock", code: 1, userInfo: [NSLocalizedDescriptionKey: "another uitest run is active (pid \(pid))"])

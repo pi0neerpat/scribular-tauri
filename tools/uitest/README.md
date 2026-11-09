@@ -19,8 +19,10 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 ### Scenario rules
 
-- Use a one-shot `play "fixture.wav"` (not `loop`) immediately before each `Start recording` action.
-- On an 8 GB VM, allow `expect "Summary·" timeout 400s` or longer.
+- Before a run, check `pgrep -fl "uitest|Scribular.app|codex"`, stop any other uitest or Scribular process, make sure no other window covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
+- Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
+- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `since we last met`).
+- On a slow VM, allow at least 400 seconds for the summary.
 - Never run two uitest runs or other GUI automation at once.
 
 ## Build and run
