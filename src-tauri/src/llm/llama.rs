@@ -29,7 +29,7 @@ use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, LlamaChatMessage, LlamaChatTemplate, LlamaModel},
+    model::{params::LlamaModelParams, LlamaModel},
     sampling::LlamaSampler,
     token::LlamaToken,
 };
@@ -82,10 +82,23 @@ mod tests {
         assert_eq!(p.temperature, 0.2);
         assert_eq!(p.top_p, 0.9);
     }
+
+    #[test]
+    fn gemma_4_formats_a_user_turn_without_thinking() {
+        assert_eq!(
+            format_gemma4_user_prompt("  summarize this  "),
+            "<|turn>user\nsummarize this\n<turn|>\n<|turn>model\n"
+        );
+    }
 }
 
 fn engine(e: impl std::fmt::Display) -> LlmError {
     LlmError::Engine(e.to_string())
+}
+
+// shortcut: only the plain user turn used here; expand if summarization adds system or tool messages.
+fn format_gemma4_user_prompt(prompt: &str) -> String {
+    format!("<|turn>user\n{}\n<turn|>\n<|turn>model\n", prompt.trim())
 }
 
 /// llama.cpp allows one backend per process.
@@ -153,7 +166,6 @@ impl SummarizerLoader for LlamaLoader {
 
 pub struct LlamaSummarizer {
     model: LlamaModel,
-    template: LlamaChatTemplate,
     params: Params,
 }
 
@@ -162,12 +174,7 @@ impl LlamaSummarizer {
     pub fn load(path: &std::path::Path, params: Params) -> Result<Self> {
         let model_params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
         let model = LlamaModel::load_from_file(backend()?, path, &model_params).map_err(engine)?;
-        let template = model.chat_template(None).map_err(engine)?;
-        Ok(Self {
-            model,
-            template,
-            params,
-        })
+        Ok(Self { model, params })
     }
 
     fn smoke_test(&self) -> Result<()> {
@@ -194,11 +201,7 @@ impl LlamaSummarizer {
     /// `prompt` as the user turn of the GGUF chat template, ready for the
     /// model's reply.
     fn format(&self, prompt: &str) -> Result<Vec<LlamaToken>> {
-        let message = LlamaChatMessage::new("user".into(), prompt.into()).map_err(engine)?;
-        let text = self
-            .model
-            .apply_chat_template(&self.template, &[message], true)
-            .map_err(engine)?;
+        let text = format_gemma4_user_prompt(prompt);
         Ok(self.model.vocab().tokenize(text.as_bytes(), true, true))
     }
 
