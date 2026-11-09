@@ -194,17 +194,28 @@ export function onSummaryAvailability(handler: (state: SummaryAvailability) => v
   return listen<SummaryAvailability>('summary-availability', (event) => handler(event.payload));
 }
 
-export async function subscribeSummaryAvailability(handler: (state: SummaryAvailability) => void): Promise<UnlistenFn> {
+export async function subscribeSummaryAvailability(
+  handler: (state: SummaryAvailability) => void,
+  onError: (error: unknown) => void,
+): Promise<UnlistenFn> {
   let version = 0;
-  const unlisten = await onSummaryAvailability((state) => { version++; handler(state); });
+  let unlisten: UnlistenFn | undefined;
+  let listenerFailed = false;
+  let listenerError: unknown;
+  try {
+    unlisten = await onSummaryAvailability((state) => { version++; handler(state); });
+  } catch (error) {
+    listenerFailed = true;
+    listenerError = error;
+  }
   try {
     const current = await getSummaryAvailability();
     if (version === 0) handler(current);
-    return unlisten;
   } catch (e) {
-    unlisten();
-    throw e;
+    onError(e);
   }
+  if (listenerFailed) onError(listenerError);
+  return () => unlisten?.();
 }
 
 /** The pinned models with their license terms, in download order. */

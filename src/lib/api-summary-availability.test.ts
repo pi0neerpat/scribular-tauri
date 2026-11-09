@@ -16,7 +16,7 @@ it('reads the snapshot after the listener is registered', async () => {
   mocks.invoke.mockImplementation(async () => { order.push('snapshot'); return 'ready'; });
   const state = vi.fn();
 
-  await subscribeSummaryAvailability(state);
+  await subscribeSummaryAvailability(state, vi.fn());
 
   expect(order).toEqual(['listen', 'snapshot']);
   expect(state).toHaveBeenCalledWith('ready');
@@ -32,7 +32,7 @@ it('keeps an event that arrives while the snapshot is pending', async () => {
   mocks.invoke.mockReturnValue(new Promise((resolve) => { resolveSnapshot = resolve; }));
   const state = vi.fn();
 
-  const subscription = subscribeSummaryAvailability(state);
+  const subscription = subscribeSummaryAvailability(state, vi.fn());
   await Promise.resolve();
   emit({ payload: 'ready' });
   resolveSnapshot('downloading');
@@ -42,18 +42,28 @@ it('keeps an event that arrives while the snapshot is pending', async () => {
   expect(state).toHaveBeenCalledWith('ready');
 });
 
-it('unlistens and propagates a failed availability snapshot', async () => {
+it('keeps the listener active and reports a failed availability snapshot', async () => {
   const unlisten = vi.fn();
   mocks.listen.mockResolvedValue(unlisten);
   mocks.invoke.mockRejectedValue(new Error('IPC failed'));
+  const onError = vi.fn();
 
-  await expect(subscribeSummaryAvailability(vi.fn())).rejects.toThrow('IPC failed');
+  const remove = await subscribeSummaryAvailability(vi.fn(), onError);
+  expect(onError).toHaveBeenCalledWith(new Error('IPC failed'));
+  expect(unlisten).not.toHaveBeenCalled();
+  remove();
   expect(unlisten).toHaveBeenCalledOnce();
 });
 
-it('propagates a failed listener setup', async () => {
+it('reports a failed listener setup and still reads the availability snapshot', async () => {
   mocks.listen.mockRejectedValue(new Error('listener failed'));
+  mocks.invoke.mockResolvedValue('ready');
+  const state = vi.fn();
+  const onError = vi.fn();
 
-  await expect(subscribeSummaryAvailability(vi.fn())).rejects.toThrow('listener failed');
-  expect(mocks.invoke).not.toHaveBeenCalled();
+  const remove = await subscribeSummaryAvailability(state, onError);
+  expect(onError).toHaveBeenCalledWith(new Error('listener failed'));
+  expect(mocks.invoke).toHaveBeenCalledOnce();
+  expect(state).toHaveBeenCalledWith('ready');
+  remove();
 });

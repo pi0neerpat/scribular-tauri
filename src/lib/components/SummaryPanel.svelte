@@ -30,6 +30,7 @@
   let busy = $state(false);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityError = $state(false);
+  let retrySummaryAvailability: (() => void) | null = null;
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -63,15 +64,27 @@
   });
 
   onMount(() => {
-    const availability = subscribeSummaryAvailability((state) => {
-      summaryAvailability = state;
-      summaryAvailabilityError = false;
-    }).catch(() => { summaryAvailabilityError = true; return () => {}; });
+    let disposed = false;
+    let unlistenAvailability: (() => void) | undefined;
+    const subscribe = () => {
+      unlistenAvailability?.();
+      unlistenAvailability = undefined;
+      void subscribeSummaryAvailability((state) => {
+        summaryAvailability = state;
+        summaryAvailabilityError = false;
+      }, () => { summaryAvailabilityError = true; }).then((remove) => {
+        if (disposed) remove(); else unlistenAvailability = remove;
+      }).catch(() => { summaryAvailabilityError = true; });
+    };
+    retrySummaryAvailability = subscribe;
+    subscribe();
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
     return () => {
-      availability.then((fn) => fn());
+      disposed = true;
+      unlistenAvailability?.();
+      retrySummaryAvailability = null;
       unlisten?.then((fn) => fn());
       clearTimeout(deleteTimer);
       clearTimeout(copyTimer);
@@ -126,7 +139,10 @@
   {:else if (summaryAvailability === 'downloading' || session.status === 'awaitingModel') && !summaryAvailabilityError}
     <p>Waiting for the summary model download…</p>
   {/if}
-  {#if summaryAvailabilityError}<p role="alert">Couldn't check whether summaries are ready. Restart Scribular to try again.</p>{/if}
+  {#if summaryAvailabilityError}
+    <p role="alert">Couldn't check summary availability.</p>
+    <button aria-label="Check summary availability again" onclick={() => retrySummaryAvailability?.()}>Check again</button>
+  {/if}
   {#if session.status === 'failed'}
     <p role="alert">{session.error}</p>
   {:else if session.status === 'cancelled'}

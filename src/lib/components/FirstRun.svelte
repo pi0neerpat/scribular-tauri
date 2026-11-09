@@ -36,13 +36,14 @@
   }
 
   async function listenForSummaryAvailability() {
-    summaryAvailabilityError = null;
     summaryAvailabilityUnlisten?.();
     summaryAvailabilityUnlisten = null;
     try {
       const unlisten = await subscribeSummaryAvailability((state) => {
         summaryAvailability = state;
         summaryAvailabilityError = null;
+      }, (e) => {
+        if (!summaryAvailabilityDisposed) summaryAvailabilityError = String(e);
       });
       if (summaryAvailabilityDisposed) unlisten();
       else summaryAvailabilityUnlisten = unlisten;
@@ -70,7 +71,7 @@
   });
 </script>
 
-{#if !speechReady || telemetry === null || summaryAvailability !== 'ready'}
+{#if !speechReady || telemetry === null || summaryAvailability !== 'ready' || summaryAvailabilityError !== null}
   <section aria-labelledby={!speechReady ? 'first-run-title' : telemetry === null ? 'telemetry-title' : undefined} aria-label={speechReady && telemetry !== null ? 'Summary status' : undefined}>
     {#if !speechReady}
       <h2 id="first-run-title">Getting Scribular ready</h2>
@@ -93,8 +94,8 @@
       <p>Waiting for the summary model download…</p>
     {/if}
     {#if summaryAvailabilityError}
-      <p role="alert">Couldn't check whether summaries are ready.</p>
-      <button aria-label="Try summary availability again" onclick={listenForSummaryAvailability}>Try again</button>
+      <p role="alert">Couldn't check summary availability.</p>
+      <button aria-label="Check summary availability again" onclick={listenForSummaryAvailability}>Check again</button>
     {/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">

@@ -5,7 +5,10 @@
 **Policy:** `../notes-assistant-electron/CLAUDE.md` § Dependency Policy (review, audit,
 exact pin, in-house check).
 
-**Version rule used:** the newest stable release published on or before 2026-10-05.
+**Version rule used:** the M3 downloader dependencies use the 2026-10-05 cutoff. The
+AS10 inference-engine follow-up uses the 2026-10-25 cutoff (the 2026-11-08 date minus
+two weeks); its separate package and build-script review is in
+[`DEPENDENCY_REVIEW_ENGINES.md`](DEPENDENCY_REVIEW_ENGINES.md).
 
 ---
 
@@ -15,6 +18,14 @@ exact pin, in-house check).
 |---|---|---|---|---|---|---|
 | `reqwest` (`default-features = false`, `native-tls`) | `=0.13.5` | 2026-09-08 | 220 M | seanmonstar | MIT / Apache-2.0 | clean |
 | `sha2` | `=0.10.9` | already locked | (RustCrypto) | RustCrypto org | MIT / Apache-2.0 | clean |
+| `llama-cpp-2` | `=0.1.160` | 2026-10-15 | 0.80 M | MarcusDunn | MIT OR Apache-2.0 | clean |
+| `llama-cpp-sys-2` | `=0.1.160` | 2026-10-15 | (same project) | MarcusDunn | MIT OR Apache-2.0 | clean |
+
+The two llama crates are the AS10 inference-engine pins. The crates.io metadata
+recheck on 2026-11-08 confirmed their publish dates and licenses; OSV reported no
+advisories for either exact version. Patrick approved these pins in the 2026-11-07
+spec decision. Their feature, vendored-code, build-script and runtime review is kept
+in `DEPENDENCY_REVIEW_ENGINES.md`.
 
 **Notes**
 - **reqwest without default features.** The 0.13 defaults use rustls with `aws-lc-rs`,

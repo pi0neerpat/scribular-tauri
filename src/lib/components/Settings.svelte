@@ -70,6 +70,7 @@
   let diagnosticsStatus = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityError = $state(false);
+  let retrySummaryAvailability = $state<(() => void) | null>(null);
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
     if (noteStyles) noteStyles.requestLeave(action, opener);
@@ -97,12 +98,19 @@
     let disposed = false;
     let progressVersion = 0;
     let sawUpdate = false;
-    void (async () => {
-      const summarySubscription = subscribeSummaryAvailability((state) => {
+    const subscribeSummary = () => {
+      summaryUnlisten?.();
+      summaryUnlisten = undefined;
+      void subscribeSummaryAvailability((state) => {
         summaryAvailability = state;
         summaryAvailabilityError = false;
-      }).catch(() => { summaryAvailabilityError = true; return () => {}; });
-      summarySubscription.then((remove) => { if (disposed) remove(); else summaryUnlisten = remove; });
+      }, () => { summaryAvailabilityError = true; }).then((remove) => {
+        if (disposed) remove(); else summaryUnlisten = remove;
+      }).catch(() => { summaryAvailabilityError = true; });
+    };
+    retrySummaryAvailability = subscribeSummary;
+    void (async () => {
+      subscribeSummary();
       try {
         const app = await getAppSettings();
         appSettings.set(app);
@@ -144,7 +152,7 @@
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); };
+    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); retrySummaryAvailability = null; };
   });
 
   async function refreshApps() {
@@ -253,7 +261,10 @@
   {:else if summaryAvailability === 'downloading' && !summaryAvailabilityError}
     <p>Waiting for the summary model download…</p>
   {/if}
-  {#if summaryAvailabilityError}<p role="alert">Couldn't check whether summaries are ready. Restart Scribular to try again.</p>{/if}
+  {#if summaryAvailabilityError}
+    <p role="alert">Couldn't check summary availability.</p>
+    <button aria-label="Check summary availability again" onclick={() => retrySummaryAvailability?.()}>Check again</button>
+  {/if}
   {#if settings}
   {#if category === 'Session'}
     <fieldset>
