@@ -42,6 +42,28 @@ it('keeps an event that arrives while the snapshot is pending', async () => {
   expect(state).toHaveBeenCalledWith('ready');
 });
 
+it('ignores a failed snapshot after an availability event arrives', async () => {
+  let emit!: (event: { payload: string }) => void;
+  mocks.listen.mockImplementation(async (_event: string, handler: (event: { payload: string }) => void) => {
+    emit = handler;
+    return () => {};
+  });
+  let rejectSnapshot!: (error: Error) => void;
+  mocks.invoke.mockReturnValue(new Promise((_resolve, reject) => { rejectSnapshot = reject; }));
+  const state = vi.fn();
+  const onError = vi.fn();
+
+  const subscription = subscribeSummaryAvailability(state, onError);
+  await Promise.resolve();
+  emit({ payload: 'ready' });
+  rejectSnapshot(new Error('stale snapshot failed'));
+  await subscription;
+
+  expect(state).toHaveBeenCalledOnce();
+  expect(state).toHaveBeenCalledWith('ready');
+  expect(onError).not.toHaveBeenCalled();
+});
+
 it('keeps the listener active and reports a failed availability snapshot', async () => {
   const unlisten = vi.fn();
   mocks.listen.mockResolvedValue(unlisten);

@@ -70,6 +70,7 @@
   let diagnosticsStatus = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityError = $state(false);
+  let summaryAvailabilityRetrying = $state(false);
   let retrySummaryAvailability = $state<(() => void) | null>(null);
 
   export function requestLeave(action: () => void, opener?: HTMLElement) {
@@ -96,17 +97,26 @@
     let updateUnlisten: (() => void) | undefined;
     let summaryUnlisten: (() => void) | undefined;
     let disposed = false;
+    let summaryAttempt = 0;
     let progressVersion = 0;
     let sawUpdate = false;
-    const subscribeSummary = () => {
+    const subscribeSummary = async () => {
+      const attempt = ++summaryAttempt;
+      summaryAvailabilityRetrying = true;
       summaryUnlisten?.();
       summaryUnlisten = undefined;
-      void subscribeSummaryAvailability((state) => {
-        summaryAvailability = state;
-        summaryAvailabilityError = false;
-      }, () => { summaryAvailabilityError = true; }).then((remove) => {
-        if (disposed) remove(); else summaryUnlisten = remove;
-      }).catch(() => { summaryAvailabilityError = true; });
+      try {
+        const remove = await subscribeSummaryAvailability((state) => {
+          if (attempt !== summaryAttempt) return;
+          summaryAvailability = state;
+          summaryAvailabilityError = false;
+        }, () => { if (!disposed && attempt === summaryAttempt) summaryAvailabilityError = true; });
+        if (disposed || attempt !== summaryAttempt) remove(); else summaryUnlisten = remove;
+      } catch {
+        if (!disposed && attempt === summaryAttempt) summaryAvailabilityError = true;
+      } finally {
+        if (attempt === summaryAttempt) summaryAvailabilityRetrying = false;
+      }
     };
     retrySummaryAvailability = subscribeSummary;
     void (async () => {
@@ -152,7 +162,7 @@
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => { disposed = true; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); retrySummaryAvailability = null; };
+    return () => { disposed = true; summaryAttempt++; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); retrySummaryAvailability = null; };
   });
 
   async function refreshApps() {
@@ -263,7 +273,7 @@
   {/if}
   {#if summaryAvailabilityError}
     <p role="alert">Couldn't check summary availability.</p>
-    <button onclick={() => retrySummaryAvailability?.()}>Check again</button>
+    <button disabled={summaryAvailabilityRetrying} onclick={() => retrySummaryAvailability?.()}>Check again</button>
   {/if}
   {#if settings}
   {#if category === 'Session'}

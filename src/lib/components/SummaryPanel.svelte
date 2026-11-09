@@ -30,6 +30,7 @@
   let busy = $state(false);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityError = $state(false);
+  let summaryAvailabilityRetrying = $state(false);
   let retrySummaryAvailability: (() => void) | null = null;
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,16 +66,25 @@
 
   onMount(() => {
     let disposed = false;
+    let summaryAttempt = 0;
     let unlistenAvailability: (() => void) | undefined;
-    const subscribe = () => {
+    const subscribe = async () => {
+      const attempt = ++summaryAttempt;
+      summaryAvailabilityRetrying = true;
       unlistenAvailability?.();
       unlistenAvailability = undefined;
-      void subscribeSummaryAvailability((state) => {
-        summaryAvailability = state;
-        summaryAvailabilityError = false;
-      }, () => { summaryAvailabilityError = true; }).then((remove) => {
-        if (disposed) remove(); else unlistenAvailability = remove;
-      }).catch(() => { summaryAvailabilityError = true; });
+      try {
+        const remove = await subscribeSummaryAvailability((state) => {
+          if (attempt !== summaryAttempt) return;
+          summaryAvailability = state;
+          summaryAvailabilityError = false;
+        }, () => { if (!disposed && attempt === summaryAttempt) summaryAvailabilityError = true; });
+        if (disposed || attempt !== summaryAttempt) remove(); else unlistenAvailability = remove;
+      } catch {
+        if (!disposed && attempt === summaryAttempt) summaryAvailabilityError = true;
+      } finally {
+        if (attempt === summaryAttempt) summaryAvailabilityRetrying = false;
+      }
     };
     retrySummaryAvailability = subscribe;
     subscribe();
@@ -83,6 +93,7 @@
     const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
     return () => {
       disposed = true;
+      summaryAttempt++;
       unlistenAvailability?.();
       retrySummaryAvailability = null;
       unlisten?.then((fn) => fn());
@@ -141,7 +152,7 @@
   {/if}
   {#if summaryAvailabilityError}
     <p role="alert">Couldn't check summary availability.</p>
-    <button onclick={() => retrySummaryAvailability?.()}>Check again</button>
+    <button disabled={summaryAvailabilityRetrying} onclick={() => retrySummaryAvailability?.()}>Check again</button>
   {/if}
   {#if session.status === 'failed'}
     <p role="alert">{session.error}</p>

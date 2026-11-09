@@ -16,6 +16,8 @@
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityUnlisten: (() => void) | null = null;
   let summaryAvailabilityDisposed = false;
+  let summaryAvailabilityAttempt = 0;
+  let summaryAvailabilityRetrying = $state(false);
   let telemetryChosen = false;
   let speech = $derived(models.find((m) => m.modelId === SPEECH_MODEL));
 
@@ -36,19 +38,24 @@
   }
 
   async function listenForSummaryAvailability() {
+    const attempt = ++summaryAvailabilityAttempt;
+    summaryAvailabilityRetrying = true;
     summaryAvailabilityUnlisten?.();
     summaryAvailabilityUnlisten = null;
     try {
       const unlisten = await subscribeSummaryAvailability((state) => {
+        if (attempt !== summaryAvailabilityAttempt) return;
         summaryAvailability = state;
         summaryAvailabilityError = null;
       }, (e) => {
-        if (!summaryAvailabilityDisposed) summaryAvailabilityError = String(e);
+        if (!summaryAvailabilityDisposed && attempt === summaryAvailabilityAttempt) summaryAvailabilityError = String(e);
       });
-      if (summaryAvailabilityDisposed) unlisten();
+      if (summaryAvailabilityDisposed || attempt !== summaryAvailabilityAttempt) unlisten();
       else summaryAvailabilityUnlisten = unlisten;
     } catch (e) {
-      if (!summaryAvailabilityDisposed) summaryAvailabilityError = String(e);
+      if (!summaryAvailabilityDisposed && attempt === summaryAvailabilityAttempt) summaryAvailabilityError = String(e);
+    } finally {
+      if (attempt === summaryAvailabilityAttempt) summaryAvailabilityRetrying = false;
     }
   }
 
@@ -65,6 +72,7 @@
       .finally(downloadModels);
     return () => {
       summaryAvailabilityDisposed = true;
+      summaryAvailabilityAttempt++;
       summaryAvailabilityUnlisten?.();
       unlisten.then((fn) => fn());
     };
@@ -95,7 +103,7 @@
     {/if}
     {#if summaryAvailabilityError}
       <p role="alert">Couldn't check summary availability.</p>
-      <button onclick={listenForSummaryAvailability}>Check again</button>
+      <button disabled={summaryAvailabilityRetrying} onclick={listenForSummaryAvailability}>Check again</button>
     {/if}
     {#if telemetry === null}
       <div aria-labelledby="telemetry-title">

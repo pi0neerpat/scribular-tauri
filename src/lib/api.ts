@@ -212,7 +212,7 @@ export async function subscribeSummaryAvailability(
     const current = await getSummaryAvailability();
     if (version === 0) handler(current);
   } catch (e) {
-    onError(e);
+    if (version === 0) onError(e);
   }
   if (listenerFailed) onError(listenerError);
   return () => unlisten?.();
