@@ -23,7 +23,7 @@ import Testing
     }
 }
 
-@Test func playFailsWhenPlayerExitsNonzero() throws {
+@Test func loopingPlayFailsWhenPlayerExitsNonzero() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let audio = root.appendingPathComponent("audio.wav")
@@ -32,4 +32,15 @@ import Testing
     defer { player.stop() }
 
     #expect(throws: DriverError.self) { try player.start(audio, loop: true) }
+}
+
+@Test func oneShotPlayFailsWhenPlayerExitsNonzero() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let audio = root.appendingPathComponent("audio.wav")
+    try Data("fixture".utf8).write(to: audio)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/false"))
+    defer { player.stop() }
+
+    #expect(throws: DriverError.self) { try player.start(audio, loop: false) }
 }
