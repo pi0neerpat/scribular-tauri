@@ -770,6 +770,9 @@ impl Inner {
 
     /// Whisper, loading it if no recording has yet.
     fn transcriber(&self) -> Result<Arc<dyn Transcriber>, String> {
+        if self.unload_whisper.load(Ordering::Relaxed) {
+            while !self.jobs.wait_idle(Duration::from_secs(1)) {}
+        }
         let mut model = lock(&self.model);
         if let Some(model) = &*model {
             return Ok(Arc::clone(model));

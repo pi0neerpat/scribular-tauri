@@ -803,6 +803,34 @@ fn segments_are_saved_and_emitted_in_recording_time() {
 }
 
 #[test]
+fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    h.recorder.set_unload_whisper(true);
+
+    let first = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    wait_until("the first summary starts", || h.queue.summarizing());
+
+    let second = h.start(InputMode::Mic);
+    h.feed(20);
+    h.wait_chunks(&second, 1);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(loads(&h), 1, "Whisper must wait until Gemma is idle");
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&first, SessionStatus::Done);
+    h.events.wait_for(&second, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(loads(&h), 2, "Whisper loads after the summary finishes");
+}
+
+#[test]
 fn whisper_loads_when_recording_starts_and_unloads_on_small_macs() {
     let h = Harness::new();
     let record = |mode| {
