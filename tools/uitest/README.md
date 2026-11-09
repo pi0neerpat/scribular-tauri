@@ -11,6 +11,20 @@
 
    `UITEST_KEYCHAIN_PASSWORD`, if set, overrides the stored password and lets `handle-keychain` answer any prompt that still appears. The runner redacts it from output.
 
+### Run safety and failure evidence
+
+Each run takes a non-blocking lock at `~/Library/Caches/scribular-uitest/uitest.lock`; a second run exits with code 2 and reports the active PID. The lock is held until the process exits. Before a mouse click, the runner waits up to 2 seconds for Scribular to become frontmost and checks the click point with the system Accessibility hit-test. For `click` steps only, if the point is covered or Scribular is not frontmost, the runner presses the resolved target through Accessibility; the success log marks this as `pressed via Accessibility (...)`. This was verified with a window covering Stop in AS2 (`runs/as2-covered-stop-20261109T104107/uitest.log`, 15/15 steps passed). The guard also checks that a same-process hit belongs to the resolved target, so another Scribular element is treated as a cover. An open keychain prompt remains a retryable failure. Other covered-click retries continue until the step timeout.
+
+Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fail-<line>-screen.png`, and print the frontmost app name. After quitting the app, every run copies a snapshot of `scribular.log` to `app.log` in that run directory when the source log exists. With `launch --keep-data`, that snapshot can include earlier app runs. A missing source or copy error is printed in the run output.
+
+### Scenario rules
+
+- Before a run, check `pgrep -fl "uitest|Scribular.app|codex"`, stop any other uitest or Scribular process, make sure no other window covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
+- Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
+- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `since we last met`).
+- On a slow VM, allow at least 400 seconds for the summary.
+- Never run two uitest runs or other GUI automation at once.
+
 ## Build and run
 
 Build the signed app separately; `launch` never builds. `launch` runs `trust-build.sh` first: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (their partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt. `launch` fails with a clear message if no password is stored.
@@ -48,9 +62,9 @@ Use a recording only for a happy path or an issue that cannot be reproduced reli
 
 1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
 2. In Settings choose `App audio`, then run `pick-app "afplay" timeout 60s`. Each attempt closes any open menu, refreshes the list, waits 2.5 seconds, and opens the App picker. It waits for the menu to open and close, detected through the window server, types `afplay`, presses Return, waits 1 second, and verifies the picker's value; a mismatch is retried. The native menu does not update while open, and its items are not exposed to Accessibility, so selection cannot rely on reading its menu items. The 1-second wait accounts for the first click after the menu closes being swallowed.
-3. Go to Record and run `play "fixture.wav"` once more without `loop`, right before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
+3. Go to Record and run `play "fixture.wav"` once more without `loop`, immediately before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
 4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
-5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists.
+5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists. On an 8 GB VM, allow `expect "Summary·" timeout 400s` or longer.
 
 The runner uses AVFoundation's `Capture screen 0` device (`0:none`). Check that device with `ffmpeg -f avfoundation -list_devices true -i ""` if screen capture does not start. Keychain typing and the Accessibility labels still need verification in a live desktop session after a rebuild.
 
@@ -125,12 +139,14 @@ quit
 
 ## Output
 
-Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its screenshot path and up to 40 visible labels. Screenshots are cropped to the app window, or the full screen when a keychain prompt is open or no window exists. A successful run's result line includes the recording path (or `no recording`). Failed runs print their failure summary, then print the final recording path (`-FAILED.mp4` for a recorded run, or `no recording`):
+Each action prints one line (`labels` prints a count line plus one line per label). A failed step stops the run and prints its cropped screenshot, full-display screenshot, frontmost app, and up to 40 visible labels. Each run directory also gets `app.log` after quit when the app log exists. A successful run's result line includes the recording path (or `no recording`). Failed runs print their failure summary, then print the final recording path (`-FAILED.mp4` for a recorded run, or `no recording`):
 
 ```text
 ✓ 1 launch /path/to/Scribular.app (built 2026-11-05T20:00:00Z)
 ✗ 6 expect "Bullet recap": not found after 10s
   screenshot: runs/<timestamp>/fail-6.png
+  screen: runs/<timestamp>/fail-6-screen.png
+  frontmost: Scribular
   visible: "Settings", "Note styles", ...
 FAIL 5/6 steps — recording: no recording
 ```

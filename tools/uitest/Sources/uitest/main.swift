@@ -6,6 +6,42 @@ import Dispatch
 import Foundation
 import UITestCore
 
+nonisolated(unsafe) private var processRunLock: RunLock?
+
+private final class RunLock {
+    private let descriptor: Int32
+
+    private init(descriptor: Int32) { self.descriptor = descriptor }
+    deinit { close(descriptor) }
+
+    static func acquire() throws -> RunLock {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches/scribular-uitest", isDirectory: true)
+            .appendingPathComponent("uitest.lock")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            var buffer = [CChar](repeating: 0, count: 32)
+            let count = buffer.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, $0.count - 1, 0) }
+            let pid = count > 0
+                ? trimmedRunLockPID(String(decoding: buffer.prefix(Int(count)).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
+                : "unknown"
+            close(descriptor)
+            throw NSError(domain: "uitest.lock", code: 1, userInfo: [NSLocalizedDescriptionKey: "another uitest run is active (pid \(pid))"])
+        }
+        _ = ftruncate(descriptor, 0)
+        _ = lseek(descriptor, 0, SEEK_SET)
+        let pid = "\(getpid())\n"
+        let written = pid.withCString { write(descriptor, $0, strlen($0)) }
+        guard written == pid.utf8.count else {
+            close(descriptor)
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        return RunLock(descriptor: descriptor)
+    }
+}
+
 private final class Cleanup {
     private let lifecycle: AppLifecycle
     private let recorder: Recorder?
@@ -41,6 +77,13 @@ private func runCLI() -> Int32 {
         print("argument error: \(error.localizedDescription)")
         return 2
     }
+    let runLock: RunLock
+    do { runLock = try RunLock.acquire() }
+    catch {
+        print(error.localizedDescription)
+        return 2
+    }
+    processRunLock = runLock
     var appPath = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         .appendingPathComponent("src-tauri/target/release/bundle/macos/Scribular.app")
     if let value = cli.appPath { appPath = URL(fileURLWithPath: value) }
@@ -129,6 +172,7 @@ private func runCLI() -> Int32 {
         source.setEventHandler {
             let duration = Date().timeIntervalSince(start)
             cleanup.run(logURL: finalizer?.logURL(for: .interrupted))
+            copyAppLog(to: runDir)
             print(recorder == nil ? "FAIL interrupted — run stopped by signal" : "FAIL interrupted — recording run stopped by signal")
             _ = finalizeOnce("interrupted", duration: duration)
             Darwin.exit(value == SIGINT ? 130 : 143)
@@ -151,8 +195,27 @@ private func runCLI() -> Int32 {
     if recorder != nil { Thread.sleep(forTimeInterval: 3) }
     let duration = Date().timeIntervalSince(start)
     cleanup.run(logURL: finalizer?.logURL(for: passed ? .pass : .fail))
+    copyAppLog(to: runDir)
     let recordingSaved = finalizeOnce(passed ? "pass" : "fail", duration: duration)
     return passed && recordingSaved ? 0 : 1
+}
+
+private func copyAppLog(to runDir: URL) {
+    let source = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/com.app.scribular.tauri/logs/scribular.log")
+    guard FileManager.default.fileExists(atPath: source.path) else {
+        print("app.log not copied: source log not found")
+        return
+    }
+    let destination = runDir.appendingPathComponent("app.log")
+    do {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: source, to: destination)
+    } catch {
+        print("app.log copy failed: \(error.localizedDescription)")
+    }
 }
 
 private func runDoctor(_ args: [String]) -> Int32 {

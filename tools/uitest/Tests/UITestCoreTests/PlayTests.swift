@@ -23,13 +23,60 @@ import Testing
     }
 }
 
-@Test func playUnplayableFileFails() throws {
+@Test func loopingPlayFailsWhenPlayerExitsNonzero() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let audio = root.appendingPathComponent("audio.wav")
+    try Data("RIFF\0\0\0\0WAVE".utf8).write(to: audio)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/false"))
+    defer { player.stop() }
+
+    #expect(throws: DriverError.self) { try player.start(audio, loop: true) }
+}
+
+@Test func oneShotPlayFailsWhenPlayerExitsNonzero() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let audio = root.appendingPathComponent("audio.wav")
+    try Data("RIFF\0\0\0\0WAVE".utf8).write(to: audio)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/false"))
+    defer { player.stop() }
+
+    #expect(throws: DriverError.self) { try player.start(audio, loop: false) }
+}
+
+@Test func playRejectsTruncatedWaveBeforeStartingPlayer() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let bad = root.appendingPathComponent("bad.wav")
-    try Data("RIFF".utf8).write(to: bad)  // exists, but afplay rejects it and exits 1
+    try Data("RIFF".utf8).write(to: bad)
     let player = Player()
     defer { player.stop() }
 
     #expect(throws: DriverError.self) { try player.start(bad, loop: true) }
+}
+
+@Test func playRejectsInvalidTwelveByteWaveHeader() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let bad = root.appendingPathComponent("bad.wav")
+    try Data("BAD!1234NOPE".utf8).write(to: bad)
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/true"))
+    defer { player.stop() }
+
+    do {
+        try player.start(bad, loop: true)
+        Issue.record("expected an invalid WAV header error")
+    } catch let error as DriverError {
+        guard case .fatal(let message) = error else { Issue.record("expected .fatal"); return }
+        #expect(message == "play: invalid WAV header: \(bad.path)")
+    }
+}
+
+@Test func playPropagatesWaveReadFailure() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+    let player = Player(executableURL: URL(fileURLWithPath: "/usr/bin/true"))
+    defer { player.stop() }
+
+    #expect(throws: CocoaError.self) { try player.start(file, loop: false) }
 }
