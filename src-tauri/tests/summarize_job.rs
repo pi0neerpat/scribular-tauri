@@ -453,7 +453,7 @@ fn whisper_load_waits_for_a_running_summary_but_stops_when_cancelled() {
 }
 
 #[test]
-fn summary_admission_waits_until_whisper_loading_finishes() {
+fn summary_execution_waits_until_whisper_loading_finishes() {
     let h = Harness::with_budget(100, |_| {});
     let id = h.session(&words(20), "");
     let cancel = AtomicBool::new(false);
@@ -472,6 +472,7 @@ fn summary_admission_waits_until_whisper_loading_finishes() {
             );
         });
         loading_rx.recv_timeout(WAIT).unwrap();
+        h.queue.preload();
 
         let (admitted_tx, admitted_rx) = mpsc::channel();
         let queue = &h.queue;
@@ -480,9 +481,19 @@ fn summary_admission_waits_until_whisper_loading_finishes() {
             queue.regenerate(&id, PROMPT_ID).unwrap();
             admitted_tx.send(()).unwrap();
         });
-        assert!(admitted_rx.recv_timeout(Duration::from_millis(50)).is_err());
-        release_tx.send(()).unwrap();
         admitted_rx.recv_timeout(WAIT).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(h.calls().is_empty(), "summary ran during Whisper loading");
+        assert_eq!(
+            h.loader.loads.load(Ordering::SeqCst),
+            0,
+            "summary preloaded during Whisper loading"
+        );
+        assert!(
+            !h.queue.summarizing(),
+            "summary started during Whisper loading"
+        );
+        release_tx.send(()).unwrap();
     });
     h.wait_idle();
 }

@@ -67,6 +67,8 @@ struct State {
     running: Option<Running>,
     /// Load the model now, ahead of the job a finishing recording queues.
     preload: bool,
+    /// A Whisper load reserved the queue from starting a summary.
+    whisper_loading: bool,
     shutdown: bool,
 }
 
@@ -81,6 +83,15 @@ pub(super) struct Shared {
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+struct TranscriptionLoad<'a>(&'a Shared);
+
+impl Drop for TranscriptionLoad<'_> {
+    fn drop(&mut self) {
+        self.0.lock().whisper_loading = false;
+        self.0.changed.notify_all();
     }
 }
 
@@ -217,8 +228,8 @@ impl JobQueue {
     }
 
     /// Waits for active or ready summaries before loading Whisper, while
-    /// allowing transcription during a summary-model download. The queue
-    /// lock covers `operation` so a summary cannot start during the load.
+    /// allowing transcription during a summary-model download. Reserves summary
+    /// start during Whisper loading without holding the queue lock.
     pub fn while_transcription_safe<T>(
         &self,
         cancel: &AtomicBool,
@@ -227,7 +238,8 @@ impl JobQueue {
         let mut state = self.shared.lock();
         while !cancel.load(Ordering::Relaxed)
             && (state.running.is_some()
-                || (!state.pending.is_empty() && self.shared.loader.ready()))
+                || (!state.pending.is_empty() && self.shared.loader.ready())
+                || state.whisper_loading)
         {
             state = self
                 .shared
@@ -239,6 +251,9 @@ impl JobQueue {
         if cancel.load(Ordering::Relaxed) {
             return None;
         }
+        state.whisper_loading = true;
+        drop(state);
+        let _loading = TranscriptionLoad(&self.shared);
         Some(operation())
     }
 
@@ -407,7 +422,9 @@ fn work(shared: &Shared) {
             let (mut state, _) = shared
                 .changed
                 .wait_timeout_while(state, Duration::from_millis(200), |s| {
-                    (s.pending.is_empty() || !shared.loader.ready()) && !s.preload && !s.shutdown
+                    (s.whisper_loading
+                        || ((s.pending.is_empty() || !shared.loader.ready()) && !s.preload))
+                        && !s.shutdown
                 })
                 .unwrap_or_else(|p| p.into_inner());
             if state.shutdown {

@@ -798,7 +798,11 @@ impl Inner {
         audio: &mpsc::Receiver<Vec<f32>>,
         cancel: &AtomicBool,
     ) -> Result<Stream, String> {
-        let stt = self.transcriber(cancel)?;
+        let stt = match self.transcriber(cancel) {
+            Ok(stt) => stt,
+            Err(_) if cancel.load(Ordering::Relaxed) => return Ok(Stream::default()),
+            Err(e) => return Err(e),
+        };
         let mut stream = Stream::default();
         let mut catching_up = false;
         loop {

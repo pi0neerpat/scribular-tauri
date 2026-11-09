@@ -7,7 +7,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
@@ -828,6 +828,60 @@ fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
     h.events.wait_for(&second, SessionStatus::Done);
     assert!(h.queue.wait_idle(WAIT));
     assert_eq!(loads(&h), 2, "Whisper loads after the summary finishes");
+}
+
+#[test]
+fn cancelling_while_waiting_for_summary_to_finish_preserves_cancelled_session() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    h.recorder.set_unload_whisper(true);
+
+    let first = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    wait_until("the first summary starts", || h.queue.summarizing());
+
+    let second = h.start(InputMode::Mic);
+    h.feed(20);
+    h.wait_chunks(&second, 1);
+    std::thread::sleep(Duration::from_millis(50));
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&second, SessionStatus::Finalizing);
+    assert!(h.recorder.cancel(&second));
+
+    h.events.wait_for(&second, SessionStatus::Cancelled);
+    h.events.wait_for(&first, SessionStatus::Done);
+    assert_eq!(h.get(&second).status, SessionStatus::Cancelled);
+    assert_eq!(h.get(&second).error, None);
+}
+
+#[test]
+fn whisper_loading_does_not_hold_the_summary_queue_lock() {
+    let h = Harness::new();
+    let queue = Arc::clone(&h.queue);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let cancel = AtomicBool::new(false);
+    let loading = std::thread::spawn(move || {
+        queue.while_transcription_safe(&cancel, || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        })
+    });
+    started_rx.recv_timeout(WAIT).unwrap();
+
+    let queue = Arc::clone(&h.queue);
+    let (query_tx, query_rx) = std::sync::mpsc::channel();
+    let query = std::thread::spawn(move || query_tx.send(queue.is_busy()).unwrap());
+    let responsive = query_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+    release_tx.send(()).unwrap();
+    query.join().unwrap();
+    assert_eq!(loading.join().unwrap(), Some(()));
+    assert!(responsive, "queue status query waited for Whisper loading");
 }
 
 #[test]
