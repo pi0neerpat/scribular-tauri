@@ -9,14 +9,20 @@ const currentRecording = vi.fn();
 const getRecordingSettings = vi.fn();
 const getSession = vi.fn();
 const onSessionProgress = vi.fn();
+const onSessionTranscriptWaiting = vi.fn(async (_handler: (state: { sessionId: string; waiting: boolean }) => void) => () => {});
 const onSessionSegments = vi.fn();
 const startRecording = vi.fn();
 const stopRecording = vi.fn();
+const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
+const onSummaryAvailability = vi.fn(async () => () => {});
 let emitProgress: ((progress: SessionProgress) => void) | undefined;
+let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
   accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
-  onSessionProgress, onSessionSegments, startRecording, stopRecording,
+  onSessionProgress, onSessionTranscriptWaiting, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
+  getSummaryAvailability, onSummaryAvailability,
+  subscribeSummaryAvailability: async (callback: (state: string) => void) => { callback(await getSummaryAvailability()); return () => {}; },
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
 
@@ -32,7 +38,12 @@ beforeEach(() => {
   getSession.mockResolvedValue(null);
   onSessionProgress.mockResolvedValue(() => {});
   emitProgress = undefined;
+  emitTranscriptWaiting = undefined;
   onSessionSegments.mockResolvedValue(() => {});
+  onSessionTranscriptWaiting.mockImplementation(async (handler) => {
+    emitTranscriptWaiting = handler;
+    return () => {};
+  });
   startRecording.mockResolvedValue(recording);
   stopRecording.mockResolvedValue(undefined);
 });
@@ -54,6 +65,38 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it('allows starting a recording while a summary is running', async () => {
+    sessionStorage.setItem('scribular.inFlightSession', 'summary-1');
+    getSession.mockResolvedValueOnce({ id: 'summary-1', status: 'summarizing', inputMode: 'mic', createdAt: 0 });
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect(target.textContent).toContain('Working…'));
+    expect([...target.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
+      expect.arrayContaining(['Start recording', 'Cancel']),
+    );
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    expect(startRecording).toHaveBeenCalledTimes(1);
+    unmount(app);
+    target.remove();
+  });
+
+  it('shows an early transcript-waiting event after startup resolves and hides it when cleared', async () => {
+    let resolveStart!: (value: typeof recording) => void;
+    startRecording.mockReturnValueOnce(new Promise((resolve) => { resolveStart = resolve; }));
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalled());
+
+    emitTranscriptWaiting!({ sessionId: recording.id, waiting: true });
+    resolveStart(recording);
+    await vi.waitFor(() => expect(target.textContent).toContain('Live transcript will start when the current summary finishes.'));
+
+    emitTranscriptWaiting!({ sessionId: recording.id, waiting: false });
+    await vi.waitFor(() => expect(target.textContent).not.toContain('Live transcript will start when the current summary finishes.'));
+    unmount(app);
+    target.remove();
+  });
+
   it('keeps Start available and offers Cancel while awaiting the summary model', async () => {
     sessionStorage.setItem('scribular.inFlightSession', 'waiting-1');
     getSession.mockResolvedValueOnce({ id: 'waiting-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });

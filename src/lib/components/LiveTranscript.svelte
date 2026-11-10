@@ -4,7 +4,7 @@
   import { onSessionSegments } from '../api';
   import { liveTranscript, wordCount, type SourceSegments } from '../transcript';
 
-  let { sessionId, labeled }: { sessionId: string; labeled: boolean } = $props();
+  let { sessionId, labeled, waiting = false }: { sessionId: string; labeled: boolean; waiting?: boolean } = $props();
 
   let segments = $state<SourceSegments>({ mic: [], system: [] });
   let text = $derived(liveTranscript(segments, labeled));
@@ -25,6 +25,8 @@
 {#if text}
   <p>{words} {words === 1 ? 'word' : 'words'}</p>
   <pre>{text}</pre>
+{:else if waiting}
+  <p>Live transcript will start when the current summary finishes.</p>
 {/if}
 
 <style>

@@ -14,10 +14,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
-use crate::jobs::{JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta};
+use crate::jobs::{
+    JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta,
+    TranscriptWaiting,
+};
 use crate::license::{AccessState, ActivationResult, Licensing};
 use crate::models::{
-    ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState, SPEAKER_CAMPPLUS,
+    ModelKind, ModelManager, ModelProgress, ModelSpec, ModelState, SummaryAvailability,
+    SPEAKER_CAMPPLUS, SUMMARY_AVAILABILITY_EVENT,
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
@@ -34,9 +38,11 @@ pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
     MODELS_PROGRESS_EVENT,
     SUMMARY_MODEL_CHANGED_EVENT,
+    SUMMARY_AVAILABILITY_EVENT,
     SESSION_PROGRESS_EVENT,
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
+    SESSION_TRANSCRIPT_WAITING_EVENT,
     LICENSE_CHANGED_EVENT,
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
@@ -70,6 +76,8 @@ pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
 /// Transcript segments as a recording transcribes, one [`SessionSegments`]
 /// per window that had speech.
 pub const SESSION_SEGMENTS_EVENT: &str = "session://segments";
+
+pub const SESSION_TRANSCRIPT_WAITING_EVENT: &str = "session://transcript-waiting";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -107,9 +115,11 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     SummaryModel::export_all(cfg)?;
     ModelSpec::export_all(cfg)?;
     ModelProgress::export_all(cfg)?;
+    SummaryAvailability::export_all(cfg)?;
     SessionProgress::export_all(cfg)?;
     SummaryDelta::export_all(cfg)?;
     SessionSegments::export_all(cfg)?;
+    TranscriptWaiting::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
     AudioApp::export_all(cfg)?;
     RecordingSettings::export_all(cfg)?;
@@ -613,6 +623,75 @@ pub fn list_models(models: State<Arc<ModelManager>>) -> Vec<ModelSpec> {
 #[tauri::command]
 pub fn models_status(models: State<Arc<ModelManager>>) -> Vec<ModelProgress> {
     models.status()
+}
+
+#[tauri::command]
+pub fn get_summary_availability(models: State<Arc<ModelManager>>) -> SummaryAvailability {
+    models.summary_availability()
+}
+
+#[tauri::command]
+pub fn retry_summary_model(
+    app: AppHandle,
+    models: State<Arc<ModelManager>>,
+    jobs: State<Arc<JobQueue>>,
+) -> Result<(), String> {
+    if models.summary_availability() == SummaryAvailability::Unsupported {
+        return Err("summary model is unsupported on this Mac".into());
+    }
+    models.set_summary_availability(SummaryAvailability::Downloading);
+    models
+        .readiness
+        .set(&models.selected_llm(), ModelState::Missing);
+    let models = Arc::clone(&models);
+    let jobs = Arc::clone(&jobs);
+    tauri::async_runtime::spawn(async move {
+        match models
+            .ensure_one(&models.selected_llm(), &|p| {
+                let _ = app.emit(MODELS_PROGRESS_EVENT, p);
+            })
+            .await
+        {
+            Ok(()) => jobs.preload(),
+            Err(e) => {
+                crate::diag::log::log(
+                    "ERROR",
+                    "commands",
+                    &format!("summary model retry failed ({e})"),
+                );
+                models.set_summary_availability(SummaryAvailability::LoadFailed);
+            }
+        }
+    });
+    Ok(())
+}
+
+pub fn restore_summary_model_setting(store: &Store, models: &ModelManager) -> Result<(), String> {
+    let Some(id) = store.get_setting(SUMMARY_MODEL_ID).map_err(|e| {
+        format!(
+            "summary model setting read failed ({})",
+            crate::diag::log::kind(&e)
+        )
+    })?
+    else {
+        return Ok(());
+    };
+    if models.select_llm(&id).is_err() {
+        crate::diag::log::log(
+            "WARN",
+            "models",
+            "resetting unknown summary model selection",
+        );
+        store
+            .set_setting(SUMMARY_MODEL_ID, crate::models::DEFAULT_LLM)
+            .map_err(|e| {
+                format!(
+                    "summary model setting reset failed ({})",
+                    crate::diag::log::kind(&e)
+                )
+            })?;
+    }
+    Ok(())
 }
 
 /// Starts downloading any missing model in the background and returns at
@@ -1148,6 +1227,10 @@ impl JobEvents for TauriJobEvents {
 
     fn segments(&self, segments: SessionSegments) {
         let _ = self.0.emit(SESSION_SEGMENTS_EVENT, segments);
+    }
+
+    fn transcript_waiting(&self, waiting: TranscriptWaiting) {
+        let _ = self.0.emit(SESSION_TRANSCRIPT_WAITING_EVENT, waiting);
     }
 }
 

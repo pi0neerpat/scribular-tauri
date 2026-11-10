@@ -1,4 +1,4 @@
-//! U5 against the real gemma-2-2b model (`cargo test -- --ignored`). The
+//! U5 against the real Gemma 4 E2B model (`cargo test -- --ignored`). The
 //! model is read from `$SCRIBULAR_MODELS`, or the app's data directory once
 //! the app (or `bench --download`) has fetched it.
 #![cfg(not(feature = "fake-engines"))]
@@ -9,7 +9,7 @@ use scribular_lib::jobs::{JobEvents, JobQueue, SessionProgress, SessionSegments,
 use scribular_lib::llm::llama::{params, LlamaLoader, LlamaSummarizer};
 use scribular_lib::llm::prompt::{chunk_budget, chunk_prompt};
 use scribular_lib::llm::Summarizer;
-use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_2_2B};
+use scribular_lib::models::{self, ModelManager, ModelState, GEMMA_4_E2B};
 use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{InputMode, NewSession, SessionStatus, Store};
 use scribular_lib::text::{chunk_by_tokens, clean_transcript, merge_diarized_segments, Segment};
@@ -27,9 +27,9 @@ fn models() -> Arc<ModelManager> {
     let models = Arc::new(ModelManager::new(dir.clone(), models::manifest()));
     models.scan();
     assert_eq!(
-        models.readiness.get(GEMMA_2_2B),
+        models.readiness.get(GEMMA_4_E2B),
         ModelState::Ready,
-        "{GEMMA_2_2B} isn't in {}; run `cargo run --bin bench -- <file> --download` first",
+        "{GEMMA_4_E2B} isn't in {}; run `cargo run --bin bench -- <file> --download` first",
         dir.display()
     );
     models
@@ -63,10 +63,11 @@ impl JobEvents for Quiet {
 /// KTD3 estimates "about 3 chunks instead of about 14"; gemma's tokenizer
 /// gives 2 for this transcript, so the test holds the ceiling and the budget.
 #[test]
-#[ignore = "needs the gemma-2-2b model"]
+#[ignore = "needs the Gemma 4 E2B model"]
 fn fifty_minute_benchmark_splits_into_at_most_three_chunks() {
     let models = models();
-    let llm = LlamaSummarizer::load(&models.path(GEMMA_2_2B).unwrap(), params(GEMMA_2_2B)).unwrap();
+    let llm =
+        LlamaSummarizer::load(&models.path(GEMMA_4_E2B).unwrap(), params(GEMMA_4_E2B)).unwrap();
     let store = Store::open(
         &std::env::temp_dir().join(format!("scribular-llama-chunks-{}.db", std::process::id())),
         &MemoryKeyStore::with_key([7; 32]),
@@ -99,7 +100,7 @@ fn fifty_minute_benchmark_splits_into_at_most_three_chunks() {
 }
 
 #[test]
-#[ignore = "needs the gemma-2-2b model"]
+#[ignore = "needs the Gemma 4 E2B model"]
 fn every_prompt_summarizes_thirty_seconds() {
     let models = models();
     let db =
@@ -143,6 +144,6 @@ fn every_prompt_summarizes_thirty_seconds() {
             "{} gave no summary",
             prompt.id
         );
-        assert_eq!(done.model_id.as_deref(), Some(GEMMA_2_2B));
+        assert_eq!(done.model_id.as_deref(), Some(GEMMA_4_E2B));
     }
 }

@@ -7,6 +7,7 @@ mod manifest;
 
 use std::{
     collections::HashMap,
+    fs,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -21,8 +22,22 @@ use ts_rs::TS;
 
 pub use download::{ensure, model_path, verify_existing, DownloadError};
 pub use manifest::{
-    manifest, ModelKind, ModelSpec, DEFAULT_LLM, GEMMA_2_2B, SPEAKER_CAMPPLUS, WHISPER_BASE,
+    manifest, ModelKind, ModelSpec, DEFAULT_LLM, GEMMA_4_E2B, SPEAKER_CAMPPLUS, WHISPER_BASE,
 };
+
+// shortcut: provisional 8 GiB floor, replace if AS10 measures a higher minimum.
+pub const MIN_SUMMARY_RAM_BYTES: u64 = 8 << 30;
+pub const SUMMARY_AVAILABILITY_EVENT: &str = "summary-availability";
+const OLD_SUMMARY_MODEL_FILE: &str = "gemma-2-2b-it-Q4_K_M.gguf";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SummaryAvailability {
+    Ready,
+    Downloading,
+    Unsupported,
+    LoadFailed,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +111,8 @@ pub struct ModelManager {
     selected_llm: Mutex<String>,
     /// The recorder's update install gate, shared so downloads cannot start mid-install.
     install_gate: OnceLock<Arc<Mutex<()>>>,
+    availability: Mutex<SummaryAvailability>,
+    availability_event: OnceLock<tauri::AppHandle>,
 }
 
 struct DownloadGuard(Arc<AtomicBool>);
@@ -115,12 +132,17 @@ impl Drop for DownloadGuard {
 
 impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
+        Self::new_with_memory(dir, specs, crate::hardware::physical_memory_bytes())
+    }
+
+    fn new_with_memory(dir: PathBuf, specs: Vec<ModelSpec>, memory_bytes: Option<u64>) -> Self {
         let first_llm = specs
             .iter()
             .find(|s| s.id == DEFAULT_LLM && s.kind == ModelKind::Llm)
             .or_else(|| specs.iter().find(|s| s.kind == ModelKind::Llm))
             .map(|s| s.id.clone())
             .unwrap_or_default();
+        let unsupported = memory_bytes.is_some_and(|bytes| bytes < MIN_SUMMARY_RAM_BYTES);
         Self {
             dir,
             running: specs
@@ -133,6 +155,40 @@ impl ModelManager {
             readiness: Readiness::default(),
             selected_llm: Mutex::new(first_llm),
             install_gate: OnceLock::new(),
+            availability: Mutex::new(if unsupported {
+                SummaryAvailability::Unsupported
+            } else {
+                SummaryAvailability::Downloading
+            }),
+            availability_event: OnceLock::new(),
+        }
+    }
+
+    pub fn set_availability_event(&self, app: tauri::AppHandle) {
+        let _ = self.availability_event.set(app);
+    }
+
+    pub fn summary_availability(&self) -> SummaryAvailability {
+        *self.availability.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    pub fn has_legacy_summary_model(&self) -> bool {
+        self.dir.join(OLD_SUMMARY_MODEL_FILE).is_file()
+    }
+
+    pub fn remove_legacy_summary_model(&self) {
+        remove_old_summary_model(&self.dir);
+    }
+
+    pub fn set_summary_availability(&self, state: SummaryAvailability) {
+        let mut current = self.availability.lock().unwrap_or_else(|p| p.into_inner());
+        if *current == state {
+            return;
+        }
+        *current = state;
+        if let Some(app) = self.availability_event.get() {
+            use tauri::Emitter;
+            let _ = app.emit(SUMMARY_AVAILABILITY_EVENT, state);
         }
     }
 
@@ -195,6 +251,11 @@ impl ModelManager {
                 self.readiness.set(&spec.id, ModelState::Ready);
             }
         }
+        if self.summary_availability() != SummaryAvailability::Unsupported
+            && self.readiness.get(&self.selected_llm()) == ModelState::Ready
+        {
+            self.set_summary_availability(SummaryAvailability::Ready);
+        }
     }
 
     /// Current state of every model, for the first render before any
@@ -223,10 +284,26 @@ impl ModelManager {
     /// retried during the LLM download, with at most one download per model.
     /// Stops at an active model so concurrent calls cannot skip ahead.
     pub async fn ensure_all(&self, on_progress: &(dyn Fn(ModelProgress) + Send + Sync)) {
+        self.ensure_all_with_memory(crate::hardware::physical_memory_bytes(), on_progress)
+            .await;
+    }
+
+    async fn ensure_all_with_memory(
+        &self,
+        memory_bytes: Option<u64>,
+        on_progress: &(dyn Fn(ModelProgress) + Send + Sync),
+    ) {
+        let unsupported = memory_bytes.is_some_and(|bytes| bytes < MIN_SUMMARY_RAM_BYTES);
+        if unsupported {
+            self.set_summary_availability(SummaryAvailability::Unsupported);
+            remove_old_summary_model(&self.dir);
+        }
         for i in 0..self.specs.len() {
             let spec = &self.specs[i];
             let selected = self.selected_llm();
-            if !spec.optional && (spec.kind != ModelKind::Llm || spec.id == selected) {
+            if !spec.optional
+                && (spec.kind != ModelKind::Llm || (spec.id == selected && !unsupported))
+            {
                 if self.running[i].load(Ordering::Acquire) {
                     return;
                 }
@@ -248,6 +325,11 @@ impl ModelManager {
             .iter()
             .position(|spec| spec.id == model_id)
             .ok_or_else(|| format!("unknown model {model_id}"))?;
+        if self.specs[i].kind == ModelKind::Llm
+            && self.summary_availability() == SummaryAvailability::Unsupported
+        {
+            return Err("summary model is unsupported on this Mac".into());
+        }
         match self.ensure_index(i, on_progress).await {
             Some(true) => Ok(()),
             Some(false) => Err(format!("model {model_id} download failed")),
@@ -289,14 +371,25 @@ impl ModelManager {
                 total_bytes: spec.size,
                 error: None,
             });
+            if spec.kind == ModelKind::Llm {
+                self.set_summary_availability(SummaryAvailability::Ready);
+            }
             return Some(true);
+        }
+        if spec.kind == ModelKind::Llm {
+            self.set_summary_availability(SummaryAvailability::Downloading);
         }
         let report = |p: ModelProgress| {
             self.readiness.set(&p.model_id, p.state);
             on_progress(p);
         };
         match ensure(&self.client, &self.dir, spec, &report).await {
-            Ok(_) => Some(true),
+            Ok(_) => {
+                if spec.kind == ModelKind::Llm {
+                    self.set_summary_availability(SummaryAvailability::Ready);
+                }
+                Some(true)
+            }
             Err(e) => {
                 report(ModelProgress {
                     model_id: spec.id.clone(),
@@ -305,8 +398,80 @@ impl ModelManager {
                     total_bytes: spec.size,
                     error: Some(e.to_string()),
                 });
+                if spec.kind == ModelKind::Llm {
+                    self.set_summary_availability(SummaryAvailability::LoadFailed);
+                }
                 Some(false)
             }
         }
+    }
+}
+
+fn remove_old_summary_model(dir: &Path) {
+    if let Err(e) = fs::remove_file(dir.join(OLD_SUMMARY_MODEL_FILE)) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            crate::diag::log::log("WARN", "models", "old summary model cleanup failed");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructing_on_low_memory_does_not_delete_old_summary() {
+        let dir = std::env::temp_dir().join(format!("scribular-model-gate-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join(OLD_SUMMARY_MODEL_FILE);
+        fs::write(&old, b"old model").unwrap();
+
+        let manager =
+            ModelManager::new_with_memory(dir.clone(), manifest(), Some(MIN_SUMMARY_RAM_BYTES - 1));
+
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::Unsupported
+        );
+        assert!(old.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unknown_memory_does_not_fail_the_summary_gate() {
+        let dir =
+            std::env::temp_dir().join(format!("scribular-model-unknown-{}", std::process::id()));
+        let manager = ModelManager::new_with_memory(dir, manifest(), None);
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::Downloading
+        );
+    }
+
+    #[test]
+    fn low_memory_keeps_speech_available_and_skips_the_llm_download() {
+        let dir = std::env::temp_dir().join(format!("scribular-model-skip-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join(OLD_SUMMARY_MODEL_FILE);
+        fs::write(&old, b"old model").unwrap();
+        let manager =
+            ModelManager::new_with_memory(dir.clone(), manifest(), Some(MIN_SUMMARY_RAM_BYTES - 1));
+        manager.readiness.set(WHISPER_BASE, ModelState::Ready);
+        let seen = Mutex::new(Vec::new());
+
+        tauri::async_runtime::block_on(
+            manager.ensure_all_with_memory(Some(MIN_SUMMARY_RAM_BYTES - 1), &|progress| {
+                seen.lock().unwrap().push(progress.model_id)
+            }),
+        );
+
+        assert_eq!(*seen.lock().unwrap(), [WHISPER_BASE]);
+        assert_eq!(manager.readiness.get(DEFAULT_LLM), ModelState::Missing);
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::Unsupported
+        );
+        assert!(!old.exists());
+        fs::remove_dir_all(dir).unwrap();
     }
 }

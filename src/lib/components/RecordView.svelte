@@ -12,6 +12,7 @@
     getSession,
     listSummaryModels,
     onSessionProgress,
+    onSessionTranscriptWaiting,
     setActivePrompt,
     startRecording,
     stopRecording,
@@ -59,6 +60,7 @@
   // reply could be older than the last event.
   let status = $state<SessionStatus | null>(null);
   let progress = $state<SessionProgress | null>(null);
+  let transcriptWaiting = $state<{ sessionId: string; waiting: boolean } | null>(null);
   // The finished session's result.
   let result = $state<Session | null>(null);
   let resultFetch = 0;
@@ -145,6 +147,10 @@
         });
       }
     });
+    const unlistenTranscriptWaiting = onSessionTranscriptWaiting((state) => {
+      if (state.waiting) transcriptWaiting = state;
+      else if (transcriptWaiting?.sessionId === state.sessionId) transcriptWaiting = null;
+    });
     // The window may reload while a session runs.
     currentRecording().then(async (recording) => {
       const id = recording ?? sessionStorage.getItem(IN_FLIGHT_KEY);
@@ -171,6 +177,7 @@
     return () => {
       window.removeEventListener('tray-start-recording', startFromTray);
       unlisten.then((fn) => fn());
+      unlistenTranscriptWaiting.then((fn) => fn());
     };
   });
 
@@ -294,13 +301,14 @@
       {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
     </p>
     <button bind:this={stopButton} onclick={stop} disabled={busy || askSpeakerCount}>Stop</button>
-  {:else if working && status !== 'awaitingModel'}
-    <p>
-      {progress?.message ?? 'Working…'}
-      {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
-    </p>
-    <button onclick={cancel}>Cancel</button>
   {:else}
+    {#if working && status !== 'awaitingModel'}
+      <p>
+        {progress?.message ?? 'Working…'}
+        {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
+      </p>
+      <button onclick={cancel}>Cancel</button>
+    {/if}
     {#if status === 'awaitingModel'}
       <p>{progress?.message ?? 'Waiting for the summary model download…'}</p>
       <button onclick={cancel}>Cancel</button>
@@ -326,7 +334,7 @@
   {/if}
 
   {#if sessionId && (recording || working || status === 'failed')}
-    <LiveTranscript {sessionId} {labeled} />
+    <LiveTranscript {sessionId} {labeled} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
 
   {#if denied}

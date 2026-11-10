@@ -10,6 +10,7 @@ vi.mock('../api', async (orig) => ({
   openExternalLink,
   currentRecording: vi.fn(() => Promise.resolve(null)),
   onSessionProgress: vi.fn(() => Promise.resolve(() => {})),
+  onSessionTranscriptWaiting: vi.fn(() => Promise.resolve(() => {})),
 }));
 const { default: LicenseGate } = await import('./LicenseGate.svelte');
 const { default: RecordView } = await import('./RecordView.svelte');

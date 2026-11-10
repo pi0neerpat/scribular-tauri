@@ -67,6 +67,8 @@ struct State {
     running: Option<Running>,
     /// Load the model now, ahead of the job a finishing recording queues.
     preload: bool,
+    /// A Whisper load reserved the queue from starting a summary.
+    whisper_loading: bool,
     shutdown: bool,
 }
 
@@ -81,6 +83,15 @@ pub(super) struct Shared {
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+struct TranscriptionLoad<'a>(&'a Shared);
+
+impl Drop for TranscriptionLoad<'_> {
+    fn drop(&mut self) {
+        self.0.lock().whisper_loading = false;
+        self.0.changed.notify_all();
     }
 }
 
@@ -216,6 +227,48 @@ impl JobQueue {
         Some(operation())
     }
 
+    /// Waits for active or ready summaries before loading Whisper, while
+    /// allowing transcription during a summary-model download. Reserves summary
+    /// start during Whisper loading without holding the queue lock.
+    pub fn while_transcription_safe<T>(
+        &self,
+        cancel: &AtomicBool,
+        on_wait: impl FnOnce(),
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let mut state = self.shared.lock();
+        let summary_waiting =
+            state.running.is_some() || (!state.pending.is_empty() && self.shared.loader.ready());
+        let waiting = summary_waiting || state.whisper_loading;
+        if waiting {
+            // Lock order: release the queue before callbacks that may lock recording or emit events.
+            drop(state);
+            if summary_waiting {
+                on_wait();
+            }
+            state = self.shared.lock();
+        }
+        while !cancel.load(Ordering::Relaxed)
+            && (state.running.is_some()
+                || (!state.pending.is_empty() && self.shared.loader.ready())
+                || state.whisper_loading)
+        {
+            state = self
+                .shared
+                .changed
+                .wait_timeout(state, Duration::from_millis(100))
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        state.whisper_loading = true;
+        drop(state);
+        let _loading = TranscriptionLoad(&self.shared);
+        Some(operation())
+    }
+
     /// Starts loading the summary model in the background, so a recording's
     /// summary doesn't wait for it after the transcript is done (M5b).
     pub fn preload(&self) {
@@ -294,7 +347,15 @@ impl JobQueue {
                 Ok(true) => deleted += 1,
                 Ok(false) => skipped += 1,
                 Err(e) => {
-                    crate::diag::log::log("ERROR", "queue", &format!("clear sessions: deleting {} failed ({})", session.id, crate::diag::log::kind(&e)));
+                    crate::diag::log::log(
+                        "ERROR",
+                        "queue",
+                        &format!(
+                            "clear sessions: deleting {} failed ({})",
+                            session.id,
+                            crate::diag::log::kind(&e)
+                        ),
+                    );
                     skipped += 1;
                 }
             }
@@ -373,7 +434,9 @@ fn work(shared: &Shared) {
             let (mut state, _) = shared
                 .changed
                 .wait_timeout_while(state, Duration::from_millis(200), |s| {
-                    (s.pending.is_empty() || !shared.loader.ready()) && !s.preload && !s.shutdown
+                    (s.whisper_loading
+                        || ((s.pending.is_empty() || !shared.loader.ready()) && !s.preload))
+                        && !s.shutdown
                 })
                 .unwrap_or_else(|p| p.into_inner());
             if state.shutdown {

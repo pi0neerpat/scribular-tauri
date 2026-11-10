@@ -7,7 +7,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Condvar, Mutex,
     },
     time::{Duration, Instant},
@@ -21,6 +21,7 @@ use scribular_lib::engines::fake::{
 };
 use scribular_lib::jobs::{
     JobEvents, JobQueue, RecordError, Recorder, SessionProgress, SessionSegments, SummaryDelta,
+    TranscriptWaiting,
 };
 use scribular_lib::llm::LlmError;
 use scribular_lib::store::key::MemoryKeyStore;
@@ -75,6 +76,7 @@ struct Events {
     store: Arc<Store>,
     progress: Mutex<Vec<SessionProgress>>,
     segments: Mutex<Vec<SessionSegments>>,
+    waiting: Mutex<Vec<TranscriptWaiting>>,
     stale_rows: Mutex<Vec<String>>,
     changed: Condvar,
 }
@@ -135,6 +137,11 @@ impl JobEvents for Events {
 
     fn segments(&self, s: SessionSegments) {
         self.segments.lock().unwrap().push(s);
+    }
+
+    fn transcript_waiting(&self, state: TranscriptWaiting) {
+        self.waiting.lock().unwrap().push(state);
+        self.changed.notify_all();
     }
 }
 
@@ -208,6 +215,7 @@ impl Harness {
             store: store.clone(),
             progress: Mutex::default(),
             segments: Mutex::default(),
+            waiting: Mutex::default(),
             stale_rows: Mutex::default(),
             changed: Condvar::new(),
         });
@@ -390,6 +398,81 @@ fn a_session_records_transcribes_and_summarizes() {
         ]
     );
     h.assert_rows_matched_events();
+}
+
+#[test]
+fn low_memory_stream_announces_summary_wait_then_catches_up_without_losing_audio() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    let first = h.start(InputMode::Mic);
+    h.feed(12);
+    h.wait_chunks(&first, 2);
+    h.recorder.stop().unwrap();
+    wait_until("summary running", || h.queue.summarizing());
+
+    h.recorder.set_unload_whisper(true);
+    let id = h.start(InputMode::MicAndSystem);
+    h.feed(12);
+    h.wait_chunks(&id, 2);
+    wait_until("transcript waiting event", || {
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.session_id == id && event.waiting)
+    });
+    assert_eq!(h.get(&id).status, SessionStatus::Recording);
+
+    assert!(h.queue.wait_idle(WAIT));
+    wait_until("transcript waiting clear", || {
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.session_id == id && !event.waiting)
+    });
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    let transcript = h.get(&id).transcript;
+    assert!(transcript.contains("hello there, how are you today?"));
+    assert!(transcript.contains("I am fine, thanks for asking."));
+    assert!(h
+        .events
+        .segments
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|event| event.session_id == id));
+    assert_eq!(
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.session_id == id)
+            .map(|event| event.waiting)
+            .collect::<Vec<_>>(),
+        [true, false]
+    );
+}
+
+#[test]
+fn no_summary_wait_emits_no_transcript_waiting_event() {
+    let h = Harness::new();
+    h.recorder.set_unload_whisper(true);
+    let id = h.start(InputMode::Mic);
+    h.feed(12);
+    h.wait_chunks(&id, 2);
+    assert!(h.events.waiting.lock().unwrap().is_empty());
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).transcript, TRANSCRIPT);
 }
 
 #[test]
@@ -800,6 +883,145 @@ fn segments_are_saved_and_emitted_in_recording_time() {
         .collect();
     assert_eq!(saved, starts);
     assert_eq!(h.get(&id).transcript, [TRANSCRIPT; 3].join(" "));
+}
+
+#[test]
+fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    h.recorder.set_unload_whisper(true);
+
+    let first = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    wait_until("the first summary starts", || h.queue.summarizing());
+
+    let second = h.start(InputMode::Mic);
+    h.feed(20);
+    h.wait_chunks(&second, 1);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(loads(&h), 1, "Whisper must wait until Gemma is idle");
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&first, SessionStatus::Done);
+    h.events.wait_for(&second, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(loads(&h), 2, "Whisper loads after the summary finishes");
+}
+
+#[test]
+fn cancelling_while_waiting_for_summary_to_finish_preserves_cancelled_session() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    h.recorder.set_unload_whisper(true);
+
+    let first = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    wait_until("the first summary starts", || h.queue.summarizing());
+
+    let second = h.start(InputMode::Mic);
+    h.feed(20);
+    h.wait_chunks(&second, 1);
+    wait_until("transcript waiting event", || {
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.session_id == second && event.waiting)
+    });
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&second, SessionStatus::Finalizing);
+    assert!(h.recorder.cancel(&second));
+
+    h.events.wait_for(&second, SessionStatus::Cancelled);
+    h.events.wait_for(&first, SessionStatus::Done);
+    assert_eq!(h.get(&second).status, SessionStatus::Cancelled);
+    assert_eq!(h.get(&second).error, None);
+    assert_eq!(
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.session_id == second)
+            .map(|event| event.waiting)
+            .collect::<Vec<_>>(),
+        [true, false]
+    );
+}
+
+#[test]
+fn high_memory_live_transcript_continues_during_a_running_summary_without_wait_events() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    h.recorder.set_unload_whisper(false);
+
+    let first = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.stop().unwrap();
+    wait_until("the summary starts", || h.queue.summarizing());
+
+    let second = h.start(InputMode::Mic);
+    h.feed(16);
+    h.wait_chunks(&second, 3);
+    wait_until("live transcript segments during the summary", || {
+        h.queue.summarizing()
+            && h.events
+                .segments
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event.session_id == second)
+    });
+    assert!(h.events.waiting.lock().unwrap().is_empty());
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&second, SessionStatus::Done);
+    h.events.wait_for(&first, SessionStatus::Done);
+    assert!(h.get(&second).transcript.contains(TRANSCRIPT));
+}
+
+#[test]
+fn whisper_loading_does_not_hold_the_summary_queue_lock() {
+    let h = Harness::new();
+    let queue = Arc::clone(&h.queue);
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let cancel = AtomicBool::new(false);
+    let loading = std::thread::spawn(move || {
+        queue.while_transcription_safe(
+            &cancel,
+            || {},
+            || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            },
+        )
+    });
+    started_rx.recv_timeout(WAIT).unwrap();
+
+    let queue = Arc::clone(&h.queue);
+    let (query_tx, query_rx) = std::sync::mpsc::channel();
+    let query = std::thread::spawn(move || query_tx.send(queue.is_busy()).unwrap());
+    let responsive = query_rx.recv_timeout(Duration::from_millis(100)).is_ok();
+    release_tx.send(()).unwrap();
+    query.join().unwrap();
+    assert_eq!(loading.join().unwrap(), Some(()));
+    assert!(responsive, "queue status query waited for Whisper loading");
 }
 
 #[test]

@@ -1,13 +1,15 @@
 # Dependency review: engines (whisper-rs, llama-cpp-2)
 
-**Date:** 2026-10-19
-**Status:** Approved 2026-10-19 (fallback A pre-approved). The ggml link check (U1) runs
-on these pins, and its result is recorded below.
+**Date:** 2026-10-19; runtime follow-up 2026-11-08
+**Status:** The 2026-10-19 approval covers fallback A and llama.cpp 0.1.158. The
+0.1.160 pins are approved for AS10 by Patrick's approved spec (2026-11-07); this
+follow-up records the package and lockfile checks.
 **Policy:** same as `DEPENDENCY_REVIEW_M0.md` (review, audit, exact pin, in-house
 check, read `build.rs` like an npm postinstall).
 
-**Version rule used:** the newest stable release that is at least 2 weeks old
-(published on or before 2026-10-05).
+**Version rule used:** the newest stable release at least 2 weeks old. The original
+review used the 2026-10-05 cutoff; the 2026-11-08 follow-up uses the 2026-10-25 cutoff.
+Both 0.1.160 pins were published on 2026-10-15.
 
 These crates are reviewed in U1, not U3/U4. The link check needs both crates at their
 final pins, because the risk being tested (two copies of ggml in one binary) depends on
@@ -21,17 +23,23 @@ the exact vendored ggml versions.
 |---|---|---|---|---|---|---|
 | `whisper-rs` | `=0.16.0` | 2026-03-12 | 0.91 M (1.66 M total) | **tazz4843 (1)** | Unlicense | clean |
 | `whisper-rs-sys` | `=0.15.0` | 2026-03-12 | (same project) | **tazz4843 (1)** | Unlicense | clean |
-| `llama-cpp-2` | `=0.1.158` | 2026-09-30 | 0.80 M | **MarcusDunn (1)** | MIT OR Apache-2.0 | clean |
-| `llama-cpp-sys-2` | `=0.1.158` | 2026-09-30 | (same project) | **MarcusDunn (1)** | MIT OR Apache-2.0 | clean |
+| `llama-cpp-2` | `=0.1.160` | 2026-10-15 | 0.80 M | **MarcusDunn (1)** | MIT OR Apache-2.0 | OSV clean (2026-11-08) |
+| `llama-cpp-sys-2` | `=0.1.160` | 2026-10-15 | (same project) | **MarcusDunn (1)** | MIT OR Apache-2.0 | OSV clean (2026-11-08) |
 
-The downloaded `.crate` files match the registry sha256 checksums (whisper-rs
-`2088172d…29f6`, whisper-rs-sys `6986c0fe…a56f`, llama-cpp-2 `5a89d1d5…cbe`,
-llama-cpp-sys-2 `608edbee…bec`).
+The downloaded `.crate` files matched registry checksums in the original review. The
+updated 0.1.160 checksums are recorded in `src-tauri/Cargo.lock`.
+The crates.io API recheck on 2026-11-08 confirmed both publish dates and licenses.
+An OSV query for both exact 0.1.160 versions returned zero advisories. `cargo audit` was
+not installed in the build environment, so this follow-up does not claim a separate
+RustSec database pass.
 
 **Notes**
-- **Newer llama-cpp-2 releases are skipped on purpose.** `0.1.159` (2026-10-07) and
-  `0.1.160` (2026-10-15) are too new under the two-week rule. The project releases about
-  once a week, tracking upstream llama.cpp.
+- `0.1.160` is the AS10 follow-up pin, selected after the 0.1.158 runtime failed to load
+  Gemma 4 E2B while the same model loaded with Homebrew llama.cpp. The project releases
+  about once a week, tracking upstream llama.cpp.
+- The 0.1.160 `build.rs` audit found no material macOS changes: dynamic linking, CMake
+  env passthrough, Metal, and Apple framework links remain the same. New Emscripten cache
+  setup is outside this macOS target and adds no network command.
 - **Single owner on both.** Each crate has one crates.io owner. whisper-rs lives on
   Codeberg (`codeberg.org/tazz4843/whisper-rs`); llama-cpp-2 is in the `utilityai`
   GitHub org. The real code is the vendored C++ (whisper.cpp, llama.cpp) from ggml-org.
@@ -39,7 +47,7 @@ llama-cpp-sys-2 `608edbee…bec`).
 - **Features to use:**
   - `whisper-rs = { version = "=0.16.0", features = ["metal"] }`. Default features are
     empty. `metal` turns on `whisper-rs-sys/metal`.
-  - `llama-cpp-2 = { version = "=0.1.158", default-features = false, features = ["metal"] }`.
+  - `llama-cpp-2 = { version = "=0.1.160", default-features = false, features = ["metal", "dynamic-link"] }`.
     The defaults (`openmp`, `android-shared-stdcxx`, `common`) aren't needed on macOS.
     Turning off `openmp` avoids needing libomp, which Xcode clang doesn't ship.
 - **MSRV:** whisper-rs-sys declares `rust-version = 1.88.0`. Current stable meets it.
@@ -49,7 +57,7 @@ llama-cpp-sys-2 `608edbee…bec`).
 | Crate | Vendors | ggml version |
 |---|---|---|
 | `whisper-rs-sys 0.15.0` | whisper.cpp 1.8.3 | **0.9.5** |
-| `llama-cpp-sys-2 0.1.158` | llama.cpp (Sept 2026) | **0.24.0** |
+| `llama-cpp-sys-2 0.1.160` | llama.cpp **0.6.0-dev** (vendored snapshot) | **0.24.0** |
 
 ### build.rs review
 
@@ -148,13 +156,13 @@ hardware before U3.
 
 ### Pin gap found first
 
-`llama-cpp-2 =0.1.158` depends on `llama-cpp-sys-2 = "^0.1.158"`, so Cargo resolved
-the sys crate to **0.1.160** (2026-10-15), which breaks the two-week rule. The fix is
+`llama-cpp-2 =0.1.160` depends on `llama-cpp-sys-2 = "^0.1.160"`, so Cargo could resolve
+a newer sys crate without the direct exact pin. Keep both pins aligned:
 to also pin both sys crates directly in `Cargo.toml`:
 
 ```toml
 whisper-rs-sys = "=0.15.0"
-llama-cpp-sys-2 = "=0.1.158"
+llama-cpp-sys-2 = "=0.1.160"
 ```
 
 U3 and U4 must keep these direct pins. All results below are on the corrected pins.
@@ -225,8 +233,8 @@ uncommitted.
 
 | Group | Recommendation |
 |---|---|
-| `whisper-rs` `=0.16.0` + `whisper-rs-sys` `=0.15.0` (feature `metal`) | ✅ Approve, plus direct sys-crate pins (`whisper-rs-sys =0.15.0`, `llama-cpp-sys-2 =0.1.158`). Link check passed with fallback A |
-| `llama-cpp-2` `=0.1.158` + `llama-cpp-sys-2` `=0.1.158` (no default features, `metal`) | ✅ Approve, plus direct sys-crate pins (`whisper-rs-sys =0.15.0`, `llama-cpp-sys-2 =0.1.158`). Link check passed with fallback A |
+| `whisper-rs` `=0.16.0` + `whisper-rs-sys` `=0.15.0` (feature `metal`) | ✅ Approve, plus direct sys-crate pins (`whisper-rs-sys =0.15.0`, `llama-cpp-sys-2 =0.1.160`). Link check passed with fallback A |
+| `llama-cpp-2` `=0.1.160` + `llama-cpp-sys-2` `=0.1.160` (no default features, `metal`, `dynamic-link`) | ✅ Approved by the 2026-11-07 spec decision for AS10; release real-model run passed all seven built-in prompts after adapting the single-user Gemma 4 template |
 | Fallback A (`dynamic-link` feature on llama-cpp-2) | ✅ **Required.** The static link failed (see above). Same crate and pin, only a different feature |
 | Test model files (tiny GGUF, `ggml-tiny.en.bin`) | Scratchpad only, not committed |
 
@@ -246,6 +254,20 @@ the 2026-10-05 cutoff, a build-only dependency (bindgen → itertools), moved wi
 
 **Recheck (2026-10-20, real `src-tauri/Cargo.lock` after U5):** 465 crates checked,
 0 published after the 2026-10-05 cutoff.
+
+**Current-tree recheck attempt (2026-11-08, cutoff 2026-10-25):** crates.io returned
+HTTP 429 during the per-version lookups, so this attempt did not establish a whole-lockfile
+result and must not be read as a clean check. The exact 0.1.160 crate metadata was checked
+separately and both publish dates (2026-10-15) fall before the cutoff. Relative to
+`origin/main`, this branch changes only `llama-cpp-2` and `llama-cpp-sys-2`, from
+0.1.158 to 0.1.160.
+
+**Recheck (2026-11-08, current lockfile; 2026-10-25 cutoff):** 572 crates checked,
+7 published after the cutoff. All 7 are present at the same versions in `origin/main`
+(`async-executor 1.14.1`, `async-lock 3.5.0`, `tauri-plugin-single-instance 2.5.5`,
+`tauri-plugin-updater 2.14.1`, `zcheapstr 1.2.0`, `zstd 0.13.4`, and `zstd-safe 7.4.0`).
+The two llama 0.1.160 pins added here were published 2026-10-15 and meet the follow-up
+cutoff.
 
 For the bundling notes above: `build.rs` now emits both `@executable_path/../Frameworks`
 (the bundle) and `@executable_path`, so binaries in `target/<profile>/` (the app under

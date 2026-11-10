@@ -49,9 +49,18 @@ pub struct SessionSegments {
     pub segments: Vec<TranscriptSegment>,
 }
 
+/// Whether a recording's live transcription is waiting for summary work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptWaiting {
+    pub session_id: String,
+    pub waiting: bool,
+}
+
 /// Where jobs report; the app emits Tauri events, tests record.
 pub trait JobEvents: Send + Sync {
     fn progress(&self, progress: SessionProgress);
     fn summary_delta(&self, delta: SummaryDelta);
     fn segments(&self, segments: SessionSegments);
+    fn transcript_waiting(&self, _: TranscriptWaiting) {}
 }

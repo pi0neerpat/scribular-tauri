@@ -1,4 +1,4 @@
-//! The real summarizer: gemma-2-2b-it through llama.cpp with Metal.
+//! The real summarizer: Gemma 4 E2B through llama.cpp with Metal.
 //!
 //! Only the safe path from `plans/DEPENDENCY_REVIEW_ENGINES.md` is used
 //! (backend init, model load, context, tokenize, decode, sample); the calls
@@ -29,13 +29,13 @@ use llama_cpp_2::{
     context::{params::LlamaContextParams, LlamaContext},
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, LlamaChatMessage, LlamaChatTemplate, LlamaModel},
+    model::{params::LlamaModelParams, LlamaModel},
     sampling::LlamaSampler,
     token::LlamaToken,
 };
 
 use super::{GenEvent, Generation, LlmError, Result, Summarizer, SummarizerLoader};
-use crate::models::{ModelManager, ModelState, GEMMA_2_2B};
+use crate::models::{ModelManager, ModelState, GEMMA_4_E2B};
 
 /// Tokens per `llama_decode` call while prefilling.
 const BATCH_TOKENS: usize = 2048;
@@ -53,13 +53,12 @@ pub struct Params {
     pub repeat_penalty: f32,
 }
 
-/// Ollama's defaults for `gemma2:2b` (KTD4): its Modelfile sets only stop
-/// words, so the runner defaults apply.
-const GEMMA_2: Params = Params {
+/// Gemma 4 E2B settings used by the note-style coach real-model run.
+const GEMMA_4: Params = Params {
     context_tokens: 8192,
     top_k: 40,
     top_p: 0.9,
-    temperature: 0.8,
+    temperature: 0.2,
     repeat_last_n: 64,
     repeat_penalty: 1.1,
 };
@@ -67,14 +66,18 @@ const GEMMA_2: Params = Params {
 /// Parameters for a manifest LLM id.
 pub fn params(model_id: &str) -> Params {
     match model_id {
-        GEMMA_2_2B => GEMMA_2,
-        // shortcut: only one LLM ships; give each new manifest LLM its own arm.
-        _ => GEMMA_2,
+        GEMMA_4_E2B => GEMMA_4,
+        _ => GEMMA_4,
     }
 }
 
 fn engine(e: impl std::fmt::Display) -> LlmError {
     LlmError::Engine(e.to_string())
+}
+
+// shortcut: only the plain user turn used here; expand if summarization adds system or tool messages.
+fn format_gemma4_user_prompt(prompt: &str) -> String {
+    format!("<|turn>user\n{}\n<turn|>\n<|turn>model\n", prompt.trim())
 }
 
 /// llama.cpp allows one backend per process.
@@ -111,20 +114,42 @@ impl SummarizerLoader for LlamaLoader {
 
     fn ready(&self) -> bool {
         self.models.readiness.get(&self.model_id()) == ModelState::Ready
+            && self.models.summary_availability() == crate::models::SummaryAvailability::Ready
     }
 
     fn load(&self, id: &str) -> Result<Arc<dyn Summarizer>> {
-        if self.models.readiness.get(id) != ModelState::Ready {
+        if self.models.readiness.get(id) != ModelState::Ready
+            || self.models.summary_availability() != crate::models::SummaryAvailability::Ready
+        {
             return Err(LlmError::NotReady);
         }
         let path = self.models.path(id).ok_or(LlmError::NotReady)?;
-        Ok(Arc::new(LlamaSummarizer::load(&path, params(id))?))
+        let summarizer = match LlamaSummarizer::load(&path, params(id)) {
+            Ok(model) => model,
+            Err(error) => {
+                self.models
+                    .set_summary_availability(crate::models::SummaryAvailability::LoadFailed);
+                return Err(error);
+            }
+        };
+        if self.models.has_legacy_summary_model() {
+            if let Err(error) = summarizer.smoke_test() {
+                self.models
+                    .set_summary_availability(crate::models::SummaryAvailability::LoadFailed);
+                return Err(error);
+            }
+            self.models.remove_legacy_summary_model();
+        }
+        if self.models.summary_availability() != crate::models::SummaryAvailability::Unsupported {
+            self.models
+                .set_summary_availability(crate::models::SummaryAvailability::Ready);
+        }
+        Ok(Arc::new(summarizer))
     }
 }
 
 pub struct LlamaSummarizer {
     model: LlamaModel,
-    template: LlamaChatTemplate,
     params: Params,
 }
 
@@ -133,22 +158,33 @@ impl LlamaSummarizer {
     pub fn load(path: &std::path::Path, params: Params) -> Result<Self> {
         let model_params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
         let model = LlamaModel::load_from_file(backend()?, path, &model_params).map_err(engine)?;
-        let template = model.chat_template(None).map_err(engine)?;
-        Ok(Self {
-            model,
-            template,
-            params,
-        })
+        Ok(Self { model, params })
     }
 
-    /// `prompt` as the user turn of the GGUF chat template, ready for the
-    /// model's reply.
+    fn smoke_test(&self) -> Result<()> {
+        let cancel = AtomicBool::new(false);
+        let mut ignore = |_: GenEvent<'_>| {};
+        let output = self.generate(
+            &[Generation {
+                prompt:
+                    "Write a brief summary of a fictional appointment about sleep and work stress."
+                        .into(),
+                max_tokens: 48,
+            }],
+            &cancel,
+            &mut ignore,
+        )?;
+        if output.first().is_none_or(|text| text.trim().is_empty()) {
+            return Err(LlmError::Engine(
+                "summary model smoke test was empty".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Encodes `prompt` as Gemma 4's user turn, ready for the model's reply.
     fn format(&self, prompt: &str) -> Result<Vec<LlamaToken>> {
-        let message = LlamaChatMessage::new("user".into(), prompt.into()).map_err(engine)?;
-        let text = self
-            .model
-            .apply_chat_template(&self.template, &[message], true)
-            .map_err(engine)?;
+        let text = format_gemma4_user_prompt(prompt);
         Ok(self.model.vocab().tokenize(text.as_bytes(), true, true))
     }
 
@@ -346,5 +382,45 @@ impl Summarizer for LlamaSummarizer {
             decode(&mut ctx, &mut batch)?;
         }
         Ok(seqs.into_iter().map(|s| s.out).collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemma_4_uses_coach_sampling() {
+        let p = params(GEMMA_4_E2B);
+        assert_eq!(p.context_tokens, 8192);
+        assert_eq!(p.temperature, 0.2);
+        assert_eq!(p.top_p, 0.9);
+    }
+
+    #[test]
+    fn gemma_4_formats_a_user_turn_without_thinking() {
+        assert_eq!(
+            format_gemma4_user_prompt("  summarize this  "),
+            "<|turn>user\nsummarize this\n<turn|>\n<|turn>model\n"
+        );
+    }
+
+    #[test]
+    fn unavailable_summary_states_block_ready_models() {
+        for state in [
+            crate::models::SummaryAvailability::Unsupported,
+            crate::models::SummaryAvailability::LoadFailed,
+        ] {
+            let models = Arc::new(ModelManager::new(
+                std::env::temp_dir().join(format!("scribular-loader-{state:?}")),
+                crate::models::manifest(),
+            ));
+            models.readiness.set(GEMMA_4_E2B, ModelState::Ready);
+            models.set_summary_availability(state);
+            let loader = LlamaLoader::new(models);
+
+            assert!(!loader.ready());
+            assert!(matches!(loader.load(GEMMA_4_E2B), Err(LlmError::NotReady)));
+        }
     }
 }
