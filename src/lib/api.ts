@@ -68,16 +68,15 @@ export function onHeartbeat(handler: (beat: Heartbeat) => void): Promise<Unliste
   return listen<Heartbeat>('app://heartbeat', (event) => handler(event.payload));
 }
 
-export function onFindRequested(handler: () => void): Promise<UnlistenFn> {
-  return listen('shell://find', handler);
+export function openSettings(pane = 'General'): Promise<void> { return invoke('open_settings', { pane }); }
+export function setShellMenuState(state: { hasSessions: boolean; selected: boolean; hasNote: boolean; recording: boolean; recoverable: boolean; locked: boolean }): Promise<void> {
+  return invoke('set_shell_menu_state', state);
 }
-
-export function setNavigationLocked(locked: boolean): Promise<void> {
-  return invoke('set_navigation_locked', { locked });
+export function onShellMenu(handler: (id: string) => void): Promise<UnlistenFn> {
+  return listen<string>('shell://menu', (event) => handler(event.payload));
 }
-
-export function onManageStylesRequested(handler: () => void): Promise<UnlistenFn> {
-  return listen('shell://manage-styles', handler);
+export function onSettingsPane(handler: (pane: string) => void): Promise<UnlistenFn> {
+  return listen<string>('shell://settings-pane', (event) => handler(event.payload));
 }
 
 export function listSessions(): Promise<SessionListItem[]> {

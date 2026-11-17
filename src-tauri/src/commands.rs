@@ -133,18 +133,30 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Ok(())
 }
 
-/// Keeps the native Manage Note Styles item in step with the model lock.
 #[tauri::command]
-pub fn set_navigation_locked(app: AppHandle, locked: bool) -> Result<(), String> {
-    let menu = app.menu().ok_or("no app menu")?;
-    for item in menu.items().map_err(|e| e.to_string())? {
-        if let tauri::menu::MenuItemKind::Submenu(sub) = item {
-            if let Some(tauri::menu::MenuItemKind::MenuItem(m)) = sub.get("shell-manage-styles") {
-                return m.set_enabled(!locked).map_err(|e| e.to_string());
-            }
-        }
-    }
-    Ok(())
+pub fn open_settings(app: AppHandle, pane: String) -> Result<(), String> {
+    crate::shell::menu::open_settings(&app, &pane)
+}
+
+#[tauri::command]
+pub fn set_shell_menu_state(
+    app: AppHandle,
+    has_sessions: bool,
+    selected: bool,
+    has_note: bool,
+    recording: bool,
+    recoverable: bool,
+    locked: bool,
+) -> Result<(), String> {
+    crate::shell::menu::set_state(
+        &app,
+        has_sessions,
+        selected,
+        has_note,
+        recording,
+        recoverable,
+        locked,
+    )
 }
 
 #[tauri::command]

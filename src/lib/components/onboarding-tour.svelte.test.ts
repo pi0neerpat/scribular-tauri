@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import OnboardingTour from './OnboardingTour.svelte';
 
-vi.mock('../api', () => ({ openExternalLink: vi.fn() }));
+vi.mock('../api', () => ({ openExternalLink: vi.fn(), openSettings: vi.fn().mockResolvedValue(undefined) }));
 
 describe('onboarding tour', () => {
   let instance: ReturnType<typeof mount> | undefined;

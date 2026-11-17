@@ -104,6 +104,8 @@
     guard(action, opener);
   }
 
+  export function newBlank() { guard(() => edit(DRAFT)); }
+
   let savePromise: Promise<boolean> | null = null;
 
   function save(): Promise<boolean> {

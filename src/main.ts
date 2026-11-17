@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import Settings from './lib/components/Settings.svelte';
 import { installFrontendErrorHandlers } from './lib/frontend-errors';
 
 installFrontendErrorHandlers();
@@ -17,6 +18,8 @@ document.addEventListener('click', (event) => {
   }
 });
 
-const app = mount(App, { target: document.getElementById('app')! });
+const target = document.getElementById('app')!;
+const app = new URLSearchParams(location.search).get('window') === 'settings'
+  ? mount(Settings, { target }) : mount(App, { target });
 
 export default app;

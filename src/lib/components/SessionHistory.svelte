@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
-  import { cancelJob, clearAllSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, recoverSession, searchSessions } from '../api';
+  import { cancelJob, clearAllSessions, copyText, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
   import type { AppView } from '../navigation';
   import type { Session } from '../types/Session';
   import type { SessionListItem } from '../types/SessionListItem';
@@ -8,8 +8,8 @@
   import SummaryPanel from './SummaryPanel.svelte';
   import TrialBadge from './TrialBadge.svelte';
 
-  let { view = 'history', navigationLocked = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
-    view?: AppView; navigationLocked?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
+  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
+    view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
     onLicense?: () => void; onTour?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
@@ -27,10 +27,12 @@
   let copiedId = $state<string | null>(null);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let deleteConfirmId = $state<string | null>(null);
+  let confirmSelectedDeletion = $state<string | null>(null);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
   let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
+  $effect(() => { void setShellMenuState({ hasSessions, selected: !!selected, hasNote: !!selected?.summary, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
@@ -63,6 +65,25 @@
     searchField?.focus();
     searchField?.select();
   }
+  export function confirmDeleteAll() { if (hasSessions) confirmClear = true; }
+  export function confirmDeleteSelected() {
+    if (selected && !['recording', 'finalizing'].includes(selected.status)) confirmSelectedDeletion = selected.id;
+  }
+  export async function copySelectedNote() {
+    if (!selected?.summary) return;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(selected.summary);
+      else await copyText(selected.summary);
+      markCopied(selected.id);
+    } catch (e) { error = String(e); }
+  }
+  export async function recoverFirst() {
+    try {
+      const first = (await listSessions()).find((s) => s.interrupted && s.hasAudio && s.status === 'failed');
+      if (first) await recover(first.id);
+    } catch (e) { error = String(e); }
+  }
+  export function refreshSessions() { void refresh(); }
 
   function markCopied(id: string) {
     copiedId = id;
@@ -140,7 +161,7 @@
     {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
     <nav aria-label="Main navigation">
       <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationLocked}>New Recording</button>
-      <button onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
+      <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
     </nav>
     {#each groups as group (group.label)}
       {#if group.rows.length}
@@ -173,7 +194,7 @@
       {/if}
     {/each}
     <nav aria-label="More">
-      <button data-tour="settings" onclick={(e) => onNavigate('settings', e.currentTarget)} disabled={navigationLocked}>Settings</button>
+      <button data-tour="settings" onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
       <button onclick={onTour}>Show tour</button>
       <TrialBadge onclick={onLicense} />
     </nav>
@@ -186,10 +207,13 @@
         <p>Delete all sessions? This cannot be undone.</p>
         <button onclick={clear} disabled={clearing}>Confirm delete all</button>
         <button onclick={() => (confirmClear = false)}>Cancel</button>
-      {:else}
-        <button onclick={() => (confirmClear = true)} disabled={!hasSessions}>Delete all sessions</button>
       {/if}
       {#if selected}
+        {#if confirmSelectedDeletion === selected.id}
+          <p>Delete this session? This cannot be undone.</p>
+          <button onclick={() => { const id = confirmSelectedDeletion!; confirmSelectedDeletion = null; void remove(id); }}>Confirm delete session</button>
+          <button onclick={() => (confirmSelectedDeletion = null)}>Cancel</button>
+        {/if}
         <SummaryPanel session={selected} active={view === 'history'} management prompts={prompts} models={models}
           onUpdate={(s) => { selected = s; void refresh(); }} onCopied={markCopied}
           onDelete={['recording', 'finalizing'].includes(selected.status) ? undefined : () => remove(selected!.id)} />

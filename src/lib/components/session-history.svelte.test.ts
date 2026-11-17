@@ -5,6 +5,7 @@ import { mount, unmount } from 'svelte';
 const api = vi.hoisted(() => ({
   listSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
   onSessionProgress: vi.fn(), cancelJob: vi.fn(), clearAllSessions: vi.fn(), deleteSession: vi.fn(), recoverSession: vi.fn(),
+  setShellMenuState: vi.fn().mockResolvedValue(undefined), openSettings: vi.fn().mockResolvedValue(undefined),
   progress: undefined as ((p: unknown) => void) | undefined,
 }));
 vi.mock('../api', () => ({
@@ -16,6 +17,8 @@ const { default: SessionHistory } = await import('./SessionHistory.svelte');
 
 beforeEach(() => {
   vi.resetAllMocks();
+  api.setShellMenuState.mockResolvedValue(undefined);
+  api.openSettings.mockResolvedValue(undefined);
   api.getPromptList.mockResolvedValue({ prompts: [], activeId: null, createdId: null });
   api.listSummaryModels.mockResolvedValue([]);
 });

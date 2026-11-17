@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mount, unmount } from 'svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
 
 const downloadModel = vi.fn();
 const getRecordingSettings = vi.fn();
@@ -30,6 +30,7 @@ vi.mock('../api', () => ({
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
   setAppSettings, setRecordingSettings, getTelemetrySetting,
   getSummaryAvailability, onSummaryAvailability, subscribeSummaryAvailability, retrySummaryModel,
+  onSettingsPane: vi.fn().mockResolvedValue(() => {}),
 }));
 import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.
@@ -40,9 +41,34 @@ const settings = { inputMode: 'mic', targetApp: null, multiSpeaker: false, promp
 const downloading = { modelId: 'speaker-campplus', state: 'downloading', downloadedBytes: 4, totalBytes: 10, error: null };
 const ready = { ...downloading, state: 'ready', downloadedBytes: 10 };
 
+beforeEach(() => {
+  window.history.replaceState({}, '', '?pane=Recording');
+  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true });
+});
+
 afterEach(() => {
+  window.history.replaceState({}, '', '/');
   appSettings.set({ notifySummaryComplete: false, showBackgroundAnimation: true });
   vi.clearAllMocks();
+});
+
+it('opens on General and keeps recording and appearance controls in their panes', async () => {
+  window.history.replaceState({}, '', '/');
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.textContent).toContain('Show summarization complete alert'));
+  expect(target.textContent).not.toContain('Identify speakers');
+  expect(target.textContent).not.toContain('Show background animation');
+  expect(target.textContent).not.toContain('Restore sample session');
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
+  flushSync();
+  expect(target.textContent).toContain('Show background animation');
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Recording')!.click();
+  flushSync();
+  expect(target.textContent).toContain('Multi-speaker');
+  unmount(app);
 });
 
 it('applies a completion event that arrives while the status snapshot is in flight', async () => {
@@ -141,6 +167,7 @@ it('shows and retries a summary availability read error', async () => {
 });
 
 it('shows updater state and disables restart while busy with the reason', async () => {
+  window.history.replaceState({}, '', '?pane=General');
   onUpdateState.mockResolvedValue(() => {});
   getUpdateState.mockResolvedValue({ state: 'ready', version: '0.2.0', notes: '', installable: false });
   getRecordingSettings.mockResolvedValue(settings);
@@ -156,6 +183,7 @@ it('shows updater state and disables restart while busy with the reason', async 
 });
 
 it('keeps an update event that arrives while the update snapshot is pending', async () => {
+  window.history.replaceState({}, '', '?pane=General');
   let emit!: (state: unknown) => void;
   let resolveSnapshot!: (state: unknown) => void;
   onUpdateState.mockImplementation(async (handler) => { emit = handler; return () => {}; });
@@ -176,6 +204,7 @@ it('keeps an update event that arrives while the update snapshot is pending', as
 });
 
 it('shows an alert when the install is rejected', async () => {
+  window.history.replaceState({}, '', '?pane=General');
   onUpdateState.mockResolvedValue(() => {});
   getUpdateState.mockResolvedValue({ state: 'ready', version: '0.2.0', notes: '', installable: true });
   installUpdate.mockRejectedValue('install failed');
@@ -206,12 +235,14 @@ it('keeps notification permission guidance through unrelated saves and shows it 
   await vi.waitFor(() => expect(requestNotificationPermission).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(alerts()).toHaveLength(1));
 
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
+  flushSync();
   const animation = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Show background animation'))!;
   animation.checked = false;
   animation.dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalled());
   expect(alerts()).toHaveLength(1);
-  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Session')!.click();
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Recording')!.click();
   await vi.waitFor(() => expect(target.textContent).toContain('Notifications are disabled. Allow them for Scribular in System Settings.'));
   unmount(app);
 });

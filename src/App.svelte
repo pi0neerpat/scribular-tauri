@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { appVersion, currentRecording, lockedState, onHeartbeat, onFindRequested, onManageStylesRequested, setNavigationLocked, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
+  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
-  import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
   import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
@@ -32,26 +31,24 @@
   let navigationLocked = $derived(navigationLockedBy(modelProgress));
   let view = $derived($navigation.view);
   $effect(() => navigation.update((n) => ({ ...n, navigationLocked })));
-  $effect(() => { void setNavigationLocked(navigationLocked).catch(() => {}); });
+  $effect(() => { if (typeof gate === 'object') void setShellMenuState({ hasSessions: false, selected: false, hasNote: false, recording: false, recoverable: false, locked: true }).catch(() => {}); });
   let speechReady = $state(false);
   let recording = $state(false);
   let confirmQuitOpen = $state(false);
   let tourOpen = $state(false);
   let tourRun = $state(0);
-  let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; showLicense: () => void } | undefined>();
-  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
-  let history = $state<{ focusSearch: () => void } | undefined>();
+  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
+  let history = $state<{ focusSearch: () => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
 
   function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
     if (navigationDisabled(navigationLocked)) return;
     const action = () => { navigation.update((n) => ({ ...n, view: next })); after?.(); };
-    if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action, opener);
-    else if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
+    if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
     else action();
   }
 
   function openLicense() {
-    navigate('settings', undefined, () => { void tick().then(() => settings?.showLicense()); });
+    void openSettings('License').catch((e) => (error = String(e)));
   }
 
   async function refreshInterrupted() {
@@ -67,8 +64,24 @@
       }
     };
     window.addEventListener('keydown', find);
-    const findRequest = onFindRequested(() => history?.focusSearch());
-    const stylesRequest = onManageStylesRequested(() => navigate('styles'));
+    const menuRequest = onShellMenu((id) => {
+      switch (id) {
+        case 'shell-find': history?.focusSearch(); break;
+        case 'shell-manage-styles': navigate('styles'); break;
+        case 'shell-blank-style': if (!recording) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
+        case 'shell-new-recording': if (!recording) navigate('record'); break;
+        case 'shell-delete-all': if (!recording) navigate('history', undefined, () => history?.confirmDeleteAll()); break;
+        case 'shell-delete-session': if (!recording) navigate('history', undefined, () => history?.confirmDeleteSelected()); break;
+        case 'shell-copy-note': void history?.copySelectedNote(); break;
+        case 'shell-recover': if (!recording) navigate('history', undefined, () => history?.recoverFirst()); break;
+        case 'shell-update': void checkForUpdates().catch((e) => (error = String(e))); break;
+        case 'shell-welcome': showTour(); break;
+        case 'shell-restore-sample': void restoreSampleSessions().then(() => history?.refreshSessions()).catch((e) => (error = String(e))); break;
+        case 'shell-support': void openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e))); break;
+        case 'shell-privacy': void openExternalLink('https://www.scribular.com/privacy').catch((e) => (error = String(e))); break;
+        case 'shell-site': void openExternalLink('https://www.scribular.com').catch((e) => (error = String(e))); break;
+      }
+    });
     getCurrentWindow().show().catch(() => {});
     const modelEventsSeen = new Set<string>();
     const modelEvents = onModelsProgress((p) => {
@@ -82,8 +95,7 @@
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
     const closeRequest = onWindowCloseRequested(() => {
       const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
-      if (view === 'settings' && settings) settings.requestLeave(hide);
-      else if (view === 'styles' && noteStyles) noteStyles.requestLeave(hide);
+      if (view === 'styles' && noteStyles) noteStyles.requestLeave(hide);
       else hide();
     });
     const trayStopFailure = onTrayStopFailed((message) => {
@@ -133,8 +145,7 @@
     return () => {
       window.removeEventListener('tray-start-failed', showRecord);
       window.removeEventListener('keydown', find);
-      findRequest.then((fn) => fn());
-      stylesRequest.then((fn) => fn());
+      menuRequest.then((fn) => fn());
       unlisten.then((fn) => fn());
       progress.then((fn) => fn());
       modelEvents.then((fn) => fn());
@@ -191,7 +202,7 @@
   {:else}
     <p>Loading…</p>
   {/if}
-  <SessionHistory bind:this={history} {view} {navigationLocked} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={() => refreshInterrupted().catch(() => {})}>
+  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={() => refreshInterrupted().catch(() => {})}>
     <!-- Keep the recorder mounted so its progress survives navigation. -->
     <div hidden={view !== 'record'}><RecordView
         {speechReady}
@@ -200,7 +211,6 @@
       />
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}
-    {#if view === 'settings'}<Settings bind:this={settings} {navigationLocked} />{/if}
   </SessionHistory>
   {#if tourOpen}{#key tourRun}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/key}{/if}
   <p>Heartbeat: {beats}</p>

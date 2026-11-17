@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { openExternalLink } from '../api';
+  import { openExternalLink, openSettings } from '../api';
 
-  type View = 'record' | 'settings';
+  type View = 'record';
   type Step = { id: string; title: string; copy: string; anchor?: string };
   let { onNavigate, onComplete, sessionsEmpty = false }: {
     onNavigate: (view: View) => void;
@@ -14,7 +14,7 @@
     { id: 'welcome', title: 'Welcome', copy: "Let's take a quick tour. Your permissions and speech model are getting ready below." },
     { id: 'audio', title: 'Choose an audio source in Settings', copy: 'Use your microphone, application audio, or both.', anchor: 'input-mode' },
     { id: 'sessions', title: 'View Sessions', copy: 'After you finish a recording, the transcript and summary appear here.', anchor: 'sessions' },
-    { id: 'notes', title: 'Customize Your Notes', copy: 'Edit your note template in Settings.', anchor: 'settings' },
+    { id: 'notes', title: 'Customize Your Notes', copy: 'Open Note Styles from the sidebar.', anchor: 'styles' },
   ]);
   let index = $state(0);
   let card = $state<HTMLElement | undefined>();
@@ -38,7 +38,7 @@
   }
 
   async function next() {
-    if (current.id === 'welcome') onNavigate('settings');
+    if (current.id === 'welcome') void openSettings('Recording');
     index = Math.min(index + 1, steps.length - 1);
     await tick();
     place();
