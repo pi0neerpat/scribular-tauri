@@ -7,7 +7,7 @@
   import type { SessionProgress } from '../types/SessionProgress';
   import SummaryPanel from './SummaryPanel.svelte';
   import TrialBadge from './TrialBadge.svelte';
-  import { accessState } from '../license';
+  import { accessState, allows } from '../license';
 
   let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
     view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; recordHasNote?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
@@ -172,7 +172,7 @@
               </button>
               <details class="actions">
                 <summary aria-label="Actions for {item.title || 'session'}">•••</summary>
-                {#if item.interrupted && item.hasAudio && item.status === 'failed'}<button onclick={() => recover(item.id)}>Recover</button>{/if}
+                {#if item.interrupted && item.hasAudio && item.status === 'failed'}<button disabled={!allows($accessState)} onclick={() => recover(item.id)}>Recover</button>{/if}
                 {#if item.status === 'awaitingModel'}<button onclick={() => cancel(item.id)}>Cancel</button>{/if}
                 {#if item.status === 'finalizing' || item.status === 'summarizing'}<button onclick={() => cancel(item.id)}>Stop</button>{/if}
                 {#if item.interrupted && !item.hasAudio}<span>Audio no longer available</span>{/if}

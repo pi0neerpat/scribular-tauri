@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Session } from '../types/Session';
 
@@ -23,6 +23,8 @@ const session: Session = {
   hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
 };
 const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, starred: true }], activeId: 'prompt-1', createdId: null };
+
+afterEach(() => accessState.set(null));
 
 it('keeps copy and delete available but disables regeneration for a lapsed licence', async () => {
   accessState.set({ kind: 'licenseLapsed' });

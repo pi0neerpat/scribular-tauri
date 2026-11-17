@@ -25,8 +25,8 @@ use crate::models::{
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
-    now_ms, AppSettings, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
-    SessionPatch, Store, SUMMARY_MODEL_ID,
+    now_ms, AppSettings, DiarizationState, InputMode, KeptAudio, Prompt, RecordingSettings,
+    Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -143,7 +143,6 @@ pub fn open_settings(app: AppHandle, pane: String) -> Result<(), String> {
 #[tauri::command]
 pub fn set_shell_menu_state(
     app: AppHandle,
-    licensing: State<Arc<Licensing>>,
     has_sessions: bool,
     selected: bool,
     has_note: bool,
@@ -159,7 +158,9 @@ pub fn set_shell_menu_state(
         recording,
         recoverable,
         locked,
-        licensing.require_access().is_ok(),
+        // Locked-store startup never manages Licensing: treat it as non-writable.
+        app.try_state::<Arc<Licensing>>()
+            .is_some_and(|l| l.require_access().is_ok()),
     )
 }
 
@@ -861,10 +862,29 @@ pub fn set_recording_settings(
 pub fn confirm_speaker_labels(
     store: State<Arc<Store>>,
     jobs: State<Arc<JobQueue>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     speaker_map: std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
+    require_access_unless_pending(store.inner(), licensing.inner(), &id)?;
     confirm_speaker_labels_with_jobs(store.inner(), jobs.inner(), &id, speaker_map)
+}
+
+/// Only a session still awaiting diarization may finish without access; anything else rewrites completed content.
+fn require_access_unless_pending(
+    store: &Store,
+    licensing: &Licensing,
+    id: &str,
+) -> Result<(), String> {
+    let pending = store
+        .get_session(id)
+        .map_err(|e| e.to_string())?
+        .is_some_and(|s| s.diarization_state == DiarizationState::Pending);
+    if pending {
+        return Ok(());
+    }
+    // Not the plain `?;` form: AS9 counts that text as an unconditional gate.
+    Ok(licensing.require_access()?)
 }
 
 fn confirm_speaker_labels_with_jobs(
@@ -915,7 +935,12 @@ fn confirm_speaker_labels_with_jobs(
 }
 
 #[tauri::command]
-pub fn skip_diarization(store: State<Arc<Store>>, id: String) -> Result<String, String> {
+pub fn skip_diarization(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<String, String> {
+    require_access_unless_pending(store.inner(), licensing.inner(), &id)?;
     store.skip_diarization(&id).map_err(|e| e.to_string())
 }
 

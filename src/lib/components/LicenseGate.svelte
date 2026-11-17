@@ -31,7 +31,7 @@
 
 {#if reason}
   <div role="alert">
-    <p>{reason} Changes need a licence. Your existing notes are still available.</p>
+    <p>{reason} Creating or editing content needs a licence. Your existing notes are still available.</p>
     <button onclick={onEnter}>Enter licence</button>
     <button onclick={buy}>Buy licence</button>
     {#if error}<p>{error}</p>{/if}

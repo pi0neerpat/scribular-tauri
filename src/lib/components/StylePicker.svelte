@@ -7,12 +7,14 @@
     selectedId,
     includeId = null,
     label = 'Note style',
+    disabled = false,
     onSelect,
   }: {
     prompts: Prompt[];
     selectedId: string | null;
     includeId?: string | null;
     label?: string;
+    disabled?: boolean;
     onSelect: (id: string) => void;
   } = $props();
 
@@ -21,7 +23,7 @@
 
 <label>
   {label}
-  <select value={selectedId} onchange={(e) => onSelect(e.currentTarget.value)}>
+  <select value={selectedId} {disabled} onchange={(e) => onSelect(e.currentTarget.value)}>
     {#each shown as prompt (prompt.id)}
       <option value={prompt.id}>{prompt.name}</option>
     {/each}

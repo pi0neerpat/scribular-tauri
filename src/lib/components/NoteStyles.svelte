@@ -51,14 +51,20 @@
     ['Built-in', list?.prompts.filter((p) => p.isDefault) ?? []],
   ]);
 
-  onMount(() => {
-    void call(getPromptList);
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    let unlistenSummary: (() => void) | undefined;
+  let disposed = false;
+  let unlistenSummary: (() => void) | undefined;
+  function watchSummary() {
+    unlistenSummary?.();
+    unlistenSummary = undefined;
     void subscribeSummaryAvailability((state) => { if (!disposed) { summaryAvailability = state; summaryError = false; } }, () => { if (!disposed) summaryError = true; })
       .then((remove) => { if (disposed) remove(); else unlistenSummary = remove; })
       .catch(() => { if (!disposed) summaryError = true; });
+  }
+
+  onMount(() => {
+    void call(getPromptList);
+    let unlisten: (() => void) | undefined;
+    watchSummary();
     void getCurrentWindow().onCloseRequested((event) => {
       if (!dirty) return;
       event.preventDefault();
@@ -122,8 +128,8 @@
   let savePromise: Promise<boolean> | null = null;
 
   function save(): Promise<boolean> {
-    if (!allows($accessState)) return Promise.resolve(false);
     if (savePromise) return savePromise;
+    if (!allows($accessState)) return Promise.resolve(false);
     saving = true;
     savePromise = (async () => {
       try {
@@ -192,18 +198,21 @@
 <section>
   <h3>Note styles</h3>
   <LicenseGate access={$accessState} onEnter={() => { void openSettings('License').catch((e) => (error = String(e))); }} showWarning={false} />
-  {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
+  {#if summaryAvailability === 'unsupported'}
     <SummaryUnavailable />
-    {#if summaryAvailability === 'loadFailed'}<button onclick={() => { void retrySummaryModel().catch(() => (summaryError = true)); }}>Try again</button>{/if}
+  {:else if summaryAvailability === 'loadFailed'}
+    <p>The summary model couldn't load.</p>
+    <button onclick={() => { void retrySummaryModel().catch(() => (summaryError = true)); }}>Try again</button>
   {:else if summaryAvailability === 'downloading' && !summaryError}
     <p>Waiting for the summary model download…</p>
   {/if}
-  {#if summaryError}<p role="alert">Couldn't check summary availability.</p>{/if}
+  {#if summaryError}<p role="alert">Couldn't check summary availability. <button onclick={() => { summaryError = false; watchSummary(); }}>Try again</button></p>{/if}
   {#if list}
     <StylePicker
       label="Default style"
       prompts={list.prompts}
       selectedId={list.activeId}
+      disabled={!allows($accessState)}
       onSelect={(id) => { if (allows($accessState)) void call(() => setActivePrompt(id)); }}
     />
     <button disabled={!allows($accessState)} onclick={(event) => guard(() => edit(DRAFT), event.currentTarget)}>New style</button>
