@@ -154,8 +154,12 @@ All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 ### Done (update)
 - p2 merged as PR #27 (`dd1f309`, 2026-11-17): native menus and separate Settings window.
 
-### This task (p3)
-- This task = p3 (PR3 in the split above): shared read-only gate at the command boundary and renewal/summary-unavailable placements (R9, R12, R13; AS6, AS9, AS10, AS15). Build on the p2 menu/Settings structure; menu enablement for denied-license states per R6/AS5 follows from the gate.
-- Out of bounds: automatic-update preference, update alert, Delete All native alert, final menu enablement (R8, R10, R11; p4). Deletion is never blocked in any access state (decision 1).
-- Reviewer: Knightwatch (`samthereviewer`) plus Cubic. Address all findings from both; Knightwatch posts as plain PR comments, not review threads. PR base = `main`.
+### Done (update 2)
+- p3 merged as PR #28 (`b040889`, 2026-11-17): shared read-only gate, renewal and summary-unavailable placements. Shell Recover stays licence-gated (decision above, line 96). Open manual checks (AS5 denied-license menus, AS10) tracked in issue #29.
+
+### This task (p4)
+- This task = p4 (PR4 in the split above): automatic-update preference, ready-update alert, Delete All native confirmation, final menu enablement (R8, R10, R11; AS8, AS11-AS14, repeat AS5). Build on the p2 menus/Settings and the p3 read-only gate.
+- Deletion is never blocked in any access state (decision 1).
+- Source of truth: this spec and the app-shell design. `plans/parity/` is obsolete; never follow it.
+- Reviewer: Cubic only. PR base = `main`.
 - cwf note for Codex phase sessions: shell commands run under the shared Codex app-server daemon and do not inherit `CWF_SESSION_ID`; prefix phase-session cwf commands (record-verification, demo add, screenshot, handoff, session end) with `CWF_SESSION_ID=<session.id from task.json>`.
