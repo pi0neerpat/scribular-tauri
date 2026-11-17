@@ -11,7 +11,7 @@
   } from '../license';
   import type { AccessState } from '../types/AccessState';
 
-  let { access, onEnter }: { access: AccessState | null; onEnter: () => void } = $props();
+  let { access, onEnter, showWarning = true }: { access: AccessState | null; onEnter: () => void; showWarning?: boolean } = $props();
 
   let dismissed = $state(dismissedToday());
   let reason = $derived(deniedReason(access));
@@ -31,12 +31,12 @@
 
 {#if reason}
   <div role="alert">
-    <p>{reason} New recordings need a licence. Your existing notes are still available.</p>
+    <p>{reason} Creating or editing content needs a licence. Your existing notes are still available.</p>
     <button onclick={onEnter}>Enter licence</button>
     <button onclick={buy}>Buy licence</button>
     {#if error}<p>{error}</p>{/if}
   </div>
-{:else if notice && !(notice.dismissible && dismissed && dismissedToday())}
+{:else if showWarning && notice && !(notice.dismissible && dismissed && dismissedToday())}
   <p role="status">
     {notice.text}
     {#if notice.dismissible}

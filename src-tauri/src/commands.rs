@@ -25,8 +25,8 @@ use crate::models::{
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
-    now_ms, AppSettings, InputMode, KeptAudio, Prompt, RecordingSettings, Session, SessionListItem,
-    SessionPatch, Store, SUMMARY_MODEL_ID,
+    now_ms, AppSettings, DiarizationState, InputMode, KeptAudio, Prompt, RecordingSettings,
+    Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -158,6 +158,9 @@ pub fn set_shell_menu_state(
         recording,
         recoverable,
         locked,
+        // Locked-store startup never manages Licensing: treat it as non-writable.
+        app.try_state::<Arc<Licensing>>()
+            .is_some_and(|l| l.require_access().is_ok()),
     )
 }
 
@@ -183,7 +186,11 @@ pub fn complete_onboarding(store: State<Arc<Store>>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn restore_sample_sessions(store: State<Arc<Store>>) -> Result<String, String> {
+pub fn restore_sample_sessions(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+) -> Result<String, String> {
+    licensing.require_access()?;
     store.restore_samples().map_err(|e| e.to_string())
 }
 
@@ -380,9 +387,11 @@ pub fn get_session(store: State<Arc<Store>>, id: String) -> Result<Option<Sessio
 #[tauri::command]
 pub fn update_session(
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     patch: SessionPatch,
 ) -> Result<Session, String> {
+    licensing.require_access()?;
     store.update_session(&id, &patch).map_err(|e| e.to_string())
 }
 
@@ -412,7 +421,12 @@ pub async fn clear_all_sessions(
 }
 
 #[tauri::command]
-pub fn undo_summary(store: State<Arc<Store>>, id: String) -> Result<Session, String> {
+pub fn undo_summary(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<Session, String> {
+    licensing.require_access()?;
     store.undo_summary(&id).map_err(|e| e.to_string())
 }
 
@@ -469,9 +483,11 @@ pub fn get_prompt_list(store: State<Arc<Store>>) -> Result<PromptList, String> {
 #[tauri::command]
 pub fn create_prompt(
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     name: String,
     text: String,
 ) -> Result<PromptList, String> {
+    licensing.require_access()?;
     let p = store
         .create_prompt(&name, &text)
         .map_err(|e| e.to_string())?;
@@ -479,7 +495,12 @@ pub fn create_prompt(
 }
 
 #[tauri::command]
-pub fn duplicate_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList, String> {
+pub fn duplicate_prompt(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<PromptList, String> {
+    licensing.require_access()?;
     let p = store.duplicate_prompt(&id).map_err(|e| e.to_string())?;
     prompt_list(&store, Some(p.id))
 }
@@ -487,10 +508,12 @@ pub fn duplicate_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptLi
 #[tauri::command]
 pub fn update_prompt(
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     name: String,
     text: String,
 ) -> Result<PromptList, String> {
+    licensing.require_access()?;
     store
         .update_prompt(&id, &name, &text)
         .map_err(|e| e.to_string())?;
@@ -506,9 +529,11 @@ pub fn delete_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList,
 #[tauri::command]
 pub fn set_prompt_starred(
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     starred: bool,
 ) -> Result<PromptList, String> {
+    licensing.require_access()?;
     store
         .set_prompt_starred(&id, starred)
         .map_err(|e| e.to_string())?;
@@ -516,7 +541,12 @@ pub fn set_prompt_starred(
 }
 
 #[tauri::command]
-pub fn set_active_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList, String> {
+pub fn set_active_prompt(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<PromptList, String> {
+    licensing.require_access()?;
     store.set_active_prompt(&id).map_err(|e| e.to_string())?;
     prompt_list(&store, None)
 }
@@ -769,9 +799,11 @@ pub fn download_model(
 pub fn regenerate_summary(
     jobs: State<Arc<JobQueue>>,
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     session_id: String,
     prompt_id: String,
 ) -> Result<(), String> {
+    licensing.require_access()?;
     reject_sample_regeneration(
         store
             .get_session(&session_id)
@@ -798,7 +830,12 @@ pub fn cancel_job(recorder: State<Arc<Recorder>>, session_id: String) -> bool {
 }
 
 #[tauri::command]
-pub fn recover_session(recorder: State<Arc<Recorder>>, id: String) -> Result<(), String> {
+pub fn recover_session(
+    recorder: State<Arc<Recorder>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<(), String> {
+    licensing.require_access()?;
     recorder.recover(&id)
 }
 
@@ -825,10 +862,29 @@ pub fn set_recording_settings(
 pub fn confirm_speaker_labels(
     store: State<Arc<Store>>,
     jobs: State<Arc<JobQueue>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     speaker_map: std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
+    require_access_unless_pending(store.inner(), licensing.inner(), &id)?;
     confirm_speaker_labels_with_jobs(store.inner(), jobs.inner(), &id, speaker_map)
+}
+
+/// Only a session still awaiting diarization may finish without access; anything else rewrites completed content.
+fn require_access_unless_pending(
+    store: &Store,
+    licensing: &Licensing,
+    id: &str,
+) -> Result<(), String> {
+    let pending = store
+        .get_session(id)
+        .map_err(|e| e.to_string())?
+        .is_some_and(|s| s.diarization_state == DiarizationState::Pending);
+    if pending {
+        return Ok(());
+    }
+    // Not the plain `?;` form: AS9 counts that text as an unconditional gate.
+    Ok(licensing.require_access()?)
 }
 
 fn confirm_speaker_labels_with_jobs(
@@ -879,16 +935,23 @@ fn confirm_speaker_labels_with_jobs(
 }
 
 #[tauri::command]
-pub fn skip_diarization(store: State<Arc<Store>>, id: String) -> Result<String, String> {
+pub fn skip_diarization(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<String, String> {
+    require_access_unless_pending(store.inner(), licensing.inner(), &id)?;
     store.skip_diarization(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn update_speaker_map(
     store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
     id: String,
     speaker_map: std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
+    licensing.require_access()?;
     store
         .update_speaker_map(&id, &speaker_map)
         .map_err(|e| e.to_string())
@@ -1345,10 +1408,9 @@ mod tests {
         }
     }
 
-    /// AS10 (structure): only the two commands that create a session from
-    /// new audio call the gate; reading, editing and settings never do.
+    /// AS6/AS9: every user-content mutation checks access at the IPC boundary.
     #[test]
-    fn as10_only_new_audio_commands_are_gated() {
+    fn as9_content_mutations_are_gated_and_deletions_remain_open() {
         let src = include_str!("commands.rs");
         let src = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
         let mut gated = Vec::new();
@@ -1360,23 +1422,43 @@ mod tests {
                 .and_then(|r| r.split(['(', '<']).next())
                 .unwrap()
                 .to_string();
-            if chunk.contains("require_access(") {
+            if chunk.contains("licensing.require_access()?;") {
                 gated.push(name.clone());
             }
             commands.push(name);
         }
-        assert_eq!(gated, ["start_recording", "transcribe_file"]);
+        assert_eq!(
+            gated,
+            [
+                "restore_sample_sessions",
+                "update_session",
+                "undo_summary",
+                "create_prompt",
+                "duplicate_prompt",
+                "update_prompt",
+                "set_prompt_starred",
+                "set_active_prompt",
+                "regenerate_summary",
+                "recover_session",
+                "update_speaker_map",
+                "start_recording",
+                "transcribe_file",
+            ]
+        );
         for open in [
             "list_sessions",
             "get_session",
-            "update_session",
             "delete_session",
-            "regenerate_summary",
-            "set_recording_settings",
+            "clear_all_sessions",
+            "delete_prompt",
             "stop_recording",
+            "cancel_job",
+            "confirm_speaker_labels",
+            "skip_diarization",
             "activate_license",
         ] {
             assert!(commands.iter().any(|c| c == open), "{open} is a command");
+            assert!(!gated.iter().any(|c| c == open), "{open} remains available");
         }
     }
 

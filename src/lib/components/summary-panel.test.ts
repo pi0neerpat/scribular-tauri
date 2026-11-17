@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Session } from '../types/Session';
 
@@ -7,13 +7,14 @@ const api = vi.hoisted(() => ({
   cancelJob: vi.fn(), copyText: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
   getSummaryAvailability: vi.fn().mockResolvedValue('ready'), onSummaryAvailability: vi.fn(async () => () => {}),
   subscribeSummaryAvailability: vi.fn(async (callback: (state: string) => void, _onError: (error: unknown) => void) => { callback(await api.getSummaryAvailability()); return () => {}; }),
-  onSummaryDelta: vi.fn(), regenerateSummary: vi.fn(), undoSummary: vi.fn(), delta: undefined as ((d: unknown) => void) | undefined,
+  onSummaryDelta: vi.fn(), openSettings: vi.fn(), openExternalLink: vi.fn(), regenerateSummary: vi.fn(), undoSummary: vi.fn(), delta: undefined as ((d: unknown) => void) | undefined,
 }));
 vi.mock('../api', () => ({
   ...api,
   onSummaryDelta: (handler: (d: unknown) => void) => { api.delta = handler; return Promise.resolve(() => {}); },
 }));
 const { default: SummaryPanel } = await import('./SummaryPanel.svelte');
+const { accessState } = await import('../license');
 
 const session: Session = {
   id: 'session-1', title: 'Session', createdAt: 1, inputMode: 'mic', status: 'done', error: null,
@@ -22,6 +23,22 @@ const session: Session = {
   hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
 };
 const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, starred: true }], activeId: 'prompt-1', createdId: null };
+
+afterEach(() => accessState.set(null));
+
+it('keeps copy and delete available but disables regeneration for a lapsed licence', async () => {
+  accessState.set({ kind: 'licenseLapsed' });
+  api.listSummaryModels.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [], onDelete: vi.fn() } });
+  await vi.waitFor(() => expect(target.textContent).toContain('Your existing notes are still available.'));
+  const named = (label: string) => [...target.querySelectorAll('button')].find((b) => b.textContent === label)!;
+  expect(named('Copy').disabled).toBe(false);
+  expect(named('Regenerate').disabled).toBe(true);
+  expect(named('Delete').disabled).toBe(false);
+  unmount(app);
+  accessState.set(null);
+});
 
 it('copies the saved summary, reports success, and keeps streamed regeneration text in preview', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);

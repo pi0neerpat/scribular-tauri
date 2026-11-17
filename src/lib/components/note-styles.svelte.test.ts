@@ -16,14 +16,18 @@ const deletePrompt = vi.fn();
 const onCloseRequested = vi.fn();
 const destroyWindow = vi.fn();
 let closeHandler: ((event: { preventDefault: () => void }) => void) | undefined;
+let summaryHandler: ((state: string) => void) | undefined;
 vi.mock('../api', () => ({
   getPromptList, updatePrompt, createPrompt, deletePrompt, duplicatePrompt: vi.fn(),
   setActivePrompt: vi.fn(), setPromptStarred: vi.fn(),
+  openSettings: vi.fn(), openExternalLink: vi.fn(), retrySummaryModel: vi.fn(),
+  subscribeSummaryAvailability: vi.fn(async (handler) => { summaryHandler = handler; handler('ready'); return () => {}; }),
 }));
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ onCloseRequested, destroy: destroyWindow }),
 }));
 const { default: NoteStyles } = await import('./NoteStyles.svelte');
+const { accessState } = await import('../license');
 
 let target: HTMLElement;
 let app: ReturnType<typeof mount>;
@@ -34,6 +38,7 @@ const input = () => target.querySelector<HTMLInputElement>('li input')!;
 const dialog = () => target.querySelector('[role="dialog"]');
 
 beforeEach(async () => {
+  accessState.set(null);
   onCloseRequested.mockImplementation((handler) => { closeHandler = handler; return Promise.resolve(vi.fn()); });
   getPromptList.mockResolvedValue(list);
   target = document.createElement('div');
@@ -45,6 +50,27 @@ beforeEach(async () => {
 });
 
 afterEach(() => { unmount(app); target.remove(); vi.clearAllMocks(); });
+
+it('keeps saved styles readable and deletable while disabling style changes after licence lapse', async () => {
+  accessState.set({ kind: 'licenseLapsed' });
+  flushSync();
+  expect(target.textContent).toContain('Your existing notes are still available.');
+  expect(button('New style').disabled).toBe(true);
+  expect(button('Make default').disabled).toBe(true);
+  expect(input().readOnly).toBe(true);
+  expect(button('Delete').disabled).toBe(false);
+});
+
+it('shows one unavailable summary message and retry only after load failure', () => {
+  summaryHandler?.('unsupported');
+  flushSync();
+  expect(target.textContent).toContain("Summaries aren't available on this Mac.");
+  expect(button('Try again')).toBeUndefined();
+  summaryHandler?.('loadFailed');
+  flushSync();
+  expect(button('Try again')).toBeDefined();
+  expect(button('Alpha')).toBeDefined();
+});
 
 function typeName(value: string) {
   input().value = value;

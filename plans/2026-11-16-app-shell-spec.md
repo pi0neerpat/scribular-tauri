@@ -151,10 +151,11 @@ All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 ### Done
 - p1 merged as PR #26 (`cd986a8`, 2026-11-17): sidebar, `search_sessions`, navigation, row actions, stable selection. It kept the old in-window Settings reachable as a stopgap and pointed the trial/license action at it; p2 removes/retargets those.
 
-### This task (p2)
-- This task = p2 (PR2 in the split above): install the native macOS menu structure and routing (Scribular, File, Edit, View, Window, Help) with stable menu item IDs, plus one separate Settings webview window with the five panes General, Appearance, Recording, Keyboard Shortcuts, License (R5, R7). Covers menu structure/routing and AS7; p3/p4 own denied-license and final enablement required by R6/AS5. Expose stable menu IDs for keyboard-shortcuts and feature owners; keyboard-shortcuts owns accelerators.
-- Remove the in-window Settings stopgap from p1 and retarget the trial/license action and Edit ▸ Find to the final menu/Settings paths. Move Note Styles, About, support links, sample restore and Delete All out of Settings per R7 (Delete All lives in the File menu; its native confirmation is p4 — until then route the menu item to the existing clear flow behind the existing confirmation). Appearance and Keyboard Shortcuts pane contents are owned by theme/keyboard-shortcuts: provide the panes with the current content or a placeholder, not new features.
-- Menu items whose actions belong to later PRs or other specs (read-only license gating p3, automatic-update preference and update alert p4, recording/coach actions owned by other specs) get their stable ID, placement and routing to existing behavior where it exists; leave enablement for unbuilt actions disabled rather than inventing behavior.
-- Out of bounds: read-only gate and renewal banners (R9, R12, R13; p3), automatic-update preference, update alert, Delete All native alert (R8, R10, R11; p4).
-- Reviewer: Cubic. PR base = `main`.
+### Done (update)
+- p2 merged as PR #27 (`dd1f309`, 2026-11-17): native menus and separate Settings window.
+
+### This task (p3)
+- This task = p3 (PR3 in the split above): shared read-only gate at the command boundary and renewal/summary-unavailable placements (R9, R12, R13; AS6, AS9, AS10, AS15). Build on the p2 menu/Settings structure; menu enablement for denied-license states per R6/AS5 follows from the gate.
+- Out of bounds: automatic-update preference, update alert, Delete All native alert, final menu enablement (R8, R10, R11; p4). Deletion is never blocked in any access state (decision 1).
+- Reviewer: Knightwatch (`samthereviewer`) plus Cubic. Address all findings from both; Knightwatch posts as plain PR comments, not review threads. PR base = `main`.
 - cwf note for Codex phase sessions: shell commands run under the shared Codex app-server daemon and do not inherit `CWF_SESSION_ID`; prefix phase-session cwf commands (record-verification, demo add, screenshot, handoff, session end) with `CWF_SESSION_ID=<session.id from task.json>`.

@@ -17,6 +17,7 @@
   import OnboardingTour from './lib/components/OnboardingTour.svelte';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
+  import { accessState, allows } from './lib/license';
 
   // Asked before anything that needs the store mounts.
   let gate = $state<'loading' | 'open' | { locked: LockReason }>('loading');
@@ -69,15 +70,15 @@
       switch (id) {
         case 'shell-find': history?.focusSearch(); break;
         case 'shell-manage-styles': navigate('styles'); break;
-        case 'shell-blank-style': if (!recording) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
-        case 'shell-new-recording': if (!recording) navigate('record'); break;
+        case 'shell-blank-style': if (!recording && allows($accessState)) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
+        case 'shell-new-recording': if (!recording && allows($accessState)) navigate('record'); break;
         case 'shell-delete-all': if (!recording) navigate('history', undefined, () => history?.confirmDeleteAll()); break;
         case 'shell-delete-session': if (!recording) navigate('history', undefined, () => history?.confirmDeleteSelected()); break;
         case 'shell-copy-note': void (view === 'record' ? recordView?.copyResultNote() : history?.copySelectedNote()); break;
-        case 'shell-recover': if (!recording) navigate('history', undefined, () => history?.recoverFirst()); break;
+        case 'shell-recover': if (!recording && allows($accessState)) navigate('history', undefined, () => history?.recoverFirst()); break;
         case 'shell-update': void checkForUpdates().catch((e) => (error = String(e))); break;
         case 'shell-welcome': showTour(); break;
-        case 'shell-restore-sample': void restoreSampleSessions().then(() => history?.refreshSessions()).catch((e) => (error = String(e))); break;
+        case 'shell-restore-sample': if (allows($accessState)) void restoreSampleSessions().then(() => history?.refreshSessions()).catch((e) => (error = String(e))); break;
         case 'shell-support': void openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e))); break;
         case 'shell-privacy': void openExternalLink('https://www.scribular.com/privacy').catch((e) => (error = String(e))); break;
         case 'shell-site': void openExternalLink('https://www.scribular.com').catch((e) => (error = String(e))); break;

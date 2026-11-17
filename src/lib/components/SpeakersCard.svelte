@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap } from '../api';
   import type { Session } from '../types/Session';
+  import { accessState, allows } from '../license';
   type SpeakerMap = Record<string, string>;
 
   let { session: incoming, onUpdate }: { session: Session; onUpdate?: (session: Session) => void } = $props();
@@ -71,18 +72,18 @@
 
 {#if session.rawTranscript && (session.diarizationState === 'pending' || session.diarizationState === 'confirmed' || addingLater)}
   {#if session.diarizationState === 'confirmed' && !editing}
-    <button onclick={() => (editing = true)}>Edit speakers</button>
+    <button onclick={() => (editing = true)} disabled={!allows($accessState)}>Edit speakers</button>
   {:else}
     <section aria-labelledby="speakers-title">
       <h4 id="speakers-title">Who's speaking in this session?</h4>
       {#each speakers as [id, name], i (id)}
         <div class="speaker color-{i % 5}">
-          <label>{id}<input value={name} oninput={(event) => setName(id, event.currentTarget.value)} onblur={session.diarizationState === 'confirmed' ? rename : undefined} /></label>
+          <label>{id}<input value={name} disabled={session.diarizationState === 'confirmed' && !allows($accessState)} oninput={(event) => setName(id, event.currentTarget.value)} onblur={session.diarizationState === 'confirmed' ? rename : undefined} /></label>
           <p>{quote(session.rawTranscript, id)}</p>
-          <button onclick={() => { setName(id, 'You'); if (session.diarizationState === 'confirmed') rename(); }}>Me</button>
-          <button onclick={() => { setName(id, 'Client'); if (session.diarizationState === 'confirmed') rename(); }}>Client</button>
+          <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, 'You'); if (session.diarizationState === 'confirmed') rename(); }}>Me</button>
+          <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, 'Client'); if (session.diarizationState === 'confirmed') rename(); }}>Client</button>
           {#each speakers.filter(([other]) => other !== id) as [other, otherName] (other)}
-            <button onclick={() => { setName(id, otherName); if (session.diarizationState === 'confirmed') rename(); }}>{otherName}</button>
+            <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, otherName); if (session.diarizationState === 'confirmed') rename(); }}>{otherName}</button>
           {/each}
         </div>
       {/each}
