@@ -1,5 +1,5 @@
 # Keyboard Shortcuts — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** Mac keyboard shortcuts for recording, navigating, and working with notes, plus one optional shortcut that works from another app.
@@ -117,6 +117,7 @@ No JavaScript global-shortcut package or webview permission is needed: registrat
 This file is the **keyboard-shortcuts** (`plans/2026-11-16-keyboard-shortcuts-spec.md`) owner. The seven-slug set is app-shell, recording-and-session, keyboard-shortcuts, onboarding, note-style-coach, session-coach, and theme. App-shell's custom menu replaces the older default-menu parity requirement; one canonical action table must serve menu labels, key dispatch, Settings list, and conflict checks. The PRs below depend on owner actions being callable; integration tests should target their real commands rather than duplicate their implementations.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 None. The approved design and Patrick's 2026-11-16 decisions settle the behavior. The selected style name appears in the background-start notification as designed; no note, transcript, session title, or patient content appears there.
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR

@@ -1,5 +1,5 @@
 # Note Style Coach — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** Turn an example note into a reusable note style, test it on a fictional session, and adjust it before saving.
@@ -125,6 +125,7 @@ Therapists want a familiar note shape without learning prompt syntax. From Note 
 App shell and recording/session should establish their shared navigation, license and record-start contracts before coach entry integration. Coach engine/data can land before the sheet. Keep only one `CoachAvailability` computation in Rust, consumed by each entry; use app-shell's license gate rather than redefining read-only access. When recording starts externally, stop coach work and release its sheet without delaying capture. The selected style for a recording is resolved at Stop by `recording-and-session`, not snapshotted by coach.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 No unresolved product decisions. **Default:** use the approved 2026-11-16 design and the author's implementation calls above; return to Patrick only if a material conflict emerges during implementation.
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR

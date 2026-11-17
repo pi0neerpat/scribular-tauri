@@ -1,5 +1,5 @@
 # Recording and session — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** Choose an in-room or call recording, check both audio sources while recording, then review and copy a note on its own session page.
@@ -120,6 +120,7 @@ The approved [recording and session design](http://100.108.210.63:3000/pi0neerpa
 Keep the shared `RecordView`, `SummaryPanel`, settings and session-store edits in this spec's PR sequence; app-shell/onboarding/shortcut/coach PRs consume the published contracts rather than independently implementing recorder or note mutation. Schema version is allocated at merge time because other specs may add migrations first. The design and gap review predate Patrick's four decisions; those decisions take precedence over their app detection, `system` retention and old-app migration suggestions.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 1. If a browser is chosen, should Scribular permit recording all audible tabs after a plain warning? **Default:** yes, because AudioCapCLI selects an app, not a tab; show the scope clearly before Start and keep the manual choice. Tab-specific capture remains out of scope.
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR

@@ -1,5 +1,5 @@
 # Theme — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** Therapists can choose a ready-made look or make one personal theme with colors and a local background picture.
@@ -112,6 +112,7 @@ Therapists need an app-wide look they can choose once, including the original Sc
 The app-shell Settings window should land before mounting Appearance. The app-shell spec defines five panes with Appearance second; use that order in implementation and acceptance checks. Theme and app-shell touch shared navigation and sidebar code; theme and recording-and-session touch record/session surfaces. Coordinate those merges, then verify live appearance in all windows. Existing parity 08's General animation switch is superseded here. Do not infer functionality from design mockups.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 1. Approve exploring design option B (presets, accent, tint, and local pictures) as this spec's scope? **Default:** approve B; it is the only documented option that includes the requested picture and color controls with reading safeguards.
 2. Does `Scribular V1` mean the original Electron app, and should its system font/red record controls remain native? **Default:** yes to Electron V1; keep system font and red controls.
 3. Should V1 stay dark-only and should Sage ship as the third built-in? **Default:** yes to both, matching the source design.

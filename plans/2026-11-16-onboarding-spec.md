@@ -1,5 +1,5 @@
 # Onboarding — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** One welcome sheet, followed by guidance only when someone first needs it.
@@ -115,6 +115,7 @@ Security check: telemetry stays off until explicit, persisted opt-in; onboarding
 App-shell and recording-and-session may land independently of the onboarding state/consent PR, but onboarding's tip and card actions need note-style-coach's route/gate. Keep source-control and session editing changes in recording-and-session; keep the Help menu action in app-shell. `App.svelte`, `RecordView.svelte`, `SummaryPanel.svelte`, `NoteStyles.svelte`, `commands.rs`, and `api.ts` are shared integration files, so sequence their PRs and rebase before editing those seams. Existing parity spec 07's tour/no-extra-click rule conflicts with the approved welcome sheet and is superseded; its sample data and restore behavior remain.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 1. If macOS returns unknown Screen & System Audio Recording permission status without initiating capture, should the sheet invite a real recording attempt? **Default:** show “Open System Settings” and “Try recording” without claiming access was granted; mark granted only after a successful real capture, keeping Record available and failure recoverable.
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR

@@ -1,5 +1,5 @@
 # Session Coach — Tauri spec
-Status: draft for cwf; Date: 2026-11-16
+Status: approved (Patrick, 2026-11-16, incl. default decisions); Date: 2026-11-16
 
 ## Summary
 - **What:** Therapists can ask the Coach to revise a session note, inspect one proposed revision, and choose whether to use it.
@@ -119,6 +119,7 @@ The Note Style Coach spec excludes improving a style from feedback on a real ses
 - A native acceptance row requires a harness side-quest if the UI test runner cannot drive the Coach or read clipboard/DB evidence. Do that before claiming AS10/AS11 complete; otherwise report them unverified.
 
 ## Decisions for Patrick (with recommended default)
+All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 1. May a real session note itself be supplied as the example for **creating** a new style? **Default:** no; keep the approved fictional example/practice flow and this narrowly scoped accepted-edit exception. A later design can add explicit real-note intake.
 
 ## Size (S/M/L, rough days) and suggested PR split if > ~1 PR
