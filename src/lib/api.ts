@@ -72,6 +72,10 @@ export function onFindRequested(handler: () => void): Promise<UnlistenFn> {
   return listen('shell://find', handler);
 }
 
+export function setNavigationLocked(locked: boolean): Promise<void> {
+  return invoke('set_navigation_locked', { locked });
+}
+
 export function onManageStylesRequested(handler: () => void): Promise<UnlistenFn> {
   return listen('shell://manage-styles', handler);
 }

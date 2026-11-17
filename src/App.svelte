@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { appVersion, currentRecording, lockedState, onHeartbeat, onFindRequested, onManageStylesRequested, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
+  import { appVersion, currentRecording, lockedState, onHeartbeat, onFindRequested, onManageStylesRequested, setNavigationLocked, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -32,6 +32,7 @@
   let navigationLocked = $derived(navigationLockedBy(modelProgress));
   let view = $derived($navigation.view);
   $effect(() => navigation.update((n) => ({ ...n, navigationLocked })));
+  $effect(() => { void setNavigationLocked(navigationLocked).catch(() => {}); });
   let speechReady = $state(false);
   let recording = $state(false);
   let confirmQuitOpen = $state(false);
@@ -58,7 +59,7 @@
   }
 
   onMount(() => {
-    const showRecord = () => navigation.update((n) => ({ ...n, view: 'record' }));
+    const showRecord = () => navigate('record');
     window.addEventListener('tray-start-failed', showRecord);
     const find = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
@@ -82,6 +83,7 @@
     const closeRequest = onWindowCloseRequested(() => {
       const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
       if (view === 'settings' && settings) settings.requestLeave(hide);
+      else if (view === 'styles' && noteStyles) noteStyles.requestLeave(hide);
       else hide();
     });
     const trayStopFailure = onTrayStopFailed((message) => {

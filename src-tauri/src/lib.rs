@@ -131,6 +131,7 @@ pub fn run() {
         .manage(commands::SummaryNotices::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::set_navigation_locked,
             commands::get_onboarding_state,
             commands::complete_onboarding,
             commands::restore_sample_sessions,

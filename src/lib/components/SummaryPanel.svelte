@@ -104,12 +104,13 @@
   });
 
   async function copy() {
-    const text = session.summary || session.transcript;
+    const { id, summary, transcript } = session;
+    const text = summary || transcript;
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
       else await copyText(text);
       copied = true;
-      if (session.summary) onCopied?.(session.id);
+      if (summary) onCopied?.(id);
       clearTimeout(copyTimer);
       copyTimer = setTimeout(() => (copied = false), 2000);
     } catch (e) { error = String(e); }

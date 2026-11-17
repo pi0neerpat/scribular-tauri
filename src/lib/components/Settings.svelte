@@ -79,7 +79,10 @@
   }
 
   export function showLicense() {
-    requestLeave(() => (category = 'License'));
+    requestLeave(() => {
+      if (navigationLocked) return;
+      category = 'License';
+    });
   }
 
   function chooseCategory(next: typeof category, opener: HTMLElement) {

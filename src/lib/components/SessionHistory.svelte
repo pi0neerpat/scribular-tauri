@@ -13,6 +13,8 @@
     onLicense?: () => void; onTour?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
+  // Unfiltered availability: a zero-match search must not disable Delete all.
+  let hasSessions = $state(false);
   let selected = $state<Session | null>(null);
   let progress = $state<Record<string, SessionProgress>>({});
   let error = $state<string | null>(null);
@@ -45,6 +47,7 @@
       const result = query ? await searchSessions(query) : await listSessions();
       if (current !== request) return;
       sessions = result;
+      if (!query || result.length) hasSessions = result.length > 0;
       error = null;
       if (!query && selected && !result.some((s) => s.id === selected?.id)) selected = null;
     } catch (e) { if (current === request) error = String(e); }
@@ -123,7 +126,7 @@
       const result = await clearAllSessions();
       clearResult = `${result.deleted} deleted${result.skipped ? `; ${result.skipped} session${result.skipped === 1 ? '' : 's'} not deleted` : ''}`;
       confirmClear = false;
-      selected = null;
+      if (!result.skipped) selected = null;
       await refresh();
       onSessionsChanged?.();
     } catch (e) { error = String(e); } finally { clearing = false; }
@@ -159,6 +162,7 @@
                 {#if item.interrupted && item.hasAudio && item.status === 'failed'}<button onclick={() => recover(item.id)}>Recover</button>{/if}
                 {#if item.status === 'awaitingModel'}<button onclick={() => cancel(item.id)}>Cancel</button>{/if}
                 {#if item.status === 'finalizing' || item.status === 'summarizing'}<button onclick={() => cancel(item.id)}>Stop</button>{/if}
+                {#if item.interrupted && !item.hasAudio}<span>Audio no longer available</span>{/if}
                 {#if !['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(item.status)}
                   <button onclick={() => confirmRemove(item.id)}>{deleteConfirmId === item.id ? 'Confirm Delete' : 'Delete'}</button>
                 {/if}
@@ -183,7 +187,7 @@
         <button onclick={clear} disabled={clearing}>Confirm delete all</button>
         <button onclick={() => (confirmClear = false)}>Cancel</button>
       {:else}
-        <button onclick={() => (confirmClear = true)} disabled={!sessions.length}>Delete all sessions</button>
+        <button onclick={() => (confirmClear = true)} disabled={!hasSessions}>Delete all sessions</button>
       {/if}
       {#if selected}
         <SummaryPanel session={selected} active={view === 'history'} management prompts={prompts} models={models}
