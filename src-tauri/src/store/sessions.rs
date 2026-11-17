@@ -2,7 +2,7 @@
 //! transcript is saved, or for 7 days when the user keeps audio (parity spec 01).
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -484,6 +484,31 @@ impl Store {
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
         })
+    }
+
+    /// Searches only the encrypted local store; the query never enters diagnostics.
+    pub fn search_sessions(&self, query: &str) -> Result<Vec<SessionListItem>> {
+        if query.is_empty() {
+            return self.list_sessions();
+        }
+        let needle = query.to_lowercase();
+        let matches: HashSet<String> = self.with(|c| {
+            let mut stmt = c.prepare("SELECT id, title, transcript, summary,
+                date(created_at / 1000, 'unixepoch', 'localtime'),
+                printf('%d/%d/%04d', strftime('%m', created_at / 1000, 'unixepoch', 'localtime'), strftime('%d', created_at / 1000, 'unixepoch', 'localtime'), strftime('%Y', created_at / 1000, 'unixepoch', 'localtime'))
+                FROM sessions")?;
+            let rows = stmt.query_map([], |row| {
+                let id: String = row.get(0)?;
+                let fields: Vec<String> = (1..=5).map(|i| row.get(i)).collect::<rusqlite::Result<_>>()?;
+                Ok(fields.iter().any(|field| field.to_lowercase().contains(&needle)).then_some(id))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().flatten().collect())
+        })?;
+        Ok(self
+            .list_sessions()?
+            .into_iter()
+            .filter(|item| matches.contains(&item.id))
+            .collect())
     }
 
     pub fn get_session(&self, id: &str) -> Result<Option<Session>> {

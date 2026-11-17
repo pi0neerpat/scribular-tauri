@@ -89,6 +89,36 @@ fn sessions_persist_across_reopen() {
 }
 
 #[test]
+fn search_sessions_matches_local_fields_and_keeps_newest_order() {
+    let db = TempDb::new();
+    let store = db.open();
+    let first = store.create_session(&new_session("MiXeD title")).unwrap();
+    store
+        .save_transcript(&first.id, "Quiet transcription", 1000)
+        .unwrap();
+    let second = store.create_session(&new_session("Other title")).unwrap();
+    store
+        .save_transcript(&second.id, "mixed transcript", 1000)
+        .unwrap();
+    store
+        .set_summary(&second.id, "Final NOTE", &Timings::default())
+        .unwrap();
+
+    assert_eq!(store.search_sessions("mixed").unwrap().len(), 2);
+    assert_eq!(store.search_sessions("MIXED").unwrap()[0].id, second.id);
+    assert_eq!(store.search_sessions("note").unwrap()[0].id, second.id);
+    assert_eq!(store.search_sessions("QUIET").unwrap()[0].id, first.id);
+    let unicode = store.create_session(&new_session("École")).unwrap();
+    assert_eq!(store.search_sessions("éCOLE").unwrap()[0].id, unicode.id);
+    assert_eq!(store.search_sessions("/").unwrap().len(), 3);
+    assert!(store.search_sessions("%").unwrap().is_empty());
+    assert_eq!(
+        store.search_sessions("").unwrap(),
+        store.list_sessions().unwrap()
+    );
+}
+
+#[test]
 fn history_snippets_are_capped_and_fall_back_to_transcript_or_empty_copy() {
     let db = TempDb::new();
     let store = db.open();

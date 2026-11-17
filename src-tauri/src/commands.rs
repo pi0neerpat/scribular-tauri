@@ -133,6 +133,20 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     Ok(())
 }
 
+/// Keeps the native Manage Note Styles item in step with the model lock.
+#[tauri::command]
+pub fn set_navigation_locked(app: AppHandle, locked: bool) -> Result<(), String> {
+    let menu = app.menu().ok_or("no app menu")?;
+    for item in menu.items().map_err(|e| e.to_string())? {
+        if let tauri::menu::MenuItemKind::Submenu(sub) = item {
+            if let Some(tauri::menu::MenuItemKind::MenuItem(m)) = sub.get("shell-manage-styles") {
+                return m.set_enabled(!locked).map_err(|e| e.to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn app_version() -> AppVersion {
     AppVersion {
@@ -334,6 +348,14 @@ pub async fn install_update(
 #[tauri::command]
 pub fn list_sessions(store: State<Arc<Store>>) -> Result<Vec<SessionListItem>, String> {
     store.list_sessions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn search_sessions(
+    store: State<Arc<Store>>,
+    query: String,
+) -> Result<Vec<SessionListItem>, String> {
+    store.search_sessions(&query).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

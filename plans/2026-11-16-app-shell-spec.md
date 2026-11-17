@@ -133,3 +133,23 @@ All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 2. PR2 (M, 2–3 days): Native menu structure/routing and separate Settings window/panes — AS5, AS7; expose stable IDs for keyboard-shortcuts and feature owners.
 3. PR3 (M, 2–3 days): Shared read-only gate at command boundary and renewal/summary-unavailable placements — AS6, AS9–AS10, AS15.
 4. PR4 (M, 3–4 days): Automatic-update preference and ready alert, Delete All native confirmation, integration/manual checks — AS8, AS11–AS14 plus repeat AS5 for final menu enablement.
+
+## Execution notes (2026-11-16)
+
+- Approved by Patrick 2026-11-16, including all default decisions. Patrick asked Darby to implement this spec.
+- Workflow: cwf, reviewer cubic, harness codex, review phase claude (`--harness codex --phase-harness review=claude`).
+- Design source on the coding VM: `/Users/admin/Projects/Scribular/docs/design/app-shell/README.md` (scribular-docs `main` at `0c06526`), with `mockup.html` and `screens/`; gaps in `design/_gaps/app-shell.md`. The design overrides older specs.
+- PR plan (one cwf task per PR, run one at a time, following the split above):
+  - p1 sidebar, grouping, `search_sessions`, navigation, session row actions, stable selection (R1-R4; AS1-AS4), base `main`
+  - p2 native menu structure/routing and separate Settings window/panes (R5-R7; AS5, AS7)
+  - p3 shared read-only gate at the command boundary, renewal and summary-unavailable placements (R9, R12, R13; AS6, AS9, AS10, AS15)
+  - p4 automatic-update preference, ready-update alert, Delete All native confirmation, final menu enablement (R8, R10, R11; AS8, AS11-AS14, repeat AS5)
+- Each PR: uitest screenshot in the body, local recording path (`runs/<ts>/recording.mp4`) on the first lines of the description. Never merged without Patrick's review.
+- Recordings and screenshots go under `runs/<ts>/` in the task clone (not committed). Never delete `~/Library/Caches/scribular-uitest` or `~/cargo-target/scribular-tauri`.
+- Never use `git worktree`.
+
+### This task (p1)
+- This task = p1 (PR1 in the split above): main-window sidebar ordered search, New Recording, Note Styles, then Today/Yesterday/Earlier groups; `search_sessions(query)` over the encrypted local store with its `src/lib/api.ts` wrapper; navigation routing; row markers and context-menu actions; stable selection across refresh and filtering. Covers R1-R4 and AS1-AS4.
+- Until p2 lands the separate Settings window, keep the existing Settings content reachable from the main window so no preference is stranded; p2 removes it. The trial/license action routes to the existing License settings until p2 retargets it to Settings ▸ License. Edit ▸ Find may use a minimal menu item or focus path that p2 folds into the full menu.
+- Other PRs' scope (full native menu bar and enablement, separate Settings window, read-only license gate, automatic-update preference, update alert, Delete All native confirmation; AS5-AS15) is out of bounds for this task. Recording-and-session, onboarding, note-style-coach, keyboard-shortcuts, session-coach and theme internals stay with their owners.
+- PR base = `main`.

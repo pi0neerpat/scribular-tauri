@@ -131,6 +131,7 @@ pub fn run() {
         .manage(commands::SummaryNotices::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::set_navigation_locked,
             commands::get_onboarding_state,
             commands::complete_onboarding,
             commands::restore_sample_sessions,
@@ -144,6 +145,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::trigger_test_panic,
             commands::list_sessions,
+            commands::search_sessions,
             commands::get_session,
             commands::update_session,
             commands::delete_session,
@@ -209,8 +211,41 @@ pub fn run() {
                 }
             }
         })
+        .on_menu_event(|app, event| {
+            let name = match event.id().as_ref() {
+                "shell-find" => "shell://find",
+                "shell-manage-styles" => "shell://manage-styles",
+                _ => return,
+            };
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.emit(name, ());
+            }
+        })
         .setup(|app| {
             if let Ok(menu) = tauri::menu::Menu::default(&app.handle()) {
+                for item in menu.items()? {
+                    if let tauri::menu::MenuItemKind::Submenu(submenu) = item {
+                        match submenu.text()?.as_str() {
+                            "Edit" => submenu.append(&tauri::menu::MenuItem::with_id(
+                                app,
+                                "shell-find",
+                                "Find",
+                                true,
+                                Some("CmdOrCtrl+F"),
+                            )?)?,
+                            "View" => submenu.append(&tauri::menu::MenuItem::with_id(
+                                app,
+                                "shell-manage-styles",
+                                "Manage Note Styles…",
+                                true,
+                                None::<&str>,
+                            )?)?,
+                            _ => {}
+                        }
+                    }
+                }
                 if let Err(e) = app.set_menu(menu) {
                     diag::log::log(
                         "WARN",

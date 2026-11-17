@@ -68,8 +68,24 @@ export function onHeartbeat(handler: (beat: Heartbeat) => void): Promise<Unliste
   return listen<Heartbeat>('app://heartbeat', (event) => handler(event.payload));
 }
 
+export function onFindRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen('shell://find', handler);
+}
+
+export function setNavigationLocked(locked: boolean): Promise<void> {
+  return invoke('set_navigation_locked', { locked });
+}
+
+export function onManageStylesRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen('shell://manage-styles', handler);
+}
+
 export function listSessions(): Promise<SessionListItem[]> {
   return invoke<SessionListItem[]>('list_sessions');
+}
+
+export function searchSessions(query: string): Promise<SessionListItem[]> {
+  return invoke<SessionListItem[]>('search_sessions', { query });
 }
 
 export function getSession(id: string): Promise<Session | null> {
