@@ -40,8 +40,12 @@
   import type { UpdateState } from '../types/UpdateState';
   import type { SummaryAvailability } from '../types/SummaryAvailability';
   import { updateStatus } from './update-status';
+  import { navigationLockedBy } from '../navigation';
 
-  let { navigationLocked = false }: { navigationLocked?: boolean } = $props();
+  let { navigationLocked: lockedProp = false }: { navigationLocked?: boolean } = $props();
+  // The Settings webview has no App.svelte, so it tracks model work itself.
+  let models = $state<Record<string, ModelProgress>>({});
+  let navigationLocked = $derived(lockedProp || navigationLockedBy(Object.values(models)));
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
@@ -140,6 +144,7 @@
       try {
         try {
           const removeListener = await onModelsProgress((p) => {
+            models[p.modelId] = p;
             if (p.modelId === SPEAKER_MODEL) {
               progressVersion++;
               speakerModel = p;
@@ -151,6 +156,7 @@
         settings = await getRecordingSettings();
         const version = progressVersion;
         const status = await modelsStatus();
+        for (const m of status) models[m.modelId] ??= m;
         if (version === progressVersion) speakerModel = status.find((m) => m.modelId === SPEAKER_MODEL) ?? null;
       } catch (e) {
         error = String(e);

@@ -73,7 +73,7 @@ describe('first run components', () => {
   });
 
   it('renders a non-modal tour without a full-screen click shield', () => {
-    const tour = render(OnboardingTour, { props: { onNavigate: () => {}, onComplete: () => {} } });
+    const tour = render(OnboardingTour, { props: { onComplete: () => {} } });
     const record = render(RecordView, { props: { speechReady: true } });
     const composed = `<main>${record.body}${tour.body}</main>`;
     expect(composed).toContain("Let's take a quick tour.");

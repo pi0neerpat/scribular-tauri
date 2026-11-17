@@ -32,7 +32,7 @@
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
   let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
-  $effect(() => { void setShellMenuState({ hasSessions, selected: !!selected, hasNote: !!selected?.summary, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
+  $effect(() => { void setShellMenuState({ hasSessions, selected: !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: !!selected?.summary, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);

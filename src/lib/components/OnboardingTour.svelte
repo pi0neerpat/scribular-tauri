@@ -2,17 +2,15 @@
   import { onMount, tick } from 'svelte';
   import { openExternalLink, openSettings } from '../api';
 
-  type View = 'record';
   type Step = { id: string; title: string; copy: string; anchor?: string };
-  let { onNavigate, onComplete, sessionsEmpty = false }: {
-    onNavigate: (view: View) => void;
+  let { onComplete, sessionsEmpty = false }: {
     onComplete: () => void;
     sessionsEmpty?: boolean;
   } = $props();
 
   let steps = $state<Step[]>([
     { id: 'welcome', title: 'Welcome', copy: "Let's take a quick tour. Your permissions and speech model are getting ready below." },
-    { id: 'audio', title: 'Choose an audio source in Settings', copy: 'Use your microphone, application audio, or both.', anchor: 'input-mode' },
+    { id: 'audio', title: 'Choose an audio source in Settings', copy: 'Settings ▸ Recording lets you use your microphone, application audio, or both.' },
     { id: 'sessions', title: 'View Sessions', copy: 'After you finish a recording, the transcript and summary appear here.', anchor: 'sessions' },
     { id: 'notes', title: 'Customize Your Notes', copy: 'Open Note Styles from the sidebar.', anchor: 'styles' },
   ]);
@@ -29,7 +27,7 @@
     }
     const anchor = document.querySelector<HTMLElement>(`[data-tour="${current.anchor}"]`);
     if (!anchor) return;
-    const target = current.anchor === 'input-mode' ? anchor.querySelector<HTMLElement>('fieldset') ?? anchor : anchor;
+    const target = anchor;
     const rect = target.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 32);
     const left = Math.min(window.innerWidth - width - 16, Math.max(16, rect.right + 16));
@@ -38,7 +36,7 @@
   }
 
   async function next() {
-    if (current.id === 'welcome') void openSettings('Recording');
+    if (current.id === 'welcome') void openSettings('Recording').catch((e) => (supportError = String(e)));
     index = Math.min(index + 1, steps.length - 1);
     await tick();
     place();

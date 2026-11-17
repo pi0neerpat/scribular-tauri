@@ -11,11 +11,9 @@ pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-        if pane != "General" {
-            window
-                .emit("shell://settings-pane", pane)
-                .map_err(|e| e.to_string())?;
-        }
+        window
+            .emit("shell://settings-pane", pane)
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
     let url = WebviewUrl::App(
@@ -93,7 +91,7 @@ pub fn set_state(
         ("shell-manage-styles", !locked),
         ("shell-blank-style", !locked && !recording),
         ("shell-find", !locked),
-        ("shell-delete-all", !locked && !recording && has_sessions),
+        ("shell-delete-all", !recording && has_sessions),
         ("shell-delete-session", !locked && selected && !recording),
         ("shell-copy-note", !locked && has_note),
         ("shell-recover", !locked && recoverable && !recording),

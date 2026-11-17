@@ -104,7 +104,7 @@
     guard(action, opener);
   }
 
-  export function newBlank() { guard(() => edit(DRAFT)); }
+  export function newBlank() { guard(() => { edit(DRAFT); void tick().then(() => document.querySelector<HTMLElement>('[data-style-name]')?.focus()); }); }
 
   let savePromise: Promise<boolean> | null = null;
 

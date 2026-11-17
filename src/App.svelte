@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
+  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
   import ModelStatus from './lib/components/ModelStatus.svelte';
@@ -91,7 +91,7 @@
     modelEvents.then(() => modelsStatus()).then((snapshot) => {
       modelProgress = [...snapshot.filter((m) => !modelEventsSeen.has(m.modelId)), ...modelProgress.filter((m) => modelEventsSeen.has(m.modelId))];
     }).catch(() => {});
-    const quitRequest = onQuitRequested(() => (confirmQuitOpen = true));
+    const quitRequest = onQuitRequested(() => { if (typeof gate === 'object') void quitApp(); else confirmQuitOpen = true; });
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
     const closeRequest = onWindowCloseRequested(() => {
       const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
@@ -212,7 +212,7 @@
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}
   </SessionHistory>
-  {#if tourOpen}{#key tourRun}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/key}{/if}
+  {#if tourOpen}{#key tourRun}<OnboardingTour onComplete={finishTour} />{/key}{/if}
   <p>Heartbeat: {beats}</p>
   {#if error && version}<p role="alert">{error}</p>{/if}
 </main>
