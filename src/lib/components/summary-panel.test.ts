@@ -44,6 +44,7 @@ it('copies the saved summary, reports success, and keeps streamed regeneration t
 it('uses the panel copy action and delete confirmation for menu requests', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   const onDelete = vi.fn();
+  api.listSummaryModels.mockResolvedValue([]);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   const target = document.createElement('div');
   const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [], onDelete } });
