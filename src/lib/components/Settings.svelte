@@ -6,7 +6,6 @@
     deniedPrivacy,
     downloadModel,
     getRecordingSettings,
-    restoreSampleSessions,
     listAudioApps,
     modelsStatus,
     onModelsProgress,
@@ -20,7 +19,7 @@
     getAppSettings,
     setAppSettings,
     requestNotificationPermission,
-    openExternalLink,
+    onSettingsPane,
     getDiagnostics,
     getTelemetrySetting,
     setTelemetrySetting,
@@ -32,7 +31,6 @@
   } from '../api';
   import { appSettings } from '../app-settings';
   import LicenseSettings from './LicenseSettings.svelte';
-  import NoteStyles from './NoteStyles.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
   import type { AudioApp } from '../types/AudioApp';
   import type { InputMode } from '../types/InputMode';
@@ -42,8 +40,12 @@
   import type { UpdateState } from '../types/UpdateState';
   import type { SummaryAvailability } from '../types/SummaryAvailability';
   import { updateStatus } from './update-status';
+  import { navigationLockedBy } from '../navigation';
 
-  let { navigationLocked = false }: { navigationLocked?: boolean } = $props();
+  let { navigationLocked: lockedProp = false }: { navigationLocked?: boolean } = $props();
+  // The Settings webview has no App.svelte, so it tracks model work itself.
+  let models = $state<Record<string, ModelProgress>>({});
+  let navigationLocked = $derived(lockedProp || navigationLockedBy(Object.values(models)));
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
@@ -61,9 +63,8 @@
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
   let notifyWasEnabled = $state(false);
-  let category = $state<'Note styles' | 'Session' | 'General' | 'About' | 'License'>('Session');
-  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
-  let sampleNotice = $state<string | null>(null);
+  type Category = 'General' | 'Appearance' | 'Recording' | 'Keyboard Shortcuts' | 'License';
+  let category = $state<Category>((new URLSearchParams(location.search).get('pane') as Category) || 'General');
   let telemetryOn = $state(false);
   let telemetryKnown = $state(false);
   let telemetrySaving = $state(false);
@@ -73,22 +74,10 @@
   let summaryAvailabilityRetrying = $state(false);
   let retrySummaryAvailability = $state<(() => void) | null>(null);
 
-  export function requestLeave(action: () => void, opener?: HTMLElement) {
-    if (noteStyles) noteStyles.requestLeave(action, opener);
-    else action();
-  }
-
-  export function showLicense() {
-    requestLeave(() => {
-      if (navigationLocked) return;
-      category = 'License';
-    });
-  }
-
-  function chooseCategory(next: typeof category, opener: HTMLElement) {
+  function chooseCategory(next: typeof category) {
     if (navigationLocked) return;
     if (next === category) return;
-    requestLeave(() => (category = next), opener);
+    category = next;
   }
 
   // The saved app stays selectable while it isn't playing.
@@ -100,6 +89,9 @@
   let selectedIcon = $derived(apps.find((a) => a.name === settings?.targetApp)?.icon ?? null);
 
   onMount(() => {
+    const paneListener = onSettingsPane((pane) => {
+      if (['General', 'Appearance', 'Recording', 'Keyboard Shortcuts', 'License'].includes(pane)) category = pane as Category;
+    });
     let unlisten: (() => void) | undefined;
     let updateUnlisten: (() => void) | undefined;
     let summaryUnlisten: (() => void) | undefined;
@@ -152,6 +144,7 @@
       try {
         try {
           const removeListener = await onModelsProgress((p) => {
+            models[p.modelId] = p;
             if (p.modelId === SPEAKER_MODEL) {
               progressVersion++;
               speakerModel = p;
@@ -163,13 +156,14 @@
         settings = await getRecordingSettings();
         const version = progressVersion;
         const status = await modelsStatus();
+        for (const m of status) models[m.modelId] ??= m;
         if (version === progressVersion) speakerModel = status.find((m) => m.modelId === SPEAKER_MODEL) ?? null;
       } catch (e) {
         error = String(e);
       }
       if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
-    return () => { disposed = true; summaryAttempt++; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); retrySummaryAvailability = null; };
+    return () => { disposed = true; summaryAttempt++; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); paneListener.then((fn) => fn()); retrySummaryAvailability = null; };
   });
 
   async function refreshApps() {
@@ -221,15 +215,6 @@
     }
   }
 
-  async function restoreSample() {
-    try {
-      await restoreSampleSessions();
-      sampleNotice = 'Sample session restored.';
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
   async function changeTelemetry() {
     if (telemetrySaving) return;
     telemetrySaving = true;
@@ -268,8 +253,8 @@
 <section data-tour="input-mode">
   <h2>Settings</h2>
   <nav aria-label="Settings categories">
-    {#each ['Note styles', 'Session', 'General', 'About', 'License'] as item}
-      <button aria-pressed={category === item} disabled={navigationLocked} onclick={(e) => chooseCategory(item as typeof category, e.currentTarget)}>{item}</button>
+    {#each ['General', 'Appearance', 'Recording', 'Keyboard Shortcuts', 'License'] as item}
+      <button aria-pressed={category === item} disabled={navigationLocked} onclick={() => chooseCategory(item as typeof category)}>{item}</button>
     {/each}
   </nav>
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
@@ -283,7 +268,7 @@
     <button disabled={summaryAvailabilityRetrying} onclick={() => retrySummaryAvailability?.()}>Check again</button>
   {/if}
   {#if settings}
-  {#if category === 'Session'}
+  {#if category === 'Recording'}
     <fieldset>
       <legend>Record</legend>
       {#each modes as [mode, label] (mode)}
@@ -295,7 +280,7 @@
     </fieldset>
   {/if}
 
-  {#if category === 'Session'}
+  {#if category === 'Recording'}
     <fieldset>
       <legend>Multi-speaker</legend>
       <p>Identify different speakers after recording. The speaker model downloads once and stays on this Mac.</p>
@@ -312,6 +297,9 @@
       {/if}
     </fieldset>
 
+  {/if}
+
+  {#if category === 'General'}
     <fieldset>
       <legend>Updates</legend>
       <p>Current version: {version || 'Loading…'}</p>
@@ -331,7 +319,7 @@
     </fieldset>
   {/if}
 
-  {#if category === 'Session'}
+  {#if category === 'Recording'}
     {#if settings.inputMode !== 'mic'}
       <label>
         App
@@ -353,7 +341,6 @@
   {#if category === 'General'}
     <fieldset>
       <legend>General</legend>
-      <label><input type="checkbox" bind:checked={$appSettings.showBackgroundAnimation} onchange={saveAppSettings} /> Show background animation</label>
       <label><input type="checkbox" bind:checked={$appSettings.notifySummaryComplete} onchange={saveAppSettings} /> Show summarization complete alert</label>
       {#if denied === 'notifications'}
         <p role="status">Notifications are disabled. Allow Scribular in System Settings to show summary alerts.
@@ -362,8 +349,11 @@
       {/if}
     </fieldset>
   {/if}
+  {#if category === 'Appearance'}
+    <label><input type="checkbox" bind:checked={$appSettings.showBackgroundAnimation} onchange={saveAppSettings} /> Show background animation</label>
+  {/if}
 
-  {#if category === 'Session'}
+  {#if category === 'Recording'}
     <fieldset>
       <legend>Audio recording</legend>
       <p>
@@ -388,25 +378,8 @@
   {/if}
   {/if}
 
-  {#if category === 'Note styles'}
-    <NoteStyles bind:this={noteStyles} />
-  {/if}
-
   {#if category === 'License'}<LicenseSettings />{/if}
-  {#if category === 'About'}
-    <p>Version: {version || 'Loading…'}</p>
-    <button onclick={() => openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e)))}>Contact support</button>
-    <button onclick={() => openExternalLink('https://www.scribular.com').catch((e) => (error = String(e)))}>Scribular website</button>
-  {/if}
-
-  {#if category === 'General'}
-  <section aria-labelledby="sample-session-title">
-    <h3 id="sample-session-title">Sample session</h3>
-    <p>Restore the example session if you deleted it.</p>
-    <button onclick={restoreSample}>Restore sample session</button>
-    {#if sampleNotice}<p role="status">{sampleNotice}</p>{/if}
-  </section>
-  {/if}
+  {#if category === 'Keyboard Shortcuts'}<p>Keyboard shortcuts are set in the app menus.</p>{/if}
 
   {#if category === 'General'}
   <fieldset>

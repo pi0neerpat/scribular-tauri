@@ -41,6 +41,23 @@ it('copies the saved summary, reports success, and keeps streamed regeneration t
   unmount(app);
 });
 
+it('uses the panel copy action and delete confirmation for menu requests', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const onDelete = vi.fn();
+  api.listSummaryModels.mockResolvedValue([]);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [], onDelete } });
+  await app.copy();
+  expect(writeText).toHaveBeenCalledWith('saved summary');
+  app.requestDelete();
+  flushSync();
+  expect(target.textContent).toContain('Confirm');
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Confirm')!.click();
+  expect(onDelete).toHaveBeenCalledOnce();
+  unmount(app);
+});
+
 it('disables Copy when both summary and transcript are empty', () => {
   api.listSummaryModels.mockResolvedValue([]);
   const target = document.createElement('div');

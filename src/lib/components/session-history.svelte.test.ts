@@ -5,6 +5,7 @@ import { mount, unmount } from 'svelte';
 const api = vi.hoisted(() => ({
   listSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
   onSessionProgress: vi.fn(), cancelJob: vi.fn(), clearAllSessions: vi.fn(), deleteSession: vi.fn(), recoverSession: vi.fn(),
+  setShellMenuState: vi.fn().mockResolvedValue(undefined), openSettings: vi.fn().mockResolvedValue(undefined),
   progress: undefined as ((p: unknown) => void) | undefined,
 }));
 vi.mock('../api', () => ({
@@ -16,6 +17,8 @@ const { default: SessionHistory } = await import('./SessionHistory.svelte');
 
 beforeEach(() => {
   vi.resetAllMocks();
+  api.setShellMenuState.mockResolvedValue(undefined);
+  api.openSettings.mockResolvedValue(undefined);
   api.getPromptList.mockResolvedValue({ prompts: [], activeId: null, createdId: null });
   api.listSummaryModels.mockResolvedValue([]);
 });
@@ -80,4 +83,24 @@ it('searches the current input text on each keystroke and restores the full list
   await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(2));
   expect(api.searchSessions).toHaveBeenCalledTimes(1);
   unmount(app);
+});
+
+it('uses the visible record result for Copy Note enablement, not a retained history selection', async () => {
+  api.listSessions.mockResolvedValue([row('History')]);
+  api.getSession.mockResolvedValue({ ...row('History'), summary: 'Old note' });
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: {
+    view: 'record', recordHasNote: false,
+    onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.(),
+  } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledWith('History'));
+  await vi.waitFor(() => expect(api.setShellMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ hasNote: false, selected: false })));
+  unmount(app);
+
+  const emptyTarget = document.createElement('div');
+  const empty = mount(SessionHistory, { target: emptyTarget, props: { view: 'record', recordHasNote: true } });
+  await vi.waitFor(() => expect(api.setShellMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ hasNote: true })));
+  unmount(empty);
 });

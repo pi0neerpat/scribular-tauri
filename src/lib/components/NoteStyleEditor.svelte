@@ -22,7 +22,7 @@
 </script>
 
 <div>
-  <label>Name <input bind:value={name} {readonly} /></label>
+  <label>Name <input data-style-name bind:value={name} {readonly} /></label>
   <label>Prompt <textarea bind:value={text} {readonly} rows="10"></textarea></label>
   {#if readonly}
     {#if onDuplicate}<button onclick={(event) => onDuplicate(event.currentTarget)}>Duplicate to edit</button>{/if}

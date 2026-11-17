@@ -37,7 +37,8 @@
     speechReady = false,
     active = true,
     onEnterLicense = () => {},
-  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void } = $props();
+    onResultNote = () => {},
+  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -63,6 +64,9 @@
   let transcriptWaiting = $state<{ sessionId: string; waiting: boolean } | null>(null);
   // The finished session's result.
   let result = $state<Session | null>(null);
+  let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
+  $effect(() => onResultNote(!!result?.summary));
+  export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
   let resultFetch = 0;
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -345,7 +349,7 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel {session} {active} byline={[
+    <SummaryPanel bind:this={summaryPanel} {session} {active} byline={[
       styles?.prompts.find((p) => p.id === session.promptId)?.name,
       session.modelId && (modelNames[session.modelId] ?? session.modelId),
     ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />
