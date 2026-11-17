@@ -319,7 +319,7 @@
     {/if}
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
     {#if styles}
-      <StylePicker prompts={styles.prompts} selectedId={styles.activeId} onSelect={chooseStyle} />
+      <StylePicker prompts={styles.prompts} selectedId={styles.activeId} disabled={!allows($accessState)} onSelect={chooseStyle} />
     {/if}
     <button onclick={start} disabled={busy || !speechReady || !allows($accessState)}>
       Start recording
