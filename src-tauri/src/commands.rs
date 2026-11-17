@@ -36,6 +36,7 @@ pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 /// Every event the core emits; each needs a `listen` wrapper in api.ts.
 pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
+    APP_SETTINGS_CHANGED_EVENT,
     MODELS_PROGRESS_EVENT,
     SUMMARY_MODEL_CHANGED_EVENT,
     SUMMARY_AVAILABILITY_EVENT,
@@ -54,6 +55,7 @@ pub const EVENTS: &[&str] = &[
 /// The new [`AccessState`] after activation, removal, re-validation or a day
 /// rollover (spec 04 R12).
 pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
+pub const APP_SETTINGS_CHANGED_EVENT: &str = "app-settings://changed";
 
 pub const UPDATE_STATE_EVENT: &str = "update://state";
 pub const TRAY_START_RECORDING_EVENT: &str = "tray-start-recording";
@@ -1104,8 +1106,16 @@ pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String>
 }
 
 #[tauri::command]
-pub fn set_app_settings(store: State<Arc<Store>>, settings: AppSettings) -> Result<(), String> {
-    store.set_app_settings(settings).map_err(|e| e.to_string())
+pub fn set_app_settings(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    settings: AppSettings,
+) -> Result<(), String> {
+    store
+        .set_app_settings(settings.clone())
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit(APP_SETTINGS_CHANGED_EVENT, settings);
+    Ok(())
 }
 
 #[tauri::command]

@@ -78,6 +78,9 @@ export function onShellMenu(handler: (id: string) => void): Promise<UnlistenFn> 
 export function onSettingsPane(handler: (pane: string) => void): Promise<UnlistenFn> {
   return listen<string>('shell://settings-pane', (event) => handler(event.payload));
 }
+export function onAppSettingsChanged(handler: (settings: AppSettings) => void): Promise<UnlistenFn> {
+  return listen<AppSettings>('app-settings://changed', (event) => handler(event.payload));
+}
 
 export function listSessions(): Promise<SessionListItem[]> {
   return invoke<SessionListItem[]>('list_sessions');

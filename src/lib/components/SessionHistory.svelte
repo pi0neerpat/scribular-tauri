@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
-  import { cancelJob, clearAllSessions, copyText, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
+  import { cancelJob, clearAllSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
   import type { AppView } from '../navigation';
   import type { Session } from '../types/Session';
   import type { SessionListItem } from '../types/SessionListItem';
@@ -8,8 +8,8 @@
   import SummaryPanel from './SummaryPanel.svelte';
   import TrialBadge from './TrialBadge.svelte';
 
-  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
-    view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
+  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
+    view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; recordHasNote?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
     onLicense?: () => void; onTour?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
@@ -27,12 +27,12 @@
   let copiedId = $state<string | null>(null);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let deleteConfirmId = $state<string | null>(null);
-  let confirmSelectedDeletion = $state<string | null>(null);
+  let summaryPanel = $state<{ copy: () => Promise<void>; requestDelete: () => void } | undefined>();
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
   let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
-  $effect(() => { void setShellMenuState({ hasSessions, selected: !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: !!selected?.summary, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
+  $effect(() => { void setShellMenuState({ hasSessions, selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
@@ -66,17 +66,8 @@
     searchField?.select();
   }
   export function confirmDeleteAll() { if (hasSessions) confirmClear = true; }
-  export function confirmDeleteSelected() {
-    if (selected && !['recording', 'finalizing'].includes(selected.status)) confirmSelectedDeletion = selected.id;
-  }
-  export async function copySelectedNote() {
-    if (!selected?.summary) return;
-    try {
-      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(selected.summary);
-      else await copyText(selected.summary);
-      markCopied(selected.id);
-    } catch (e) { error = String(e); }
-  }
+  export function confirmDeleteSelected() { if (view === 'history' && selected && !['recording', 'finalizing'].includes(selected.status)) summaryPanel?.requestDelete(); }
+  export async function copySelectedNote() { if (view === 'history' && selected?.summary) await summaryPanel?.copy(); }
   export async function recoverFirst() {
     try {
       const first = (await listSessions()).find((s) => s.interrupted && s.hasAudio && s.status === 'failed');
@@ -209,12 +200,7 @@
         <button onclick={() => (confirmClear = false)}>Cancel</button>
       {/if}
       {#if selected}
-        {#if confirmSelectedDeletion === selected.id}
-          <p>Delete this session? This cannot be undone.</p>
-          <button onclick={() => { const id = confirmSelectedDeletion!; confirmSelectedDeletion = null; void remove(id); }}>Confirm delete session</button>
-          <button onclick={() => (confirmSelectedDeletion = null)}>Cancel</button>
-        {/if}
-        <SummaryPanel session={selected} active={view === 'history'} management prompts={prompts} models={models}
+        <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history'} management prompts={prompts} models={models}
           onUpdate={(s) => { selected = s; void refresh(); }} onCopied={markCopied}
           onDelete={['recording', 'finalizing'].includes(selected.status) ? undefined : () => remove(selected!.id)} />
       {:else}<p>Select a session or start a new recording.</p>{/if}

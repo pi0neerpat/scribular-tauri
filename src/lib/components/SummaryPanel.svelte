@@ -103,7 +103,7 @@
     };
   });
 
-  async function copy() {
+  export async function copy() {
     const { id, summary, transcript } = session;
     const text = summary || transcript;
     try {
@@ -129,10 +129,15 @@
     catch (e) { error = String(e); }
   }
 
+  export function requestDelete() {
+    confirmDelete = true;
+    clearTimeout(deleteTimer);
+    deleteTimer = setTimeout(() => (confirmDelete = false), 3000);
+  }
+
   function deleteClick() {
     if (confirmDelete) { clearTimeout(deleteTimer); confirmDelete = false; onDelete?.(); return; }
-    confirmDelete = true;
-    deleteTimer = setTimeout(() => (confirmDelete = false), 3000);
+    requestDelete();
   }
 
   async function stop() {
