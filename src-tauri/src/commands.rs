@@ -337,6 +337,14 @@ pub fn list_sessions(store: State<Arc<Store>>) -> Result<Vec<SessionListItem>, S
 }
 
 #[tauri::command]
+pub fn search_sessions(
+    store: State<Arc<Store>>,
+    query: String,
+) -> Result<Vec<SessionListItem>, String> {
+    store.search_sessions(&query).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_session(store: State<Arc<Store>>, id: String) -> Result<Option<Session>, String> {
     store.get_session(&id).map_err(|e| e.to_string())
 }

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 
 const api = vi.hoisted(() => ({
-  listSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
+  listSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
   onSessionProgress: vi.fn(), cancelJob: vi.fn(), clearAllSessions: vi.fn(), deleteSession: vi.fn(), recoverSession: vi.fn(),
   progress: undefined as ((p: unknown) => void) | undefined,
 }));
@@ -14,16 +14,51 @@ vi.mock('../api', () => ({
 vi.mock('./SummaryPanel.svelte', () => ({ default: () => null }));
 const { default: SessionHistory } = await import('./SessionHistory.svelte');
 
-it('refreshes the list when a progress event names an unknown session', async () => {
-  const row = { id: 'new', title: 'New session', createdAt: 1, status: 'failed', durationMs: null, hasAudio: false, snippet: 'No summary available', interrupted: false };
-  api.listSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([row]);
+beforeEach(() => {
+  vi.resetAllMocks();
   api.getPromptList.mockResolvedValue({ prompts: [], activeId: null, createdId: null });
   api.listSummaryModels.mockResolvedValue([]);
+});
+
+const row = (id: string, status = 'done') => ({ id, title: id, createdAt: Date.now(), status, durationMs: null, hasAudio: true, snippet: '', interrupted: false, isSample: false });
+
+it('refreshes the list when a progress event names an unknown session', async () => {
+  api.listSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([row('new', 'failed')]);
   const target = document.createElement('div');
   const app = mount(SessionHistory, { target });
-  await vi.waitFor(() => expect(target.textContent).toContain('0 sessions'));
+  await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(1));
   api.progress?.({ sessionId: 'new', state: 'failed', stepIndex: 1, stepCount: 1, message: 'Done' });
-  await vi.waitFor(() => expect(target.textContent).toContain('1 session'));
-  expect(target.textContent).toContain('New session');
+  await vi.waitFor(() => expect(target.textContent).toContain('new'));
+  unmount(app);
+});
+
+it('shows row state actions and keeps selected detail when search hides it or fails', async () => {
+  const interrupted = { ...row('Interrupted', 'failed'), interrupted: true };
+  const queued = row('Queued', 'awaitingModel');
+  const complete = row('Complete');
+  api.listSessions.mockResolvedValue([interrupted, queued, complete]);
+  api.searchSessions.mockResolvedValueOnce([queued]).mockRejectedValueOnce(new Error('offline'));
+  api.getSession.mockResolvedValue({ ...complete, summary: 'Saved note' });
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.textContent).toContain('Complete'));
+  expect(target.textContent).toContain('Recover');
+  expect(target.textContent).toContain('Writing…');
+  const actions = [...target.querySelectorAll('details')].map((node) => node.textContent);
+  expect(actions[0]).toContain('Recover');
+  expect(actions[1]).toContain('Cancel');
+  expect(actions[2]).toContain('Delete');
+  (target.querySelectorAll('.session')[2] as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-current="page"]')?.textContent).toContain('Complete'));
+  const input = target.querySelector('input[type="search"]') as HTMLInputElement;
+  input.value = 'queued'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(1));
+  expect(target.textContent).toContain('Queued');
+  input.value = 'other'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(target.textContent).toContain('Could not update sidebar'));
+  expect(target.querySelectorAll('.session')).toHaveLength(1);
+  input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(3));
+  expect(target.querySelector('[aria-current="page"]')?.textContent).toContain('Complete');
   unmount(app);
 });

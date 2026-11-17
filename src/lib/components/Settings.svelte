@@ -78,6 +78,10 @@
     else action();
   }
 
+  export function showLicense() {
+    requestLeave(() => (category = 'License'));
+  }
+
   function chooseCategory(next: typeof category, opener: HTMLElement) {
     if (navigationLocked) return;
     if (next === category) return;

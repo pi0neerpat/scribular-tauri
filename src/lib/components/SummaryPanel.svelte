@@ -20,7 +20,8 @@
     models: modelList = [],
     onUpdate,
     onDelete,
-  }: { session: Session; active?: boolean; byline?: string; management?: boolean; prompts?: PromptList | null; models?: SummaryModel[]; onUpdate?: (session: Session) => void; onDelete?: () => void } = $props();
+    onCopied,
+  }: { session: Session; active?: boolean; byline?: string; management?: boolean; prompts?: PromptList | null; models?: SummaryModel[]; onUpdate?: (session: Session) => void; onDelete?: () => void; onCopied?: (id: string) => void } = $props();
   let prompts = $state<PromptList | null>(null);
   let models = $state<SummaryModel[]>([]);
   let selectedPrompt = $state<string | null>(null);
@@ -108,6 +109,7 @@
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
       else await copyText(text);
       copied = true;
+      if (session.summary) onCopied?.(session.id);
       clearTimeout(copyTimer);
       copyTimer = setTimeout(() => (copied = false), 2000);
     } catch (e) { error = String(e); }

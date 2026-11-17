@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { appVersion, currentRecording, lockedState, onHeartbeat, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
+  import { onMount, tick } from 'svelte';
+  import { appVersion, currentRecording, lockedState, onHeartbeat, onFindRequested, onManageStylesRequested, onSessionProgress, onQuitRequested, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import Settings from './lib/components/Settings.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
   import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
-  import TrialBadge from './lib/components/TrialBadge.svelte';
+  import NoteStyles from './lib/components/NoteStyles.svelte';
   import UpdateBar from './lib/components/UpdateBar.svelte';
   import SessionHistory from './lib/components/SessionHistory.svelte';
   import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { navigation, navigationDisabled, navigationLockedBy } from './lib/navigation';
+  import { navigation, navigationDisabled, navigationLockedBy, type AppView } from './lib/navigation';
   import { modelsStatus, onModelsProgress } from './lib/api';
   import OnboardingTour from './lib/components/OnboardingTour.svelte';
   import { followAccessState } from './lib/license';
@@ -37,13 +37,20 @@
   let confirmQuitOpen = $state(false);
   let tourOpen = $state(false);
   let tourRun = $state(0);
-  let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
+  let settings = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; showLicense: () => void } | undefined>();
+  let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void } | undefined>();
+  let history = $state<{ focusSearch: () => void } | undefined>();
 
-  function navigate(next: typeof view, opener?: HTMLElement) {
+  function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
     if (navigationDisabled(navigationLocked)) return;
-    const action = () => navigation.update((n) => ({ ...n, view: next }));
+    const action = () => { navigation.update((n) => ({ ...n, view: next })); after?.(); };
     if (view === 'settings' && next !== 'settings' && settings) settings.requestLeave(action, opener);
+    else if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
     else action();
+  }
+
+  function openLicense() {
+    navigate('settings', undefined, () => { void tick().then(() => settings?.showLicense()); });
   }
 
   async function refreshInterrupted() {
@@ -53,6 +60,14 @@
   onMount(() => {
     const showRecord = () => navigation.update((n) => ({ ...n, view: 'record' }));
     window.addEventListener('tray-start-failed', showRecord);
+    const find = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault(); history?.focusSearch();
+      }
+    };
+    window.addEventListener('keydown', find);
+    const findRequest = onFindRequested(() => history?.focusSearch());
+    const stylesRequest = onManageStylesRequested(() => navigate('styles'));
     getCurrentWindow().show().catch(() => {});
     const modelEventsSeen = new Set<string>();
     const modelEvents = onModelsProgress((p) => {
@@ -115,6 +130,9 @@
     const stopLicense = followAccessState();
     return () => {
       window.removeEventListener('tray-start-failed', showRecord);
+      window.removeEventListener('keydown', find);
+      findRequest.then((fn) => fn());
+      stylesRequest.then((fn) => fn());
       unlisten.then((fn) => fn());
       progress.then((fn) => fn());
       modelEvents.then((fn) => fn());
@@ -135,8 +153,8 @@
     }
   }
 
-  function showTour(event: MouseEvent) {
-    navigate('record', event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined);
+  function showTour() {
+    navigate('record');
     tourRun++;
     tourOpen = true;
   }
@@ -171,24 +189,17 @@
   {:else}
     <p>Loading…</p>
   {/if}
-  <nav>
-    <button onclick={(event) => navigate('record', event.currentTarget)} aria-pressed={view === 'record'}>Record</button>
-    <button onclick={(event) => navigate('history', event.currentTarget)} aria-pressed={view === 'history'} disabled={navigationDisabled(navigationLocked)} aria-disabled={navigationLocked}>History</button>
-    <button data-tour="settings" onclick={(event) => navigate('settings', event.currentTarget)} aria-pressed={view === 'settings'} disabled={navigationDisabled(navigationLocked)} aria-disabled={navigationLocked}>Settings</button>
-    <button onclick={showTour}>Show tour</button>
-    <TrialBadge onclick={() => navigate('settings')} />
-  </nav>
-  <!-- Hidden, not unmounted, so a session in flight keeps its progress. -->
-  <div hidden={view !== 'record'}><RecordView
-      {speechReady}
-      active={view === 'record'}
-      onEnterLicense={() => navigate('settings')}
-    />
-  </div>
-  <div hidden={view !== 'history'}><SessionHistory active={view === 'history'} onSessionsChanged={() => refreshInterrupted().catch(() => {})} /></div>
-  {#if view === 'settings'}
-    <Settings bind:this={settings} {navigationLocked} />
-  {/if}
+  <SessionHistory bind:this={history} {view} {navigationLocked} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={() => refreshInterrupted().catch(() => {})}>
+    <!-- Keep the recorder mounted so its progress survives navigation. -->
+    <div hidden={view !== 'record'}><RecordView
+        {speechReady}
+        active={view === 'record'}
+        onEnterLicense={openLicense}
+      />
+    </div>
+    {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}
+    {#if view === 'settings'}<Settings bind:this={settings} {navigationLocked} />{/if}
+  </SessionHistory>
   {#if tourOpen}{#key tourRun}<OnboardingTour onNavigate={navigate} onComplete={finishTour} />{/key}{/if}
   <p>Heartbeat: {beats}</p>
   {#if error && version}<p role="alert">{error}</p>{/if}
