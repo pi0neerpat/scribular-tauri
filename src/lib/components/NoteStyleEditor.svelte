@@ -29,6 +29,6 @@
   {:else}
     <button onclick={onSave} disabled={!dirty || !text.trim() || saving}>Save</button>
     {#if dirty}<span>Unsaved changes</span>{/if}
-    {#if onDelete}<button onclick={(event) => onDelete(event.currentTarget)}>Delete</button>{/if}
   {/if}
+  {#if onDelete}<button onclick={(event) => onDelete(event.currentTarget)}>Delete</button>{/if}
 </div>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
+  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, openSettings, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
   import type { SummaryAvailability } from '../types/SummaryAvailability';
@@ -9,6 +9,8 @@
   import SpeakersCard from './SpeakersCard.svelte';
   import StylePicker from './StylePicker.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
+  import LicenseGate from './LicenseGate.svelte';
+  import { accessState, allows } from '../license';
 
   // `active` is false while the record view is hidden behind Settings.
   let {
@@ -153,6 +155,7 @@
 
 <article>
   <h3>{session.title}</h3>
+  {#if management}<LicenseGate access={$accessState} onEnter={() => { void openSettings('License').catch((e) => (error = String(e))); }} showWarning={false} />{/if}
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
     <SummaryUnavailable />
   {:else if (summaryAvailability === 'downloading' || session.status === 'awaitingModel') && !summaryAvailabilityError}
@@ -173,10 +176,10 @@
     {#if prompts}
       <StylePicker prompts={prompts.prompts} selectedId={selectedPrompt} includeId={session.promptId} onSelect={(id) => (selectedPrompt = id)} />
     {/if}
-    <button onclick={regenerate} disabled={summaryAvailability !== 'ready' || working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
+    <button onclick={regenerate} disabled={!allows($accessState) || summaryAvailability !== 'ready' || working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
     {#if session.status === 'summarizing'}<button onclick={stop}>Stop</button>{/if}
     {#if session.status === 'awaitingModel'}<button onclick={stop}>Cancel</button>{/if}
-    {#if session.previousSummary}<button onclick={undo}>Undo</button>{/if}
+    {#if session.previousSummary}<button onclick={undo} disabled={!allows($accessState)}>Undo</button>{/if}
     {#if onDelete}
       <button onclick={deleteClick}>{confirmDelete ? 'Confirm' : 'Delete'}</button>
     {/if}

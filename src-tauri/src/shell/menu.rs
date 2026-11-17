@@ -84,17 +84,22 @@ pub fn set_state(
     recording: bool,
     recoverable: bool,
     locked: bool,
+    writable: bool,
 ) -> Result<(), String> {
     let menu = app.menu().ok_or("no app menu")?;
     for (id, enabled) in [
-        ("shell-new-recording", !locked && !recording),
+        ("shell-new-recording", writable && !locked && !recording),
         ("shell-manage-styles", !locked),
-        ("shell-blank-style", !locked && !recording),
+        ("shell-blank-style", writable && !locked && !recording),
         ("shell-find", !locked),
         ("shell-delete-all", !recording && has_sessions),
         ("shell-delete-session", !locked && selected && !recording),
         ("shell-copy-note", !locked && has_note),
-        ("shell-recover", !locked && recoverable && !recording),
+        (
+            "shell-recover",
+            writable && !locked && recoverable && !recording,
+        ),
+        ("shell-restore-sample", writable && !locked),
     ] {
         for top in menu.items().map_err(|e| e.to_string())? {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {

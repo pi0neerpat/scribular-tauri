@@ -7,6 +7,7 @@
   import type { SessionProgress } from '../types/SessionProgress';
   import SummaryPanel from './SummaryPanel.svelte';
   import TrialBadge from './TrialBadge.svelte';
+  import { accessState } from '../license';
 
   let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
     view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; recordHasNote?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
@@ -32,7 +33,7 @@
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
   let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
-  $effect(() => { void setShellMenuState({ hasSessions, selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
+  $effect(() => { $accessState; void setShellMenuState({ hasSessions, selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);

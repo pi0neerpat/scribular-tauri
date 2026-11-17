@@ -10,12 +10,19 @@
     getPromptList,
     setActivePrompt,
     setPromptStarred,
+    openSettings,
+    retrySummaryModel,
+    subscribeSummaryAvailability,
     updatePrompt,
   } from '../api';
   import type { Prompt } from '../types/Prompt';
   import type { PromptList } from '../types/PromptList';
   import NoteStyleEditor from './NoteStyleEditor.svelte';
   import StylePicker from './StylePicker.svelte';
+  import LicenseGate from './LicenseGate.svelte';
+  import SummaryUnavailable from './SummaryUnavailable.svelte';
+  import { accessState, allows } from '../license';
+  import type { SummaryAvailability } from '../types/SummaryAvailability';
 
   // `openId` of a new style not yet saved.
   const DRAFT = '';
@@ -29,6 +36,8 @@
   let deleting = $state<Prompt | null>(null);
   let error = $state<string | null>(null);
   let saving = $state(false);
+  let summaryAvailability = $state<SummaryAvailability>('downloading');
+  let summaryError = $state(false);
   let dialogElement = $state<HTMLDivElement | undefined>();
   let dialogOpener = $state<HTMLElement | null>(null);
   let dialogFallback = $state<HTMLElement | null>(null);
@@ -46,6 +55,10 @@
     void call(getPromptList);
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    let unlistenSummary: (() => void) | undefined;
+    void subscribeSummaryAvailability((state) => { if (!disposed) { summaryAvailability = state; summaryError = false; } }, () => { if (!disposed) summaryError = true; })
+      .then((remove) => { if (disposed) remove(); else unlistenSummary = remove; })
+      .catch(() => { if (!disposed) summaryError = true; });
     void getCurrentWindow().onCloseRequested((event) => {
       if (!dirty) return;
       event.preventDefault();
@@ -55,7 +68,7 @@
       if (disposed) removeListener();
       else unlisten = removeListener;
     });
-    return () => { disposed = true; unlisten?.(); };
+    return () => { disposed = true; unlisten?.(); unlistenSummary?.(); };
   });
 
   $effect(() => {
@@ -104,11 +117,12 @@
     guard(action, opener);
   }
 
-  export function newBlank() { guard(() => { edit(DRAFT); void tick().then(() => document.querySelector<HTMLElement>('[data-style-name]')?.focus()); }); }
+  export function newBlank() { if (allows($accessState)) guard(() => { edit(DRAFT); void tick().then(() => document.querySelector<HTMLElement>('[data-style-name]')?.focus()); }); }
 
   let savePromise: Promise<boolean> | null = null;
 
   function save(): Promise<boolean> {
+    if (!allows($accessState)) return Promise.resolve(false);
     if (savePromise) return savePromise;
     saving = true;
     savePromise = (async () => {
@@ -177,16 +191,24 @@
 
 <section>
   <h3>Note styles</h3>
+  <LicenseGate access={$accessState} onEnter={() => { void openSettings('License').catch((e) => (error = String(e))); }} showWarning={false} />
+  {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
+    <SummaryUnavailable />
+    {#if summaryAvailability === 'loadFailed'}<button onclick={() => { void retrySummaryModel().catch(() => (summaryError = true)); }}>Try again</button>{/if}
+  {:else if summaryAvailability === 'downloading' && !summaryError}
+    <p>Waiting for the summary model download…</p>
+  {/if}
+  {#if summaryError}<p role="alert">Couldn't check summary availability.</p>{/if}
   {#if list}
     <StylePicker
       label="Default style"
       prompts={list.prompts}
       selectedId={list.activeId}
-      onSelect={(id) => call(() => setActivePrompt(id))}
+      onSelect={(id) => { if (allows($accessState)) void call(() => setActivePrompt(id)); }}
     />
-    <button onclick={(event) => guard(() => edit(DRAFT), event.currentTarget)}>New style</button>
+    <button disabled={!allows($accessState)} onclick={(event) => guard(() => edit(DRAFT), event.currentTarget)}>New style</button>
     {#if openId === DRAFT}
-      <NoteStyleEditor bind:name bind:text readonly={false} {dirty} {saving} onSave={save} />
+      <NoteStyleEditor bind:name bind:text readonly={!allows($accessState)} {dirty} {saving} onSave={save} />
     {/if}
     {#each groups as [heading, prompts] (heading)}
       {#if prompts.length}
@@ -197,6 +219,7 @@
               <button
                 aria-label={`Toggle favourite for ${p.name}`}
                 aria-pressed={p.starred}
+                disabled={!allows($accessState)}
                 onclick={() => call(() => setPromptStarred(p.id, !p.starred))}>{p.starred ? '★' : '☆'}</button>
               <button aria-expanded={openId === p.id} onclick={(event) => guard(() => edit(openId === p.id ? null : p.id), event.currentTarget)}>
                 {p.name}
@@ -205,19 +228,19 @@
               {#if p.id === list.activeId}
                 <span>Default</span>
               {:else}
-                <button onclick={() => call(() => setActivePrompt(p.id))}>Make default</button>
+                <button disabled={!allows($accessState)} onclick={() => call(() => setActivePrompt(p.id))}>Make default</button>
               {/if}
               {#if p.description}<p>{p.description}</p>{/if}
               {#if openId === p.id}
                 <NoteStyleEditor
                   bind:name
                   bind:text
-                  readonly={p.isDefault}
+                  readonly={p.isDefault || !allows($accessState)}
                   {dirty}
                   {saving}
                   onSave={save}
-                  onDuplicate={(opener) => guard(() => duplicate(p.id), opener)}
-                  onDelete={(opener) => guard(() => {
+                  onDuplicate={allows($accessState) ? (opener) => guard(() => duplicate(p.id), opener) : undefined}
+                  onDelete={p.isDefault ? undefined : (opener) => guard(() => {
                     dialogOpener = opener.closest('li')?.querySelector<HTMLElement>('button[aria-expanded]') ?? opener;
                     dialogFallback = opener.closest('section')?.querySelector<HTMLElement>('button') ?? null;
                     edit(null);
@@ -235,7 +258,7 @@
   {#if pending}
     <div bind:this={dialogElement} role="dialog" aria-modal="true" aria-label="Discard changes?" tabindex="-1" onkeydown={dialogKeydown}>
       <p>Discard changes?</p>
-      <button onclick={() => resolve('save')} data-dialog-save>Save</button>
+      <button onclick={() => resolve('save')} disabled={!allows($accessState)} data-dialog-save>Save</button>
       <button onclick={() => resolve('discard')} disabled={saving}>Discard</button>
       <button onclick={() => resolve('cancel')} disabled={saving} data-dialog-initial-focus>Cancel</button>
     </div>
