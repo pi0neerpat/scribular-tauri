@@ -62,3 +62,22 @@ it('shows row state actions and keeps selected detail when search hides it or fa
   expect(target.querySelector('[aria-current="page"]')?.textContent).toContain('Complete');
   unmount(app);
 });
+
+it('searches the current input text on each keystroke and restores the full list when cleared', async () => {
+  const a = row('Alpha');
+  const b = row('Beta');
+  api.listSessions.mockResolvedValue([a, b]);
+  api.searchSessions.mockImplementation(async (q: string) => [a, b].filter((r) => r.title.toLowerCase().startsWith(q)));
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target });
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(2));
+  const input = target.querySelector('input[type="search"]') as HTMLInputElement;
+  const type = (v: string) => { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); };
+  type('a');
+  await vi.waitFor(() => expect(api.searchSessions).toHaveBeenLastCalledWith('a'));
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(1));
+  type('');
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(2));
+  expect(api.searchSessions).toHaveBeenCalledTimes(1);
+  unmount(app);
+});
