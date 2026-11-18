@@ -228,16 +228,24 @@ impl UpdateManager {
     }
 
     pub fn check_automatically(&self) {
-        let enabled = self
-            .store
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-            .is_some_and(|store| {
-                store
-                    .app_settings()
-                    .is_ok_and(|settings| settings.check_for_updates_automatically)
-            });
+        // No store means no saved preference, so the default (on) applies.
+        let enabled = match self.store.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            None => true,
+            Some(store) => match store.app_settings() {
+                Ok(settings) => settings.check_for_updates_automatically,
+                Err(error) => {
+                    crate::diag::log::log(
+                        "ERROR",
+                        "update",
+                        &format!(
+                            "reading automatic update preference failed ({})",
+                            crate::diag::log::kind(&error)
+                        ),
+                    );
+                    false
+                }
+            },
+        };
         if enabled {
             self.check();
         }

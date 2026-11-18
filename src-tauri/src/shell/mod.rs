@@ -1,6 +1,9 @@
 pub mod menu;
 pub mod tray;
 
+/// Shows a modal alert. `Some(false)` = first button (Return/Escape default),
+/// `Some(true)` = second button, `None` = `detail` returned `None` (alert skipped)
+/// or AppKit returned an unrecognized response.
 #[cfg(target_os = "macos")]
 pub async fn native_choice(
     app: tauri::AppHandle,

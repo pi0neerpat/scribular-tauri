@@ -14,6 +14,7 @@
     if (event.key === 'Escape' && !confirming) { event.preventDefault(); close(); }
     if (event.key !== 'Tab') return;
     const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+    if (!buttons.length) { event.preventDefault(); dialog.focus(); return; }
     const first = buttons[0];
     const last = buttons.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last?.focus(); }

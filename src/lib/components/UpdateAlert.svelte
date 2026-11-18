@@ -35,9 +35,14 @@
     let revision = 0;
     void (async () => {
       try {
-        const unlisten = await onUpdateState((next) => { revision++; updateState = next; });
+        const unlisten = await onUpdateState((next) => {
+          revision++;
+          // Keep the error only while the same ready version stays current, so it stays recoverable.
+          if (!(next.state === 'ready' && updateState.state === 'ready' && next.version === updateState.version)) error = null;
+          updateState = next;
+        });
         if (disposed) unlisten(); else remove = unlisten;
-      } catch { /* Snapshot still supplies the update state. */ }
+      } catch (e) { if (!disposed) error = `Live update events are unavailable: ${String(e)}`; }
       const snapshotRevision = revision;
       try {
         const snapshot = await getUpdateState();
@@ -48,4 +53,4 @@
   });
 </script>
 
-{#if error}<p role="alert">{error}</p>{/if}
+{#if error}<p role="alert">{error} <button onclick={() => (error = null)}>Dismiss</button></p>{/if}
