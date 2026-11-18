@@ -232,6 +232,8 @@ pub struct FakeSource {
     sink: Arc<Mutex<Option<Sink>>>,
     /// Makes `open` fail as if macOS refused access.
     pub deny: AtomicBool,
+    /// Whether this source is available to open as app audio.
+    pub available: AtomicBool,
     /// How many times `open` succeeded.
     pub opened: AtomicUsize,
 }
@@ -242,6 +244,7 @@ impl FakeSource {
             format,
             sink: Arc::default(),
             deny: AtomicBool::new(false),
+            available: AtomicBool::new(true),
             opened: AtomicUsize::new(0),
         }
     }
@@ -328,6 +331,9 @@ pub struct FakeSystemAudio {
 
 impl SystemAudio for FakeSystemAudio {
     fn list_apps(&self) -> AudioResult<Vec<AudioApp>> {
+        if !self.source.available.load(Ordering::Relaxed) {
+            return Ok(Vec::new());
+        }
         Ok(vec![AudioApp {
             name: self.app.clone(),
             sample_rate: self.source.format.sample_rate,
@@ -336,8 +342,11 @@ impl SystemAudio for FakeSystemAudio {
         }])
     }
 
-    fn open(&self, app: &str, sink: Sink) -> AudioResult<Box<dyn Capture>> {
-        if app != self.app {
+    fn open(&self, app: &str, sink: Sink, cancel: &AtomicBool) -> AudioResult<Box<dyn Capture>> {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        }
+        if app != self.app || !self.source.available.load(Ordering::Relaxed) {
             return Err(AudioError::AppNotFound(app.into()));
         }
         self.source.open(Privacy::SystemAudio, sink)

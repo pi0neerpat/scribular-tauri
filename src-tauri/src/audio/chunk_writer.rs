@@ -2,7 +2,10 @@
 //! records, so a crash loses at most the last few seconds (KTD2).
 
 use std::{
-    sync::{mpsc, Arc},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        mpsc, Arc,
+    },
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -35,80 +38,129 @@ pub fn channel_with_capacity(capacity: usize) -> (Sink, Consumer) {
     ring(capacity)
 }
 
-/// Writes until the producer is gone (the capture was dropped), then flushes
-/// the partial last chunk. Joins to the number of 16 kHz samples written.
-/// Each resampled slice also goes to `live`, for streaming transcription;
-/// if nothing receives it any more, recording carries on.
+/// The next position and the partial chunk already committed at the end of a span.
+#[derive(Clone, Default)]
+pub struct Timeline {
+    pub samples: usize,
+    tail: Vec<i16>,
+}
+
+pub struct Input {
+    pub format: Format,
+    pub consumer: Consumer,
+    pub timeline: Timeline,
+    pub level: Arc<AtomicU32>,
+    /// For app audio, maps the first batch onto the microphone's sample clock.
+    pub align: Option<Box<dyn FnOnce() -> usize + Send>>,
+}
+
+/// Flushes the final partial chunk when the capture closes. A later span can
+/// extend it, keeping the store's fixed-size chunk addressing intact.
 pub fn spawn(
     store: Arc<Store>,
     session_id: String,
     source: AudioSource,
-    format: Format,
-    mut consumer: Consumer,
-    live: mpsc::Sender<Vec<f32>>,
-) -> std::io::Result<JoinHandle<store::Result<u64>>> {
+    input: Input,
+    live: mpsc::Sender<(usize, Vec<f32>)>,
+) -> std::io::Result<JoinHandle<store::Result<Timeline>>> {
     thread::Builder::new()
         .name(format!("chunks-{}", source.as_str()))
         .spawn(move || {
+            let Input {
+                format,
+                mut consumer,
+                mut timeline,
+                level,
+                mut align,
+            } = input;
             let mut resampler = Resampler::new(format);
-            let mut pending: Vec<f32> = Vec::with_capacity(CHUNK_SAMPLES * 2);
-            let mut seq = 0u32;
-            let mut total = 0u64;
-            let mut write = |samples: &[f32], seq: &mut u32| -> store::Result<()> {
-                let pcm: Vec<i16> = samples.iter().copied().map(to_i16).collect();
-                store.append_audio_chunk(&session_id, source, *seq, &pcm)?;
-                *seq += 1;
-                total += pcm.len() as u64;
+            let mut seq = (timeline.samples / CHUNK_SAMPLES) as u32;
+            let mut saved = timeline.tail.len();
+            let mut write = |pcm: &[i16], saved: &mut usize| -> store::Result<()> {
+                if *saved == 0 {
+                    store.append_audio_chunk(&session_id, source, seq, pcm)?;
+                } else {
+                    store.extend_audio_chunk(&session_id, source, seq, pcm)?;
+                }
+                seq += 1;
+                *saved = 0;
                 Ok(())
             };
-            {
-                let mut process = |samples: &[f32]| -> store::Result<()> {
-                    let before = pending.len();
-                    resampler.process(samples, &mut pending);
-                    let _ = live.send(pending[before..].to_vec());
-                    while pending.len() >= CHUNK_SAMPLES {
-                        write(&pending[..CHUNK_SAMPLES], &mut seq)?;
-                        pending.drain(..CHUNK_SAMPLES);
+            let mut data = Vec::new();
+            let mut pcm = Vec::new();
+            let silence = [0.0; 4096];
+            loop {
+                data.clear();
+                let drained = consumer.drain(&mut data);
+                if !data.is_empty() || drained.dropped > 0 {
+                    if let Some(align) = align.take() {
+                        let offset = align();
+                        while offset > timeline.samples {
+                            let n = (offset - timeline.samples)
+                                .min(CHUNK_SAMPLES - timeline.tail.len());
+                            timeline.tail.resize(timeline.tail.len() + n, 0);
+                            timeline.samples += n;
+                            if timeline.tail.len() == CHUNK_SAMPLES {
+                                write(&timeline.tail, &mut saved)?;
+                                timeline.tail.clear();
+                            }
+                        }
                     }
-                    Ok(())
-                };
-                let mut data = Vec::new();
-                let silence = [0.0; 4096];
-                loop {
-                    data.clear();
-                    let drained = consumer.drain(&mut data);
+                    let mut process = |samples: &[f32], meter: bool| -> store::Result<()> {
+                        pcm.clear();
+                        resampler.process(samples, &mut pcm);
+                        if pcm.is_empty() {
+                            return Ok(());
+                        }
+                        if meter {
+                            let rms = crate::stt::stream::rms(&pcm);
+                            if rms.is_finite() {
+                                level.fetch_max(rms.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+                            }
+                        }
+                        let start = timeline.samples;
+                        while timeline.samples - start < pcm.len() {
+                            let from = timeline.samples - start;
+                            let n = (pcm.len() - from).min(CHUNK_SAMPLES - timeline.tail.len());
+                            timeline
+                                .tail
+                                .extend(pcm[from..from + n].iter().copied().map(to_i16));
+                            timeline.samples += n;
+                            if timeline.tail.len() == CHUNK_SAMPLES {
+                                write(&timeline.tail, &mut saved)?;
+                                timeline.tail.clear();
+                            }
+                        }
+                        let _ = live.send((start, std::mem::take(&mut pcm)));
+                        Ok(())
+                    };
                     if !data.is_empty() {
-                        process(&data)?;
+                        process(&data, true)?;
                     }
-                    if drained.dropped > 0 {
+                    let mut remaining = drained.dropped;
+                    if remaining > 0 {
                         crate::diag::log::log(
                             "WARN",
                             "audio",
-                            &format!(
-                                "{} samples of {} dropped for session {}",
-                                drained.dropped,
-                                source.as_str(),
-                                session_id
-                            ),
+                            &format!("{} samples of {} dropped", remaining, source.as_str()),
                         );
-                        let mut remaining = drained.dropped;
-                        while remaining > 0 {
-                            let n = remaining.min(silence.len());
-                            process(&silence[..n])?;
-                            remaining -= n;
-                        }
                     }
-                    if drained.closed {
-                        break;
-                    }
-                    if data.is_empty() && drained.dropped == 0 {
-                        thread::sleep(POLL);
+                    while remaining > 0 {
+                        let n = remaining.min(silence.len());
+                        process(&silence[..n], false)?;
+                        remaining -= n;
                     }
                 }
+                if drained.closed {
+                    break;
+                }
+                if data.is_empty() && drained.dropped == 0 {
+                    thread::sleep(POLL);
+                }
             }
-            if !pending.is_empty() {
-                write(&pending, &mut seq)?;
+            if timeline.tail.len() > saved {
+                write(&timeline.tail, &mut saved)?;
             }
-            Ok(total)
+            Ok(timeline)
         })
 }

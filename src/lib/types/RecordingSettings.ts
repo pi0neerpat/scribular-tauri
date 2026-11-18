@@ -6,7 +6,7 @@ import type { InputMode } from "./InputMode";
  */
 export type RecordingSettings = { inputMode: InputMode, 
 /**
- * The app whose audio `System` and `MicAndSystem` capture.
+ * The app whose audio `MicAndSystem` captures.
  */
 targetApp: string | null, promptId: string | null, 
 /**

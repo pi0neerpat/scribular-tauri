@@ -52,7 +52,6 @@
 
   const modes: [InputMode, string][] = [
     ['mic', 'Microphone'],
-    ['system', 'App audio'],
     ['micAndSystem', 'Microphone and app audio'],
   ];
 

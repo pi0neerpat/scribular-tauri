@@ -8,16 +8,18 @@ use std::{
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, RecvTimeoutError, TryRecvError},
-        Arc, Mutex, MutexGuard,
+        mpsc::{self, TryRecvError},
+        Arc, Condvar, Mutex, MutexGuard,
     },
     thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use super::summarize::ms;
-use super::{JobEvents, JobQueue, SessionProgress, SessionSegments, TranscriptWaiting};
-use crate::audio::{chunk_writer, AudioError, Capture, Microphone, SystemAudio};
+use super::{
+    JobEvents, JobQueue, RecordingState, SessionProgress, SessionSegments, TranscriptWaiting,
+};
+use crate::audio::{AudioError, Microphone, SystemAudio};
 use crate::diarize::SpeakerEmbedderLoader;
 use crate::store::{
     self, AudioSource, InputMode, NewSession, Session, SessionStatus, Store, StoreError, Timings,
@@ -36,6 +38,8 @@ pub enum RecordError {
     SpeechModelNotReady,
     /// System audio was asked for without an app to capture.
     NoTargetApp,
+    UnsupportedMode,
+    Interrupted,
     Audio(AudioError),
     Store(StoreError),
 }
@@ -46,7 +50,9 @@ impl fmt::Display for RecordError {
             Self::AlreadyRecording => f.write_str("a recording is already running"),
             Self::NotRecording => f.write_str("nothing is recording"),
             Self::SpeechModelNotReady => f.write_str("The speech model isn't downloaded yet."),
-            Self::NoTargetApp => f.write_str("choose an app to record in Settings"),
+            Self::NoTargetApp => f.write_str("Choose an app to record."),
+            Self::UnsupportedMode => f.write_str("Choose In the room or On a call to record."),
+            Self::Interrupted => f.write_str("Recording stopped. Saved audio can be recovered."),
             Self::Audio(e) => e.fmt(f),
             Self::Store(e) => e.fmt(f),
         }
@@ -82,59 +88,56 @@ fn sources(mode: InputMode) -> &'static [AudioSource] {
     }
 }
 
-/// How often a recording checks that its sources still write.
-const WATCH_INTERVAL: Duration = Duration::from_millis(250);
+mod capture;
 
-/// A source's streaming transcription; joins to its windows still queued.
-type Streamer = JoinHandle<Result<Stream, String>>;
+use capture::{Recording, Source, Streamer};
 
-struct Source {
-    source: AudioSource,
-    capture: Box<dyn Capture>,
-    writer: JoinHandle<store::Result<u64>>,
-    streamer: Streamer,
+#[derive(Default)]
+struct Transcription {
+    cancelled: AtomicBool,
+    store_failed: AtomicBool,
+    live: Mutex<LiveTranscription>,
+    changed: Condvar,
 }
 
-impl Source {
-    /// Stops capturing and waits for the last chunk to be written. Returns
-    /// the 16 kHz samples stored, and the streamer, which ends once it has
-    /// taken the last of the audio.
-    fn finish(self) -> (Result<u64, String>, Streamer) {
-        drop(self.capture);
-        let written = match self.writer.join() {
-            Ok(written) => written.map_err(|e| e.to_string()),
-            Err(_) => Err("the audio writer crashed".into()),
-        };
-        (written, self.streamer)
+#[derive(Default)]
+struct LiveTranscription {
+    paused: bool,
+    window_cancel: Arc<AtomicBool>,
+}
+
+impl Transcription {
+    fn pause(&self) {
+        let mut live = lock(&self.live);
+        live.paused = true;
+        live.window_cancel.store(true, Ordering::Relaxed);
     }
-}
 
-struct Recording {
-    session_id: String,
-    multi_speaker: bool,
-    sources: Vec<Source>,
-    /// Stops the streamers of a recording that is abandoned or, once
-    /// stopped, cancelled.
-    cancel: Arc<AtomicBool>,
-    /// Dropped with the recording, which ends its watchdog.
-    _watched: mpsc::Sender<()>,
-}
-
-/// Stops `sources` without transcribing what they recorded. With `wait`,
-/// returns once their streamers have stopped too.
-fn abandon(sources: Vec<Source>, cancel: &AtomicBool, wait: bool) -> Option<String> {
-    cancel.store(true, Ordering::Relaxed);
-    let mut error = None;
-    for source in sources {
-        let (written, streamer) = source.finish();
-        if let Err(e) = written {
-            error.get_or_insert(e);
-        }
-        if wait {
-            let _ = streamer.join();
+    fn resume(&self) {
+        let mut live = lock(&self.live);
+        if live.paused {
+            live.window_cancel = Arc::default();
+            live.paused = false;
+            self.changed.notify_all();
         }
     }
-    error
+
+    fn cancel(&self) {
+        let live = lock(&self.live);
+        self.cancelled.store(true, Ordering::Relaxed);
+        live.window_cancel.store(true, Ordering::Relaxed);
+        self.changed.notify_all();
+    }
+
+    fn running(&self) -> Option<MutexGuard<'_, LiveTranscription>> {
+        let live = self
+            .changed
+            .wait_while(lock(&self.live), |live| {
+                live.paused && !self.cancelled.load(Ordering::Relaxed)
+            })
+            .unwrap_or_else(|p| p.into_inner());
+        (!self.cancelled.load(Ordering::Relaxed)).then_some(live)
+    }
 }
 
 /// Whisper is unloaded at 8 GiB regardless of the summary model's RAM gate.
@@ -148,7 +151,7 @@ fn low_memory() -> bool {
 #[derive(Default)]
 struct State {
     /// Cancel flags of sessions being transcribed.
-    finalizing: HashMap<String, Arc<AtomicBool>>,
+    finalizing: HashMap<String, Arc<Transcription>>,
     shutdown: bool,
 }
 
@@ -302,93 +305,98 @@ impl Recorder {
         Ok(operation())
     }
 
-    /// Creates a session in `Recording` and starts every source `mode`
-    /// needs. If a source fails to start, the session is deleted again.
+    pub fn recording_state(&self) -> Option<RecordingState> {
+        lock(&self.inner.recording)
+            .as_ref()
+            .map(Recording::snapshot)
+    }
+
+    /// Creates a session and starts the microphone. App audio attaches in the background.
     pub fn start(
         &self,
         mode: InputMode,
         app: Option<&str>,
         title: &str,
     ) -> Result<Session, RecordError> {
+        let target_app = match mode {
+            InputMode::Mic => None,
+            InputMode::System => return Err(RecordError::UnsupportedMode),
+            InputMode::MicAndSystem => Some(
+                app.filter(|app| !app.trim().is_empty() && !app.contains('\0'))
+                    .ok_or(RecordError::NoTargetApp)?
+                    .to_owned(),
+            ),
+        };
         let _gate = lock(&self.install_gate);
         let inner = &self.inner;
         if !inner.stt.ready() {
             return Err(RecordError::SpeechModelNotReady);
         }
-        let mut recording = lock(&inner.recording);
-        if recording.is_some() {
+        let mut current = lock(&inner.recording);
+        if current.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        let app = app.filter(|a| !a.is_empty());
-        let multi_speaker = inner.store.recording_settings()?.multi_speaker;
-        if sources(mode).contains(&AudioSource::System) && app.is_none() {
-            return Err(RecordError::NoTargetApp);
-        }
+        let settings = inner.store.recording_settings()?;
+        let mic = Source::prepare(|sink| inner.mic.open(sink))?;
         let session = inner.store.create_session(&NewSession {
             title: title.into(),
             input_mode: mode,
-            prompt_id: inner.store.get_setting(ACTIVE_PROMPT_ID)?,
+            prompt_id: settings.prompt_id,
             model_id: None,
         })?;
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mut started = Vec::new();
-        for &source in sources(mode) {
-            match inner.open(&session.id, source, app, &cancel) {
-                Ok(s) => started.push(s),
-                Err(e) => {
-                    // Not waiting: a streamer may be loading whisper.
-                    abandon(started, &cancel, false);
+        let recording =
+            match Recording::start(inner, &session.id, settings.multi_speaker, target_app, mic) {
+                Ok(recording) => recording,
+                Err(error) => {
                     if let Err(e) = inner.store.delete_session(&session.id) {
-                        crate::diag::log::log(
-                            "ERROR",
-                            "recording",
-                            &format!(
-                                "deleting failed recording {} ({})",
-                                session.id,
-                                crate::diag::log::kind(&e)
-                            ),
-                        );
+                        crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&e));
                     }
-                    return Err(e);
+                    return Err(error);
                 }
-            }
-        }
-        let (watched, unwatched) = mpsc::channel();
-        let watchdog = {
-            let inner = Arc::clone(inner);
-            let id = session.id.clone();
-            std::thread::Builder::new()
-                .name("record-watch".into())
-                .spawn(move || inner.watch(&id, &unwatched))
-        };
-        if let Err(e) = watchdog {
-            abandon(started, &cancel, false);
-            if let Err(e) = inner.store.delete_session(&session.id) {
-                crate::diag::log::log(
-                    "ERROR",
-                    "recording",
-                    &format!(
-                        "deleting failed recording {} ({})",
-                        session.id,
-                        crate::diag::log::kind(&e)
-                    ),
-                );
-            }
-            return Err(e.into());
-        }
+            };
         lock(&inner.transcript_waiting).clear();
         lock(&inner.transcript_started).clear();
-        *recording = Some(Recording {
-            session_id: session.id.clone(),
-            multi_speaker,
-            sources: started,
-            cancel,
-            _watched: watched,
-        });
-        inner.events.recording_changed(true, multi_speaker);
-        drop(recording);
+        inner.events.recording_changed(true, settings.multi_speaker);
+        inner.events.recording_state(Some(recording.snapshot()));
+        *current = Some(recording);
         inner.emit(&session.id, SessionStatus::Recording, "Recording...");
         Ok(session)
+    }
+
+    pub fn pause(&self) -> Result<(), RecordError> {
+        let mut current = lock(&self.inner.recording);
+        let recording = current.as_mut().ok_or(RecordError::NotRecording)?;
+        if !recording.running() {
+            return Ok(());
+        }
+        if let Err(error) = recording.pause(&self.inner) {
+            self.inner
+                .interrupt(current.take().expect("active recording"), error);
+            return Err(RecordError::Interrupted);
+        }
+        self.inner
+            .events
+            .recording_state(Some(recording.snapshot()));
+        Ok(())
+    }
+
+    pub fn resume(&self) -> Result<(), RecordError> {
+        let mut current = lock(&self.inner.recording);
+        let recording = current.as_mut().ok_or(RecordError::NotRecording)?;
+        if recording.running() {
+            return Ok(());
+        }
+        if let Err(error) = recording.resume(&self.inner) {
+            self.inner.interrupt(
+                current.take().expect("active recording"),
+                "Recording stopped: couldn't resume the microphone.",
+            );
+            return Err(error);
+        }
+        self.inner
+            .events
+            .recording_state(Some(recording.snapshot()));
+        Ok(())
     }
 
     /// Stops the recording and transcribes it in the background. Returns
@@ -401,52 +409,55 @@ impl Recorder {
         let _gate = lock(&self.install_gate);
         let inner = &self.inner;
         let mut current = lock(&inner.recording);
-        let recording = current.take().ok_or(RecordError::NotRecording)?;
-        inner.events.recording_changed(false, false);
-        drop(current);
-        let id = recording.session_id;
+        let mut recording = current.take().ok_or(RecordError::NotRecording)?;
+        inner.recording_ended();
+        let id = recording.session_id.clone();
         let diarize = recording.multi_speaker && num_speakers != Some(0);
-        let mut samples = 0;
-        let mut failure = None;
-        let mut streamers = Vec::new();
-        for source in recording.sources {
-            let (written, streamer) = source.finish();
-            match written {
-                Ok(n) => samples = samples.max(n),
-                Err(e) => {
-                    failure.get_or_insert(e);
-                }
-            }
-            streamers.push(streamer);
+        if let Err(error) = recording.close(inner) {
+            inner.interrupt_audio(&id, error, &recording.transcription);
+            return Ok(id);
         }
-        if failure.is_some() || samples == 0 {
-            recording.cancel.store(true, Ordering::Relaxed);
-            // The chunks already written stay for a retry.
-            let e = failure.unwrap_or_else(|| "no audio was recorded".into());
-            inner.end(&id, SessionStatus::Failed, &e);
+        let samples = recording.samples();
+        if samples == 0 {
+            recording.transcription.cancel();
+            inner.end(&id, SessionStatus::Failed, "no audio was recorded");
             return Ok(id);
         }
         let duration_ms =
-            u32::try_from(samples * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
-
-        // The streamers' flag, so a cancel also stops the window in flight.
-        let cancel = Arc::clone(&recording.cancel);
+            u32::try_from(samples as u64 * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
+        let transcription = recording.transcription;
+        let streamers = recording.streamers;
         lock(&inner.state)
             .finalizing
-            .insert(id.clone(), Arc::clone(&cancel));
+            .insert(id.clone(), Arc::clone(&transcription));
         if let Err(e) = inner.store.set_status(&id, SessionStatus::Finalizing, None) {
             lock(&inner.state).finalizing.remove(&id);
+            inner.interrupt_audio(
+                &id,
+                "Recording stopped: couldn't save the session.",
+                &transcription,
+            );
             return Err(e.into());
         }
+        drop(current);
         inner.emit(&id, SessionStatus::Finalizing, "Transcribing...");
+        transcription.resume();
 
         let worker = {
             let inner = Arc::clone(inner);
             let id = id.clone();
+            let transcription = Arc::clone(&transcription);
             std::thread::Builder::new()
                 .name("finalize".into())
                 .spawn(move || {
-                    inner.finalize(&id, duration_ms, streamers, &cancel, diarize, num_speakers);
+                    inner.finalize(
+                        &id,
+                        duration_ms,
+                        streamers,
+                        &transcription,
+                        diarize,
+                        num_speakers,
+                    );
                     lock(&inner.state).finalizing.remove(&id);
                 })
         };
@@ -458,7 +469,12 @@ impl Recorder {
             }
             Err(e) => {
                 lock(&inner.state).finalizing.remove(&id);
-                inner.end(&id, SessionStatus::Failed, &e.to_string());
+                crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&e));
+                inner.interrupt_audio(
+                    &id,
+                    "Recording stopped: couldn't start transcription.",
+                    &transcription,
+                );
             }
         }
         Ok(id)
@@ -468,7 +484,7 @@ impl Recorder {
     /// its summary job. Returns whether it had either.
     pub fn cancel(&self, session_id: &str) -> bool {
         if let Some(flag) = lock(&self.inner.state).finalizing.get(session_id) {
-            flag.store(true, Ordering::Relaxed);
+            flag.cancel();
             return true;
         }
         self.inner.jobs.cancel(session_id)
@@ -493,7 +509,7 @@ impl Recorder {
         {
             return Err("only interrupted sessions with saved audio can be recovered".into());
         }
-        let cancel = Arc::new(AtomicBool::new(false));
+        let transcription = Arc::new(Transcription::default());
         if !self
             .inner
             .store
@@ -504,7 +520,7 @@ impl Recorder {
         }
         state
             .finalizing
-            .insert(session_id.into(), Arc::clone(&cancel));
+            .insert(session_id.into(), Arc::clone(&transcription));
         drop(state);
         self.inner.emit(
             session_id,
@@ -516,7 +532,7 @@ impl Recorder {
         let worker = std::thread::Builder::new()
             .name("recover-session".into())
             .spawn(move || {
-                inner.recover(&id, &cancel);
+                inner.recover(&id, &transcription);
                 lock(&inner.state).finalizing.remove(&id);
             });
         let worker = match worker {
@@ -546,12 +562,16 @@ impl Recorder {
             }
             state.shutdown = true;
             for flag in state.finalizing.values() {
-                flag.store(true, Ordering::Relaxed);
+                flag.cancel();
             }
         }
         let recording = lock(&self.inner.recording).take();
-        if let Some(recording) = recording {
-            abandon(recording.sources, &recording.cancel, true);
+        if let Some(mut recording) = recording {
+            recording.transcription.cancel();
+            let _ = recording.close(&self.inner);
+            for (_, streamer) in recording.streamers {
+                let _ = streamer.join();
+            }
         }
         for worker in lock(&self.finalizers).drain(..) {
             let _ = worker.join();
@@ -569,7 +589,8 @@ impl Drop for Recorder {
 }
 
 impl Inner {
-    fn recover(&self, id: &str, cancel: &AtomicBool) {
+    fn recover(&self, id: &str, transcription: &Transcription) {
+        let cancel = &transcription.cancelled;
         let insufficient = crate::text::ChunkError::InsufficientAudio.to_string();
         let failed = |inner: &Self, message: &str| {
             let persisted = if message == insufficient {
@@ -617,7 +638,7 @@ impl Inner {
                     Ok(s) => s,
                     Err(e) => return failed(self, &e),
                 };
-                match self.window(id, source, &mut stream, &window, &*stt, cancel) {
+                match self.window(id, source, &mut stream, &window, &*stt, transcription) {
                     Ok(true) => {}
                     Ok(false) => return failed(self, store::INTERRUPTED),
                     Err(e) => return failed(self, &e),
@@ -727,54 +748,6 @@ impl Inner {
         }
     }
 
-    fn open(
-        self: &Arc<Self>,
-        session_id: &str,
-        source: AudioSource,
-        app: Option<&str>,
-        cancel: &Arc<AtomicBool>,
-    ) -> Result<Source, RecordError> {
-        let (sink, audio_in) = chunk_writer::channel();
-        let (live, audio) = mpsc::channel();
-        let capture = match source {
-            AudioSource::Mic => self.mic.open(sink)?,
-            AudioSource::System => self
-                .system
-                .open(app.ok_or(RecordError::NoTargetApp)?, sink)?,
-        };
-        let format = capture.format();
-        // A zero rate would stall the resampler forever.
-        if format.sample_rate == 0 {
-            return Err(AudioError::Device(format!(
-                "{} reports a 0 Hz sample rate",
-                source.as_str()
-            ))
-            .into());
-        }
-        let writer = chunk_writer::spawn(
-            Arc::clone(&self.store),
-            session_id.into(),
-            source,
-            format,
-            audio_in,
-            live,
-        )?;
-        let streamer = {
-            let inner = Arc::clone(self);
-            let id = session_id.to_owned();
-            let cancel = Arc::clone(cancel);
-            std::thread::Builder::new()
-                .name(format!("stream-{}", source.as_str()))
-                .spawn(move || inner.stream(&id, source, &audio, &cancel))?
-        };
-        Ok(Source {
-            source,
-            capture,
-            writer,
-            streamer,
-        })
-    }
-
     /// Whisper, loading it if no recording has yet.
     fn transcriber(&self, id: &str, cancel: &AtomicBool) -> Result<Arc<dyn Transcriber>, String> {
         if self.unload_whisper.load(Ordering::Relaxed) {
@@ -831,26 +804,31 @@ impl Inner {
         &self,
         id: &str,
         source: AudioSource,
-        audio: &mpsc::Receiver<Vec<f32>>,
-        cancel: &AtomicBool,
+        audio: &mpsc::Receiver<(usize, Vec<f32>)>,
+        transcription: &Transcription,
     ) -> Result<Stream, String> {
+        let cancel = &transcription.cancelled;
         let stt = match self.transcriber(id, cancel) {
             Ok(stt) => stt,
             Err(_) if cancel.load(Ordering::Relaxed) => return Ok(Stream::default()),
             Err(e) => return Err(e),
         };
-        let mut stream = Stream::default();
+        let Ok((start, samples)) = audio.recv() else {
+            return Ok(Stream::default());
+        };
+        let mut stream = Stream::at(start);
+        stream.push(&samples);
         let mut catching_up = false;
         loop {
             if stream.queued() == 0 {
-                let Ok(samples) = audio.recv() else {
+                let Ok((_, samples)) = audio.recv() else {
                     return Ok(stream);
                 };
                 stream.push(&samples);
             }
             loop {
                 match audio.try_recv() {
-                    Ok(samples) => stream.push(&samples),
+                    Ok((_, samples)) => stream.push(&samples),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => return Ok(stream),
                 }
@@ -867,14 +845,17 @@ impl Inner {
                 };
                 // Only while still recording, so the row matches the event.
                 let recording = lock(&self.recording);
-                if recording.as_ref().is_some_and(|r| r.session_id == id) {
+                if recording
+                    .as_ref()
+                    .is_some_and(|r| r.session_id == id && r.running())
+                {
                     self.emit(id, SessionStatus::Recording, message);
                 }
             }
             let Some(window) = stream.next() else {
                 continue;
             };
-            if !self.window(id, source, &mut stream, &window, &*stt, cancel)? {
+            if !self.window(id, source, &mut stream, &window, &*stt, transcription)? {
                 return Ok(stream);
             }
         }
@@ -889,29 +870,47 @@ impl Inner {
         stream: &mut Stream,
         window: &Window,
         stt: &dyn Transcriber,
-        cancel: &AtomicBool,
+        transcription: &Transcription,
     ) -> Result<bool, String> {
-        let segments = {
-            let _turn = lock(&self.transcribing);
-            stream.transcribe(window, stt, cancel)
-        };
-        let segments = match segments {
-            Ok(segments) => segments,
-            Err(SttError::Cancelled) => return Ok(false),
-            Err(e) => return Err(e.to_string()),
+        let segments = loop {
+            let Some(running) = transcription.running() else {
+                return Ok(false);
+            };
+            let cancel = Arc::clone(&running.window_cancel);
+            drop(running);
+            let segments = {
+                let _turn = lock(&self.transcribing);
+                if cancel.load(Ordering::Relaxed) {
+                    continue;
+                }
+                stream.transcribe(window, stt, &cancel)
+            };
+            match segments {
+                Ok(segments) => break segments,
+                Err(SttError::Cancelled) if cancel.load(Ordering::Relaxed) => continue,
+                Err(SttError::Cancelled) => return Ok(false),
+                Err(e) => return Err(e.to_string()),
+            }
         };
         if segments.is_empty() {
             return Ok(true);
         }
+        // Serialize segment commits with pause. A window that just finished
+        // when pause arrived can publish its result after resume.
+        let Some(_running) = transcription.running() else {
+            return Ok(false);
+        };
         for s in &segments {
             let segment = Segment {
                 start_ms: s.start_ms,
                 end_ms: s.end_ms,
                 text: Some(s.text.clone()),
             };
-            self.store
-                .add_segment(id, source, &segment)
-                .map_err(|e| e.to_string())?;
+            self.store.add_segment(id, source, &segment).map_err(|e| {
+                transcription.store_failed.store(true, Ordering::Relaxed);
+                crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&e));
+                "Couldn't save transcript segments.".to_owned()
+            })?;
         }
         self.events.segments(SessionSegments {
             session_id: id.into(),
@@ -919,39 +918,6 @@ impl Inner {
             segments,
         });
         Ok(true)
-    }
-
-    /// Fails the recording of `id` as soon as one of its sources stops
-    /// writing — the device or app went away, or a chunk failed to save —
-    /// keeping the chunks written so far. Returns when the recording ends.
-    fn watch(&self, id: &str, recording_ends: &mpsc::Receiver<()>) {
-        while let Err(RecvTimeoutError::Timeout) = recording_ends.recv_timeout(WATCH_INTERVAL) {
-            let mut current = lock(&self.recording);
-            let stopped = current.as_ref().and_then(|r| {
-                (r.session_id == id)
-                    .then(|| r.sources.iter().find(|s| s.writer.is_finished()))
-                    .flatten()
-                    .map(|s| s.source)
-            });
-            let Some(stopped) = stopped else { continue };
-            let Some(recording) = current.take() else {
-                return;
-            };
-            // Marked before `recording` unlocks, so `is_busy` covers the teardown.
-            lock(&self.state)
-                .finalizing
-                .insert(id.into(), Arc::clone(&recording.cancel));
-            self.events.recording_changed(false, false);
-            drop(current);
-            let error = abandon(recording.sources, &recording.cancel, true);
-            let error = error.unwrap_or_else(|| match stopped {
-                AudioSource::Mic => "recording stopped: the microphone was lost".into(),
-                AudioSource::System => "recording stopped: the app's audio ended".into(),
-            });
-            self.end(id, SessionStatus::Failed, &error);
-            lock(&self.state).finalizing.remove(id);
-            return;
-        }
     }
 
     /// Writes the status row, then emits the matching event.
@@ -988,28 +954,44 @@ impl Inner {
         id: &str,
         duration_ms: u32,
         streamers: Vec<Streamer>,
-        cancel: &AtomicBool,
+        transcription: &Transcription,
         diarize: bool,
         num_speakers: Option<u8>,
     ) {
+        let cancel = &transcription.cancelled;
         let started = Instant::now();
         // The summary model loads while the tail transcribes (M5b).
         self.jobs.preload();
-        let drained = self.drain(id, streamers, cancel);
+        let drained = self.drain(id, streamers, transcription);
+        if transcription.store_failed.load(Ordering::Relaxed) {
+            return self.interrupt_audio(id, "Couldn't save transcript segments.", transcription);
+        }
         if self.unload_whisper.load(Ordering::Relaxed) && lock(&self.recording).is_none() {
             lock(&self.model).take();
         }
         let (transcript, partial) =
             match drained.and_then(|partial| self.transcript(id).map(|t| (t, partial))) {
                 Ok(t) => t,
-                Err(e) => return self.end(id, SessionStatus::Failed, &e),
+                Err(_) => {
+                    return self.interrupt_audio(
+                        id,
+                        "Couldn't finish transcribing. Saved audio can be recovered.",
+                        transcription,
+                    )
+                }
             };
         if lock(&self.state).shutdown {
             return;
         }
         let session = match self.session(id) {
             Ok(s) => s,
-            Err(e) => return self.end(id, SessionStatus::Failed, &e),
+            Err(_) => {
+                return self.interrupt_audio(
+                    id,
+                    "Couldn't load the session for transcription.",
+                    transcription,
+                )
+            }
         };
         let diarization = if diarize {
             self.emit(id, SessionStatus::Finalizing, "Identifying speakers…");
@@ -1074,7 +1056,8 @@ impl Inner {
             None => self.store.save_transcript(id, &transcript, duration_ms),
         };
         if let Err(e) = saved {
-            return self.end(id, SessionStatus::Failed, &e.to_string());
+            crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&e));
+            return self.interrupt_audio(id, "Couldn't save the transcript.", transcription);
         }
         crate::diag::telemetry::record_session(Arc::clone(&self.store), duration_ms);
         let timings = Timings {
@@ -1126,20 +1109,25 @@ impl Inner {
     fn drain(
         &self,
         id: &str,
-        streamers: Vec<Streamer>,
-        cancel: &AtomicBool,
+        mut streamers: Vec<Streamer>,
+        transcription: &Transcription,
     ) -> Result<bool, String> {
+        streamers.sort_by_key(|(source, _)| *source != AudioSource::System);
         // Joined first, so none outlives a failure.
-        let streams: Vec<Result<Stream, String>> = streamers
+        let streams: Vec<_> = streamers
             .into_iter()
-            .map(|s| {
-                s.join()
-                    .unwrap_or_else(|_| Err("the transcriber crashed".into()))
+            .map(|(source, streamer)| {
+                (
+                    source,
+                    streamer
+                        .join()
+                        .unwrap_or_else(|_| Err("the transcriber crashed".into())),
+                )
             })
             .collect();
-        let session = self.session(id)?;
+        let cancel = &transcription.cancelled;
         let mut partial = false;
-        for (&source, stream) in sources(session.input_mode).iter().zip(streams) {
+        for (source, stream) in streams {
             let mut stream = stream?;
             stream.finish();
             while !partial {
@@ -1151,7 +1139,7 @@ impl Inner {
                 // Loaded on demand: a recording that streamed every window
                 // needs no model here.
                 let stt = self.transcriber(id, cancel)?;
-                partial = !self.window(id, source, &mut stream, &window, &*stt, cancel)?;
+                partial = !self.window(id, source, &mut stream, &window, &*stt, transcription)?;
             }
         }
         Ok(partial)

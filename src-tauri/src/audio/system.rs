@@ -33,7 +33,7 @@ pub struct AudioApp {
 pub trait SystemAudio: Send + Sync {
     fn list_apps(&self) -> Result<Vec<AudioApp>>;
     /// Captures `app`, which must appear in `list_apps`.
-    fn open(&self, app: &str, sink: Sink) -> Result<Box<dyn Capture>>;
+    fn open(&self, app: &str, sink: Sink, cancel: &AtomicBool) -> Result<Box<dyn Capture>>;
 }
 
 pub struct AudioCapCli {
@@ -55,30 +55,75 @@ impl AudioCapCli {
             path: dir.join("AudioCapCLI"),
         })
     }
+
+    fn sources(&self, cancel: &AtomicBool) -> Result<Vec<AudioApp>> {
+        check_cancel(cancel)?;
+        let mut child = Command::new(&self.path)
+            .arg("--list-sources")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdout = child.stdout.take().expect("stdout is piped");
+        let mut stderr = child.stderr.take().expect("stderr is piped");
+        let (status, stdout, stderr) = thread::scope(|scope| {
+            let output = scope.spawn(move || {
+                let mut text = Vec::new();
+                stdout.read_to_end(&mut text).map(|_| text)
+            });
+            let errors = scope.spawn(move || {
+                let mut text = Vec::new();
+                stderr.read_to_end(&mut text).map(|_| text)
+            });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let status = (|| loop {
+                check_cancel(cancel)?;
+                if let Some(status) = child.try_wait()? {
+                    break Ok(status);
+                }
+                if Instant::now() >= deadline {
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "listing audio sources timed out",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(20));
+            })();
+            if status.is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Ok::<_, std::io::Error>((
+                status?,
+                output.join().expect("source stdout reader")?,
+                errors.join().expect("source stderr reader")?,
+            ))
+        })?;
+        if is_permission_denied(&String::from_utf8_lossy(&stderr)) {
+            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+        }
+        if !status.success() {
+            return Err(AudioError::Device("couldn't list app audio sources".into()));
+        }
+        Ok(parse_sources(&String::from_utf8_lossy(&stdout)))
+    }
+}
+
+fn check_cancel(cancel: &AtomicBool) -> std::io::Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(std::io::ErrorKind::Interrupted.into());
+    }
+    Ok(())
 }
 
 impl SystemAudio for AudioCapCli {
     fn list_apps(&self) -> Result<Vec<AudioApp>> {
-        let out = Command::new(&self.path)
-            .arg("--list-sources")
-            .stdin(Stdio::null())
-            .output()?;
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if is_permission_denied(&stderr) {
-            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
-        }
-        if !out.status.success() {
-            return Err(AudioError::Device(format!(
-                "AudioCapCLI --list-sources failed: {}",
-                stderr.trim()
-            )));
-        }
-        Ok(parse_sources(&String::from_utf8_lossy(&out.stdout)))
+        self.sources(&AtomicBool::new(false))
     }
 
-    fn open(&self, app: &str, mut sink: Sink) -> Result<Box<dyn Capture>> {
+    fn open(&self, app: &str, mut sink: Sink, cancel: &AtomicBool) -> Result<Box<dyn Capture>> {
         let found = self
-            .list_apps()?
+            .sources(cancel)?
             .into_iter()
             .find(|a| a.name == app)
             .ok_or_else(|| AudioError::AppNotFound(app.to_owned()))?;
@@ -86,6 +131,7 @@ impl SystemAudio for AudioCapCli {
             sample_rate: found.sample_rate,
             channels: found.channels,
         };
+        check_cancel(cancel)?;
         let child = Command::new(&self.path)
             .args(["--source", app])
             // Match Electron's spawn default: AudioCapCLI delivers no PCM
@@ -138,17 +184,19 @@ impl SystemAudio for AudioCapCli {
 
         let deadline = Instant::now() + STARTUP_GRACE;
         while Instant::now() < deadline && !flowing.load(Ordering::Relaxed) {
+            check_cancel(cancel)?;
             if capture.child.try_wait()?.is_some() {
                 drop(capture);
                 let errors = errors.lock().unwrap_or_else(|e| e.into_inner());
                 return Err(if is_permission_denied(&errors) {
                     AudioError::PermissionDenied(Privacy::SystemAudio)
                 } else {
-                    AudioError::Device(format!("AudioCapCLI exited: {}", errors.trim()))
+                    AudioError::Device("app audio capture ended during startup".into())
                 });
             }
             thread::sleep(Duration::from_millis(20));
         }
+        check_cancel(cancel)?;
         Ok(Box::new(capture))
     }
 }
@@ -307,7 +355,7 @@ mod tests {
             path: fixture.0.clone(),
         };
         let (sink, mut consumer) = super::super::ring::ring(64);
-        let capture = cli.open("Fixture", sink).unwrap();
+        let capture = cli.open("Fixture", sink, &AtomicBool::new(false)).unwrap();
         assert_eq!(
             capture.format(),
             Format {
@@ -350,7 +398,7 @@ mod tests {
             path: root.join("binaries/AudioCapCLI-aarch64-apple-darwin"),
         };
         let (sink, mut consumer) = super::super::ring::ring(1 << 20);
-        let capture = cli.open("afplay", sink).unwrap();
+        let capture = cli.open("afplay", sink, &AtomicBool::new(false)).unwrap();
         let mut samples = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {

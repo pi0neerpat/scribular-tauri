@@ -73,13 +73,18 @@ fn a_writer_that_falls_behind_pads_the_dropped_audio_with_silence() {
         store.clone(),
         id.clone(),
         AudioSource::Mic,
-        FORMAT,
-        consumer,
+        chunk_writer::Input {
+            format: FORMAT,
+            consumer,
+            timeline: Default::default(),
+            level: Arc::default(),
+            align: None,
+        },
         live,
     )
     .unwrap();
     drop(sink);
-    assert_eq!(writer.join().unwrap().unwrap(), 2000);
+    assert_eq!(writer.join().unwrap().unwrap().samples, 2000);
     let samples = store.audio_samples(&id, AudioSource::Mic).unwrap();
     assert_eq!(samples.len(), 2000);
     assert!(samples[..1000].iter().all(|&s| s == to_i16(0.5)));
@@ -97,8 +102,13 @@ fn a_writer_that_keeps_up_loses_nothing() {
         store.clone(),
         id.clone(),
         AudioSource::Mic,
-        FORMAT,
-        consumer,
+        chunk_writer::Input {
+            format: FORMAT,
+            consumer,
+            timeline: Default::default(),
+            level: Arc::default(),
+            align: None,
+        },
         live,
     )
     .unwrap();
@@ -108,7 +118,7 @@ fn a_writer_that_keeps_up_loses_nothing() {
         }
     }
     drop(sink);
-    assert_eq!(writer.join().unwrap().unwrap(), 14_000);
+    assert_eq!(writer.join().unwrap().unwrap().samples, 14_000);
     let samples = store.audio_samples(&id, AudioSource::Mic).unwrap();
     assert_eq!(samples.len(), 14_000);
     assert!(samples.iter().all(|&s| s == to_i16(0.5)));
