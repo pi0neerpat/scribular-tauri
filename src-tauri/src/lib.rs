@@ -109,10 +109,7 @@ pub fn run() {
     diag::panic::install();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            shell::show_main(app);
         }))
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
@@ -133,6 +130,7 @@ pub fn run() {
             commands::app_version,
             commands::open_settings,
             commands::set_shell_menu_state,
+            commands::set_main_window_visible,
             commands::get_onboarding_state,
             commands::complete_onboarding,
             commands::restore_sample_sessions,
@@ -419,10 +417,14 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                shell::show_main(app);
+            }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } if label == "settings" => {
+                let _ = shell::hide_dock_if_no_windows(app);
             }
             _ => {}
         });

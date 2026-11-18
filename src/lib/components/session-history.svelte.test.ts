@@ -57,6 +57,41 @@ it('reports partial deletion from the native command on the recording view even 
   unmount(app);
 });
 
+it('keeps Delete All available for real sessions even when search hides them and the license lapses', async () => {
+  accessState.set({ kind: 'licenseLapsed' });
+  api.listSessions.mockResolvedValue([row('one'), row('two')]);
+  api.searchSessions.mockResolvedValue([]);
+  api.clearAllSessions.mockResolvedValueOnce(null).mockResolvedValueOnce({ deleted: 2, skipped: 0 });
+  const target = document.createElement('div');
+  const props = $state({ recording: false });
+  const app = mount(SessionHistory, { target, props });
+  const button = target.querySelector<HTMLButtonElement>('.delete-all')!;
+  expect(button.disabled).toBe(true);
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  props.recording = true;
+  await vi.waitFor(() => expect(button.disabled).toBe(true));
+  button.click();
+  expect(api.clearAllSessions).not.toHaveBeenCalled();
+  props.recording = false;
+  const search = target.querySelector<HTMLInputElement>('input[type="search"]')!;
+  search.value = 'no match';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(0));
+  expect(button.disabled).toBe(false);
+  button.click();
+  await vi.waitFor(() => expect(api.clearAllSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  api.listSessions.mockResolvedValue([]);
+  button.click();
+  await vi.waitFor(() => expect(target.textContent).toContain('2 deleted; 0 skipped'));
+  await vi.waitFor(() => expect(button.disabled).toBe(true));
+  search.value = '';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(4));
+  expect(target.querySelectorAll('.session')).toHaveLength(0);
+  unmount(app);
+});
+
 it('shows row state actions and keeps selected detail when search hides it or fails', async () => {
   const interrupted = { ...row('Interrupted', 'failed'), interrupted: true };
   const queued = row('Queued', 'awaitingModel');

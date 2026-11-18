@@ -9,7 +9,7 @@ pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
         _ => "General",
     };
     if let Some(window) = app.get_webview_window("settings") {
-        window.show().map_err(|e| e.to_string())?;
+        super::show_window(&window).map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         window
             .emit("shell://settings-pane", pane)
@@ -28,11 +28,14 @@ pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
         .inner_size(680.0, 560.0)
         .build()
         .map_err(|e| e.to_string())?;
-    Ok(())
+    super::restore_dock_icon(app).map_err(|e| e.to_string())
 }
 
 pub fn handle(app: &AppHandle, event: MenuEvent) {
     let id = event.id().as_ref();
+    if !id.starts_with("shell-") {
+        return;
+    }
     if let Some(menu) = app.menu() {
         for top in menu.items().unwrap_or_default() {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {
@@ -55,23 +58,21 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         }
         return;
     }
-    if let Some(window) = app.get_webview_window("main") {
-        if id == "shell-close" {
-            if let Some(settings) = app.get_webview_window("settings") {
-                if settings.is_focused().unwrap_or(false) {
-                    let _ = settings.close();
-                    return;
-                }
-            }
+    if id == "shell-quit" {
+        app.exit(0);
+        return;
+    }
+    if id == "shell-close" {
+        let window = app
+            .get_webview_window("settings")
+            .filter(|window| window.is_focused().unwrap_or(false))
+            .or_else(|| app.get_webview_window("main"));
+        if let Some(window) = window {
             let _ = window.close();
-            return;
         }
-        let _ = window.show();
-        let _ = window.set_focus();
-        if id == "shell-quit" {
-            let _ = window.emit(crate::commands::QUIT_REQUESTED_EVENT, false);
-            return;
-        }
+        return;
+    }
+    if let Some(window) = super::show_main(app) {
         let _ = window.emit("shell://menu", id);
     }
 }

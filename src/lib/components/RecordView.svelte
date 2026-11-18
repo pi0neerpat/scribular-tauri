@@ -18,7 +18,6 @@
     stopRecording,
     notifyTrayStartFailure,
   } from '../api';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { Privacy } from '../types/Privacy';
   import type { PromptList } from '../types/PromptList';
   import type { Session } from '../types/Session';
@@ -252,7 +251,6 @@
         if (trayStart) {
           window.dispatchEvent(new Event('tray-start-failed'));
           try {
-            await getCurrentWindow().show();
             await notifyTrayStartFailure(String(e));
           } catch (noticeError) { error = `${String(e)} (notification failed: ${String(noticeError)})`; }
           trayStart = false;

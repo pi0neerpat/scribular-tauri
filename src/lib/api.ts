@@ -72,6 +72,7 @@ export function onHeartbeat(handler: (beat: Heartbeat) => void): Promise<Unliste
 }
 
 export function openSettings(pane = 'General'): Promise<void> { return invoke('open_settings', { pane }); }
+export function setMainWindowVisible(visible: boolean): Promise<void> { return invoke('set_main_window_visible', { visible }); }
 export function setShellMenuState(state: { selected: boolean; hasNote: boolean; recording: boolean; recoverable: boolean; locked: boolean }): Promise<void> {
   return invoke('set_shell_menu_state', state);
 }

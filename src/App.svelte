@@ -11,9 +11,8 @@
   import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { navigation, navigationDisabled, navigationLockedBy, type AppView } from './lib/navigation';
-  import { modelsStatus, onModelsProgress } from './lib/api';
+  import { modelsStatus, onModelsProgress, setMainWindowVisible } from './lib/api';
   import OnboardingTour from './lib/components/OnboardingTour.svelte';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
@@ -90,7 +89,7 @@
         case 'shell-site': void openExternalLink('https://www.scribular.com').catch((e) => (error = String(e))); break;
       }
     });
-    getCurrentWindow().show().catch(() => {});
+    setMainWindowVisible(true).catch(() => {});
     const modelEventsSeen = new Set<string>();
     const modelEvents = onModelsProgress((p) => {
       modelEventsSeen.add(p.modelId);
@@ -105,13 +104,13 @@
     });
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
     const closeRequest = onWindowCloseRequested(() => {
-      const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
+      const hide = () => { void setMainWindowVisible(false).catch((e) => (error = String(e))); };
       if (view === 'styles' && noteStyles) noteStyles.requestLeave(hide);
       else hide();
     });
     const trayStopFailure = onTrayStopFailed((message) => {
       error = message;
-      void getCurrentWindow().show().catch((e) => (error = `${message} (${String(e)})`));
+      void setMainWindowVisible(true).catch((e) => (error = `${message} (${String(e)})`));
     });
     let settingsEventSeen = false;
     const settingsChanged = onAppSettingsChanged((s) => { settingsEventSeen = true; appSettings.set(s); });

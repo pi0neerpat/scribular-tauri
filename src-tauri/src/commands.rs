@@ -141,6 +141,19 @@ pub fn open_settings(app: AppHandle, pane: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_main_window_visible(app: AppHandle, visible: bool) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("No main window")?;
+    if visible {
+        crate::shell::show_window(&window)
+    } else {
+        window
+            .hide()
+            .and_then(|()| crate::shell::hide_dock_if_no_windows(&app))
+    }
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn set_shell_menu_state(
     app: AppHandle,
     selected: bool,
@@ -1145,9 +1158,7 @@ pub fn quit_app(app: AppHandle) {
 }
 
 pub(crate) fn request_quit_confirmation(app: &AppHandle, restart_for_update: bool) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
+    if let Some(window) = crate::shell::show_main(app) {
         let _ = window.emit(QUIT_REQUESTED_EVENT, restart_for_update);
     }
 }
@@ -1178,10 +1189,7 @@ pub(crate) async fn confirm_quit(
 #[tauri::command]
 pub fn notify_tray_start_failure(app: AppHandle, message: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    crate::shell::show_main(&app);
     app.notification()
         .builder()
         .title("Scribular")
@@ -1408,42 +1416,47 @@ fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -
 
 impl JobEvents for TauriJobEvents {
     fn progress(&self, progress: SessionProgress) {
-        let recording = progress.state == crate::store::SessionStatus::Recording;
-        crate::shell::tray::refresh(&self.0, recording);
-        if progress.state == crate::store::SessionStatus::Done {
-            if let Some(store) = self.0.try_state::<Arc<Store>>() {
-                let enabled = store
-                    .app_settings()
-                    .is_ok_and(|s| s.notify_summary_complete);
-                {
-                    let focused = self.0.get_webview_window("main").is_some_and(|w| {
-                        w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
-                    });
-                    if let Some(notices) = self.0.try_state::<SummaryNotices>() {
-                        let mut sent = notices.0.lock().unwrap_or_else(|e| e.into_inner());
-                        if should_notify_summary(
-                            enabled,
-                            focused,
-                            sent.contains(&progress.session_id),
-                        ) {
-                            use tauri_plugin_notification::NotificationExt;
-                            if self
-                                .0
-                                .notification()
-                                .builder()
-                                .title("Scribular")
-                                .body("Summary ready")
-                                .show()
-                                .is_ok()
-                            {
-                                sent.insert(progress.session_id.clone());
+        // Quit can join a finalizer on the main thread. Workers must not wait for native UI.
+        let app = self.0.clone();
+        let _ = self.0.run_on_main_thread(move || {
+            let recording = app
+                .try_state::<Arc<Recorder>>()
+                .is_some_and(|r| r.is_recording());
+            crate::shell::tray::refresh(&app, recording);
+            if progress.state == crate::store::SessionStatus::Done {
+                if let Some(store) = app.try_state::<Arc<Store>>() {
+                    let enabled = store
+                        .app_settings()
+                        .is_ok_and(|s| s.notify_summary_complete);
+                    {
+                        let focused = app.get_webview_window("main").is_some_and(|w| {
+                            w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+                        });
+                        if let Some(notices) = app.try_state::<SummaryNotices>() {
+                            let mut sent = notices.0.lock().unwrap_or_else(|e| e.into_inner());
+                            if should_notify_summary(
+                                enabled,
+                                focused,
+                                sent.contains(&progress.session_id),
+                            ) {
+                                use tauri_plugin_notification::NotificationExt;
+                                if app
+                                    .notification()
+                                    .builder()
+                                    .title("Scribular")
+                                    .body("Summary ready")
+                                    .show()
+                                    .is_ok()
+                                {
+                                    sent.insert(progress.session_id.clone());
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        let _ = self.0.emit(SESSION_PROGRESS_EVENT, progress);
+            let _ = app.emit(SESSION_PROGRESS_EVENT, progress);
+        });
     }
 
     fn summary_delta(&self, delta: SummaryDelta) {

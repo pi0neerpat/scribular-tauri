@@ -31,8 +31,8 @@
 
 <div role="presentation" class="veil">
   <div bind:this={dialog} role="alertdialog" aria-modal="true" aria-labelledby="quit-title" tabindex="-1" onkeydown={keydown}>
-    <h2 id="quit-title">{restart ? 'Restart to update?' : 'A recording is in progress'}</h2>
-    <p>{restart ? 'Restarting will interrupt the work in progress. Scribular will keep what it has recorded so far.' : "Quit and keep what's recorded so far?"}</p>
+    <h2 id="quit-title">{restart ? 'Restart to update?' : 'Work is in progress'}</h2>
+    <p>{restart ? 'Restarting' : 'Quitting'} will interrupt the work in progress. Scribular will keep what it has recorded so far.</p>
     <button onclick={close} disabled={confirming}>Cancel</button>
     <button onclick={confirm} disabled={confirming}>{restart ? 'Restart Now' : 'Quit'}</button>
     {#if error}<p role="alert">{error}</p>{/if}

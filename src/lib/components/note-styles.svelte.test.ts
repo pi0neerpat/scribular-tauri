@@ -13,9 +13,6 @@ const getPromptList = vi.fn();
 const updatePrompt = vi.fn();
 const createPrompt = vi.fn();
 const deletePrompt = vi.fn();
-const onCloseRequested = vi.fn();
-const destroyWindow = vi.fn();
-let closeHandler: ((event: { preventDefault: () => void }) => void) | undefined;
 let summaryHandler: ((state: string) => void) | undefined;
 vi.mock('../api', () => ({
   getPromptList, updatePrompt, createPrompt, deletePrompt, duplicatePrompt: vi.fn(),
@@ -23,14 +20,11 @@ vi.mock('../api', () => ({
   openSettings: vi.fn(), openExternalLink: vi.fn(), retrySummaryModel: vi.fn(),
   subscribeSummaryAvailability: vi.fn(async (handler) => { summaryHandler = handler; handler('ready'); return () => {}; }),
 }));
-vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({ onCloseRequested, destroy: destroyWindow }),
-}));
 const { default: NoteStyles } = await import('./NoteStyles.svelte');
 const { accessState } = await import('../license');
 
 let target: HTMLElement;
-let app: ReturnType<typeof mount>;
+let app: ReturnType<typeof NoteStyles>;
 
 const button = (label: string) =>
   [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)!;
@@ -39,7 +33,6 @@ const dialog = () => target.querySelector('[role="dialog"]');
 
 beforeEach(async () => {
   accessState.set(null);
-  onCloseRequested.mockImplementation((handler) => { closeHandler = handler; return Promise.resolve(vi.fn()); });
   getPromptList.mockResolvedValue(list);
   target = document.createElement('div');
   document.body.append(target);
@@ -197,45 +190,45 @@ it('restores focus before leaving Settings unmounts the editor', async () => {
   opener.remove();
 });
 
-it('asks before closing the window with a dirty style', async () => {
+it('asks before closing the window with a dirty style', () => {
+  const hideWindow = vi.fn();
   typeName('Alpha 2');
-  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
-  const event = { preventDefault: vi.fn() };
-  closeHandler!(event);
+  app.requestLeave(hideWindow);
   flushSync();
-  expect(event.preventDefault).toHaveBeenCalledOnce();
   expect(dialog()?.textContent).toContain('Discard changes?');
   button('Cancel').click();
   flushSync();
-  expect(destroyWindow).not.toHaveBeenCalled();
-  closeHandler!(event);
+  expect(hideWindow).not.toHaveBeenCalled();
+  app.requestLeave(hideWindow);
   flushSync();
   button('Discard').click();
-  expect(destroyWindow).toHaveBeenCalledOnce();
+  expect(hideWindow).toHaveBeenCalledOnce();
+  flushSync();
+  expect(input().value).toBe('Alpha');
 });
 
 it('saves a dirty style before closing the window', async () => {
+  const hideWindow = vi.fn();
   updatePrompt.mockResolvedValue(list);
   typeName('Alpha 2');
-  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
-  closeHandler!({ preventDefault: vi.fn() });
+  app.requestLeave(hideWindow);
   flushSync();
   dialog()!.querySelector<HTMLButtonElement>('button')!.click();
-  await vi.waitFor(() => expect(destroyWindow).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(hideWindow).toHaveBeenCalledOnce());
   expect(updatePrompt).toHaveBeenCalledWith('a', 'Alpha 2', 'Alpha text');
 });
 
 it('keeps the window open when saving before close fails', async () => {
+  const hideWindow = vi.fn();
   updatePrompt.mockRejectedValue(new Error('save failed'));
   typeName('Alpha 2');
-  await vi.waitFor(() => expect(onCloseRequested).toHaveBeenCalledOnce());
-  closeHandler!({ preventDefault: vi.fn() });
+  app.requestLeave(hideWindow);
   flushSync();
   dialog()!.querySelector<HTMLButtonElement>('button')!.click();
   await vi.waitFor(() => expect(target.textContent).toContain('save failed'));
   expect(dialog()).not.toBeNull();
   expect(input().value).toBe('Alpha 2');
-  expect(destroyWindow).not.toHaveBeenCalled();
+  expect(hideWindow).not.toHaveBeenCalled();
 });
 
 it('keeps pending navigation while a save is already in progress', async () => {

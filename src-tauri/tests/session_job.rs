@@ -489,6 +489,7 @@ fn stopping_while_the_llm_is_downloading_saves_transcript_and_resumes() {
     assert_eq!(waiting.transcript, TRANSCRIPT);
     assert!(waiting.summary.is_empty());
     assert_eq!(h.chunks(&id), 0);
+    assert!(!h.recorder.quit_confirmation_needed());
 
     h.summarizer.ready.store(true, Ordering::SeqCst);
     assert!(h.queue.wait_idle(WAIT));
@@ -516,6 +517,27 @@ fn chunks_are_written_while_recording() {
     h.feed(5);
     h.wait_chunks(&id, 2);
     assert_eq!(h.get(&id).status, SessionStatus::Recording);
+}
+
+#[test]
+fn quit_confirmation_only_for_recording_and_running_summary() {
+    let h = Harness::with(
+        |_| {},
+        |loader| {
+            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
+        },
+    );
+    assert!(!h.recorder.quit_confirmation_needed());
+    let id = h.start(InputMode::Mic);
+    assert!(h.recorder.quit_confirmation_needed());
+    h.feed(12);
+    h.wait_chunks(&id, 2);
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::Summarizing);
+    assert!(h.recorder.quit_confirmation_needed());
+    assert!(h.queue.wait_idle(WAIT));
+    assert_eq!(h.get(&id).status, SessionStatus::Done);
+    assert!(!h.recorder.quit_confirmation_needed());
 }
 
 #[test]

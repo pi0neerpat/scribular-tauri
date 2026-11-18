@@ -288,15 +288,9 @@ impl Recorder {
                 .is_some_and(|models| models.is_busy())
     }
 
-    /// Whether quitting would interrupt recording, transcription or summary work.
+    /// Whether quitting would interrupt a recording or a running summary.
     pub fn quit_confirmation_needed(&self) -> bool {
-        let recording = lock(&self.inner.recording).is_some();
-        recording
-            || !lock(&self.inner.state).finalizing.is_empty()
-            || self.inner.jobs.is_busy()
-            || lock(&self.finalizers)
-                .iter()
-                .any(|worker| !worker.is_finished())
+        self.is_recording() || self.inner.jobs.summarizing()
     }
 
     /// Runs `operation` while preventing a recording from starting.
@@ -391,6 +385,7 @@ impl Recorder {
             cancel,
             _watched: watched,
         });
+        drop(recording);
         inner.emit(&session.id, SessionStatus::Recording, "Recording...");
         Ok(session)
     }

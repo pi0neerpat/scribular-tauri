@@ -38,7 +38,9 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_window(app),
+            "show" => {
+                super::show_main(app);
+            }
             "start" => {
                 let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
             }
@@ -90,13 +92,6 @@ fn stop(app: &AppHandle, speakers: Option<u8>) {
                 .body(error)
                 .show();
         });
-    }
-}
-
-fn show_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
     }
 }
 
@@ -200,18 +195,23 @@ mod tests {
     use super::*;
     #[test]
     fn tray_model_matches_menu_states() {
-        assert_eq!(
-            tray_model(false, false),
-            [
-                TrayItem::Show,
-                TrayItem::Separator,
-                TrayItem::Start,
-                TrayItem::Separator,
-                TrayItem::Quit
-            ]
-        );
-        assert_eq!(tray_model(true, false)[2], TrayItem::Stop);
-        assert_eq!(tray_model(true, true)[2], TrayItem::SpeakerSubmenu);
+        for (recording, multi_speaker, action) in [
+            (false, false, TrayItem::Start),
+            (false, true, TrayItem::Start),
+            (true, false, TrayItem::Stop),
+            (true, true, TrayItem::SpeakerSubmenu),
+        ] {
+            assert_eq!(
+                tray_model(recording, multi_speaker),
+                [
+                    TrayItem::Show,
+                    TrayItem::Separator,
+                    action,
+                    TrayItem::Separator,
+                    TrayItem::Quit
+                ]
+            );
+        }
     }
 
     #[test]

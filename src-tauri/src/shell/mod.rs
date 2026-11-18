@@ -1,6 +1,38 @@
 pub mod menu;
 pub mod tray;
 
+use tauri::{AppHandle, Manager, WebviewWindow};
+
+pub fn show_main(app: &AppHandle) -> Option<WebviewWindow> {
+    let window = app.get_webview_window("main")?;
+    let _ = show_window(&window);
+    let _ = window.set_focus();
+    Some(window)
+}
+
+pub fn show_window(window: &WebviewWindow) -> tauri::Result<()> {
+    restore_dock_icon(window.app_handle())?;
+    window.show()
+}
+
+pub fn restore_dock_icon(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Regular)?;
+    Ok(())
+}
+
+pub fn hide_dock_if_no_windows(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    if app.tray_by_id("main").is_some()
+        && app.webview_windows().values().all(|window| {
+            !window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(true)
+        })
+    {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory)?;
+    }
+    Ok(())
+}
+
 /// Shows a modal alert. `Some(false)` = first button (Return/Escape default),
 /// `Some(true)` = second button, `None` = `detail` returned `None` (alert skipped)
 /// or AppKit returned an unrecognized response.
