@@ -81,30 +81,42 @@ pub struct RecordingSource {
     pub target_app: Option<String>,
 }
 
+pub(crate) fn valid_target_app(app: &str) -> bool {
+    !app.trim().is_empty() && !app.contains('\0')
+}
+
 fn recording_source(c: &Connection) -> Result<RecordingSource> {
     let location = select(c, RECORD_LOCATION)?;
     let on_call = match location.as_deref() {
         Some(location) => location == "onCall",
         None => select(c, INPUT_MODE)?.as_deref() == Some(InputMode::MicAndSystem.as_str()),
     };
+    let target_app = select(
+        c,
+        if location.is_some() {
+            RECORD_TARGET_APP
+        } else {
+            TARGET_APP
+        },
+    )?
+    .filter(|app| valid_target_app(app));
     Ok(RecordingSource {
-        location: if on_call {
+        location: if on_call && target_app.is_some() {
             RecordLocation::OnCall
         } else {
             RecordLocation::InRoom
         },
-        target_app: select(
-            c,
-            if location.is_some() {
-                RECORD_TARGET_APP
-            } else {
-                TARGET_APP
-            },
-        )?,
+        target_app,
     })
 }
 
 fn save_source(c: &Connection, source: &RecordingSource) -> Result<()> {
+    let app = source.target_app.as_deref();
+    if app.map_or(source.location == RecordLocation::OnCall, |app| {
+        !valid_target_app(app)
+    }) {
+        return Err(super::StoreError::InvalidRecordingSource);
+    }
     insert(
         c,
         RECORD_LOCATION,
@@ -113,10 +125,7 @@ fn save_source(c: &Connection, source: &RecordingSource) -> Result<()> {
             RecordLocation::OnCall => "onCall",
         },
     )?;
-    match source.target_app.as_deref() {
-        Some(app) if app.contains('\0') || app.trim().is_empty() => {
-            return Err(super::StoreError::InvalidRecordingSource);
-        }
+    match app {
         Some(app) => insert(c, RECORD_TARGET_APP, app)?,
         None => {
             c.execute("DELETE FROM settings WHERE key = ?1", [RECORD_TARGET_APP])?;
@@ -242,7 +251,7 @@ impl Store {
         })
     }
 
-    /// Saves them all at once; an absent app clears it, an absent prompt
+    /// Saves them all at once; an absent app clears it in mic mode, an absent prompt
     /// keeps the active one. Unknown ids are rejected and unstarred styles
     /// are starred, matching `set_active_prompt`.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {

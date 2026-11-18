@@ -927,6 +927,34 @@ fn pause_freezes_capture_and_live_transcription_and_stop_accepts_paused_state() 
 }
 
 #[test]
+fn resumed_mic_segments_follow_the_pre_pause_tail_while_recording() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.pause().unwrap();
+    assert!(h.events.segments.lock().unwrap().is_empty());
+
+    h.recorder.resume().unwrap();
+    h.feed(16);
+    wait_until("both spans publish before Stop", || {
+        h.events.segments.lock().unwrap().len() >= 2
+    });
+    let starts: Vec<_> = h
+        .events
+        .segments
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| event.session_id == id && event.source == AudioSource::Mic)
+        .flat_map(|event| event.segments.iter().map(|segment| segment.start_ms))
+        .collect();
+    assert_eq!(starts, [0, 1000, 3000, 4000]);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(19_000));
+}
+
+#[test]
 fn pause_suspends_app_attempts_and_failed_app_resume_keeps_mic_running() {
     let h = Harness::new();
     let id = h.start(InputMode::MicAndSystem);

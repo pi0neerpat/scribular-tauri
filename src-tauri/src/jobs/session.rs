@@ -22,8 +22,8 @@ use super::{
 use crate::audio::{AudioError, Microphone, SystemAudio};
 use crate::diarize::SpeakerEmbedderLoader;
 use crate::store::{
-    self, AudioSource, InputMode, NewSession, Session, SessionStatus, Store, StoreError, Timings,
-    ACTIVE_PROMPT_ID,
+    self, valid_target_app, AudioSource, InputMode, NewSession, Session, SessionStatus, Store,
+    StoreError, Timings, ACTIVE_PROMPT_ID,
 };
 use crate::stt::{
     stream::{Stream, Window},
@@ -90,7 +90,7 @@ fn sources(mode: InputMode) -> &'static [AudioSource] {
 
 mod capture;
 
-use capture::{Recording, Source, Streamer};
+use capture::{Recording, Source, SpanAudio, Streamer};
 
 #[derive(Default)]
 struct Transcription {
@@ -322,7 +322,7 @@ impl Recorder {
             InputMode::Mic => None,
             InputMode::System => return Err(RecordError::UnsupportedMode),
             InputMode::MicAndSystem => Some(
-                app.filter(|app| !app.trim().is_empty() && !app.contains('\0'))
+                app.filter(|app| valid_target_app(app))
                     .ok_or(RecordError::NoTargetApp)?
                     .to_owned(),
             ),
@@ -425,8 +425,8 @@ impl Recorder {
         }
         let duration_ms =
             u32::try_from(samples as u64 * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
+        let streamers = recording.take_streamers();
         let transcription = recording.transcription;
-        let streamers = recording.streamers;
         lock(&inner.state)
             .finalizing
             .insert(id.clone(), Arc::clone(&transcription));
@@ -569,7 +569,7 @@ impl Recorder {
         if let Some(mut recording) = recording {
             recording.transcription.cancel();
             let _ = recording.close(&self.inner);
-            for (_, streamer) in recording.streamers {
+            for (_, streamer) in recording.take_streamers() {
                 let _ = streamer.join();
             }
         }
@@ -798,13 +798,30 @@ impl Inner {
         Ok(loaded)
     }
 
-    /// Transcribes `source` while it records, one window per 15 s of audio
-    /// (M5b). Returns once the audio ends, with the windows not yet done.
-    fn stream(
+    /// Finish each closed span before publishing from the next one on this track.
+    fn stream_spans(
         &self,
         id: &str,
         source: AudioSource,
-        audio: &mpsc::Receiver<(usize, Vec<f32>)>,
+        spans: &mpsc::Receiver<SpanAudio>,
+        transcription: &Transcription,
+    ) -> Result<Option<Stream>, String> {
+        let mut stream = Stream::default();
+        for audio in spans {
+            if self.drain_span(id, source, &mut stream, transcription)? {
+                return Ok(None);
+            }
+            stream = self.stream_span(id, source, &audio, transcription)?;
+        }
+        Ok(Some(stream))
+    }
+
+    /// Transcribes a capture span while it records, leaving remaining windows for the drain.
+    fn stream_span(
+        &self,
+        id: &str,
+        source: AudioSource,
+        audio: &SpanAudio,
         transcription: &Transcription,
     ) -> Result<Stream, String> {
         let cancel = &transcription.cancelled;
@@ -1109,10 +1126,9 @@ impl Inner {
     fn drain(
         &self,
         id: &str,
-        mut streamers: Vec<Streamer>,
+        streamers: Vec<Streamer>,
         transcription: &Transcription,
     ) -> Result<bool, String> {
-        streamers.sort_by_key(|(source, _)| *source != AudioSource::System);
         // Joined first, so none outlives a failure.
         let streams: Vec<_> = streamers
             .into_iter()
@@ -1125,24 +1141,38 @@ impl Inner {
                 )
             })
             .collect();
-        let cancel = &transcription.cancelled;
         let mut partial = false;
         for (source, stream) in streams {
-            let mut stream = stream?;
-            stream.finish();
-            while !partial {
-                let Some(window) = stream.next() else { break };
-                if cancel.load(Ordering::Relaxed) {
-                    partial = true;
-                    break;
+            match stream? {
+                Some(mut stream) if !partial => {
+                    partial = self.drain_span(id, source, &mut stream, transcription)?;
                 }
-                // Loaded on demand: a recording that streamed every window
-                // needs no model here.
-                let stt = self.transcriber(id, cancel)?;
-                partial = !self.window(id, source, &mut stream, &window, &*stt, transcription)?;
+                Some(_) => {}
+                None => partial = true,
             }
         }
         Ok(partial)
+    }
+
+    fn drain_span(
+        &self,
+        id: &str,
+        source: AudioSource,
+        stream: &mut Stream,
+        transcription: &Transcription,
+    ) -> Result<bool, String> {
+        let cancel = &transcription.cancelled;
+        stream.finish();
+        while let Some(window) = stream.next() {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(true);
+            }
+            let stt = self.transcriber(id, cancel)?;
+            if !self.window(id, source, stream, &window, &*stt, transcription)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn session(&self, id: &str) -> Result<Session, String> {

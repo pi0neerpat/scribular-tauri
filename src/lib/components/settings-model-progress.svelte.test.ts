@@ -71,6 +71,28 @@ it('opens on General and keeps recording and appearance controls in their panes'
   unmount(app);
 });
 
+it('saves call mode only after an app is selected', async () => {
+  onModelsProgress.mockResolvedValue(() => {});
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  listAudioApps.mockResolvedValue([{ name: 'Zoom', sampleRate: 48000, channels: 2, icon: null }]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  await vi.waitFor(() => expect(target.querySelector('input[value="micAndSystem"]')).toBeTruthy());
+  const call = target.querySelector<HTMLInputElement>('input[value="micAndSystem"]')!;
+  call.checked = true;
+  call.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(target.querySelector('option[value="Zoom"]')).toBeTruthy());
+  expect(setRecordingSettings).toHaveBeenLastCalledWith({ ...settings, promptId: null });
+  const picker = target.querySelector('select')!;
+  picker.value = 'Zoom';
+  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(setRecordingSettings).toHaveBeenLastCalledWith({
+    ...settings, inputMode: 'micAndSystem', targetApp: 'Zoom', promptId: null,
+  }));
+  unmount(app);
+});
+
 it('applies a completion event that arrives while the status snapshot is in flight', async () => {
   let notify: ((progress: typeof ready) => void) | undefined;
   let resolveSnapshot!: (items: typeof downloading[]) => void;

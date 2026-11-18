@@ -23,6 +23,7 @@ pub use sessions::{
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
     AUDIO_RETENTION_MS, INTERRUPTED,
 };
+pub(crate) use settings::valid_target_app;
 pub use settings::{
     AppSettings, RecordLocation, RecordingSettings, RecordingSource, ACTIVE_PROMPT_ID,
     ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL, SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION,

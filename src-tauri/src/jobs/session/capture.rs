@@ -28,7 +28,8 @@ const CALL_WARNING_MS: u32 = 20_000;
 const MIC_LOST: &str = "Recording stopped: the microphone was lost.";
 const WRITE_FAILED: &str = "Recording stopped: couldn't save audio.";
 
-pub(super) type Streamer = (AudioSource, JoinHandle<Result<Stream, String>>);
+pub(super) type Streamer = (AudioSource, JoinHandle<Result<Option<Stream>, String>>);
+pub(super) type SpanAudio = mpsc::Receiver<(usize, Vec<f32>)>;
 
 pub(super) struct Source {
     capture: Box<dyn Capture>,
@@ -92,6 +93,7 @@ struct Span {
 #[derive(Default)]
 struct Track {
     span: Option<Span>,
+    stream: Option<(mpsc::Sender<SpanAudio>, Streamer)>,
     timeline: chunk_writer::Timeline,
     level: Arc<AtomicU32>,
 }
@@ -105,7 +107,7 @@ impl Track {
         ready: Source,
         align: Option<Box<dyn FnOnce() -> usize + Send>>,
         transcription: &Arc<Transcription>,
-    ) -> Result<Streamer, RecordError> {
+    ) -> Result<(), RecordError> {
         let Source {
             capture,
             consumer,
@@ -118,14 +120,16 @@ impl Track {
         };
         self.level.store(0, Ordering::Relaxed);
         let (live, audio) = mpsc::channel();
-        let streamer = {
+        if self.stream.is_none() {
+            let (next_span, spans) = mpsc::channel();
             let inner = Arc::clone(inner);
             let id = id.to_owned();
             let transcription = Arc::clone(transcription);
-            thread::Builder::new()
+            let worker = thread::Builder::new()
                 .name(format!("stream-{}", source.as_str()))
-                .spawn(move || inner.stream(&id, source, &audio, &transcription))?
-        };
+                .spawn(move || inner.stream_spans(&id, source, &spans, &transcription))?;
+            self.stream = Some((next_span, (source, worker)));
+        }
         let writer = chunk_writer::spawn(
             Arc::clone(&inner.store),
             id.into(),
@@ -139,13 +143,16 @@ impl Track {
             },
             live,
         )?;
+        let (next_span, _) = self.stream.as_ref().expect("track has a streamer");
+        // A failed streamer must leave the chunk writer running for recovery.
+        let _ = next_span.send(audio);
         self.timeline = chunk_writer::Timeline::default();
         self.span = Some(Span {
             capture,
             position,
             writer,
         });
-        Ok((source, streamer))
+        Ok(())
     }
 
     fn lost(&self) -> bool {
@@ -192,7 +199,6 @@ pub(super) struct Recording {
     pub(super) session_id: String,
     pub(super) multi_speaker: bool,
     pub(super) transcription: Arc<Transcription>,
-    pub(super) streamers: Vec<Streamer>,
     mic: Track,
     system: Track,
     target_app: Option<String>,
@@ -219,7 +225,6 @@ impl Recording {
             session_id: id.into(),
             multi_speaker,
             transcription: Arc::default(),
-            streamers: Vec::new(),
             mic: Track::default(),
             system: Track::default(),
             target_app,
@@ -243,14 +248,14 @@ impl Recording {
     }
 
     fn start_mic(&mut self, inner: &Arc<Inner>, mic: Source) -> Result<(), RecordError> {
-        self.streamers.push(self.mic.attach(
+        self.mic.attach(
             inner,
             &self.session_id,
             AudioSource::Mic,
             mic,
             None,
             &self.transcription,
-        )?);
+        )?;
         self.running_since = Some(Instant::now());
         Ok(())
     }
@@ -279,6 +284,13 @@ impl Recording {
 
     pub(super) fn samples(&self) -> usize {
         self.mic.timeline.samples.max(self.system.timeline.samples)
+    }
+
+    pub(super) fn take_streamers(&mut self) -> Vec<Streamer> {
+        [&mut self.system, &mut self.mic]
+            .into_iter()
+            .filter_map(|track| track.stream.take().map(|(_, worker)| worker))
+            .collect()
     }
 
     pub(super) fn pause(&mut self, inner: &Arc<Inner>) -> Result<(), &'static str> {
@@ -346,10 +358,7 @@ impl Recording {
                         Some(align),
                         &self.transcription,
                     ) {
-                        Ok(streamer) => {
-                            self.streamers.push(streamer);
-                            self.last_attach_error = None;
-                        }
+                        Ok(()) => self.last_attach_error = None,
                         Err(_) => self.log_attach_failure("app_audio_worker_failed"),
                     }
                 }

@@ -9,7 +9,7 @@ use std::{
 use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{
     AppSettings, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, RecordLocation,
-    RecordingSettings, RecordingSource, SessionPatch, SessionStatus, Store, Timings,
+    RecordingSettings, RecordingSource, SessionPatch, SessionStatus, Store, StoreError, Timings,
     ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
 };
 use scribular_lib::text::Segment;
@@ -739,12 +739,15 @@ fn record_source_defaults_round_trips_and_keeps_legacy_sessions_readable() {
         store.get_setting("record_target_app").unwrap().as_deref(),
         Some("Zoom")
     );
-    assert!(store
-        .set_recording_source(&RecordingSource {
-            location: RecordLocation::InRoom,
-            target_app: Some(" ".into()),
-        })
-        .is_err());
+    for target_app in [None, Some(" ".into()), Some("Zoom\0".into())] {
+        assert!(matches!(
+            store.set_recording_source(&RecordingSource {
+                location: RecordLocation::OnCall,
+                target_app,
+            }),
+            Err(StoreError::InvalidRecordingSource)
+        ));
+    }
     assert_eq!(store.recording_source().unwrap(), source);
     store
         .set_recording_source(&RecordingSource::default())
@@ -752,6 +755,18 @@ fn record_source_defaults_round_trips_and_keeps_legacy_sessions_readable() {
     assert_eq!(
         store.recording_source().unwrap(),
         RecordingSource::default()
+    );
+    // Earlier builds could persist call mode before an app was chosen.
+    store.set_setting("record_location", "onCall").unwrap();
+    drop(store);
+    let store = db.open();
+    assert_eq!(
+        store.recording_source().unwrap(),
+        RecordingSource::default()
+    );
+    assert_eq!(
+        store.recording_settings().unwrap().input_mode,
+        InputMode::Mic
     );
 }
 
@@ -778,8 +793,18 @@ fn recording_settings_round_trip_and_clear() {
     let store = db.open();
     assert_eq!(store.recording_settings().unwrap(), chosen);
 
+    assert!(matches!(
+        store.set_recording_settings(&RecordingSettings {
+            target_app: None,
+            keep_audio: false,
+            ..chosen.clone()
+        }),
+        Err(StoreError::InvalidRecordingSource)
+    ));
+    assert_eq!(store.recording_settings().unwrap(), chosen);
+
     let cleared = RecordingSettings {
-        input_mode: InputMode::MicAndSystem,
+        input_mode: InputMode::Mic,
         target_app: None,
         prompt_id: None,
         keep_audio: false,
