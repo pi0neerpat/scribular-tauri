@@ -60,6 +60,9 @@ export function triggerTestPanic(): Promise<void> { return invoke<void>('trigger
 export function checkForUpdates(): Promise<void> { return invoke<void>('check_for_updates'); }
 export function getUpdateState(): Promise<UpdateState> { return invoke<UpdateState>('get_update_state'); }
 export function installUpdate(): Promise<void> { return invoke<void>('install_update'); }
+export function showUpdateReadyAlert(version: string): Promise<boolean | null> {
+  return invoke<boolean | null>('show_update_ready_alert', { version });
+}
 export function onUpdateState(handler: (state: UpdateState) => void): Promise<UnlistenFn> {
   return listen<UpdateState>('update://state', (event) => handler(event.payload));
 }
@@ -69,7 +72,7 @@ export function onHeartbeat(handler: (beat: Heartbeat) => void): Promise<Unliste
 }
 
 export function openSettings(pane = 'General'): Promise<void> { return invoke('open_settings', { pane }); }
-export function setShellMenuState(state: { hasSessions: boolean; selected: boolean; hasNote: boolean; recording: boolean; recoverable: boolean; locked: boolean }): Promise<void> {
+export function setShellMenuState(state: { selected: boolean; hasNote: boolean; recording: boolean; recoverable: boolean; locked: boolean }): Promise<void> {
   return invoke('set_shell_menu_state', state);
 }
 export function onShellMenu(handler: (id: string) => void): Promise<UnlistenFn> {
@@ -121,13 +124,15 @@ export function startFresh(confirmation: string): Promise<void> {
 export function quitApp(): Promise<void> {
   return invoke<void>('quit_app');
 }
-export function confirmQuit(): Promise<void> { return invoke<void>('confirm_quit'); }
+export function confirmQuit(restartForUpdate: boolean): Promise<void> {
+  return invoke<void>('confirm_quit', { restartForUpdate });
+}
 export function notifyTrayStartFailure(message: string): Promise<void> { return invoke<void>('notify_tray_start_failure', { message }); }
 export function onTrayStartRecording(handler: () => void): Promise<UnlistenFn> {
   return listen('tray-start-recording', () => handler());
 }
-export function onQuitRequested(handler: () => void): Promise<UnlistenFn> {
-  return listen('quit-requested', () => handler());
+export function onQuitRequested(handler: (restartForUpdate: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>('quit-requested', (event) => handler(event.payload));
 }
 export function onWindowCloseRequested(handler: () => void): Promise<UnlistenFn> {
   return listen('window-close-requested', () => handler());
@@ -146,8 +151,8 @@ export function deleteSession(id: string): Promise<boolean> {
   return invoke<boolean>('delete_session', { id });
 }
 
-export function clearAllSessions(): Promise<ClearSessionsResult> {
-  return invoke<ClearSessionsResult>('clear_all_sessions');
+export function clearAllSessions(): Promise<ClearSessionsResult | null> {
+  return invoke<ClearSessionsResult | null>('clear_all_sessions');
 }
 
 export function undoSummary(id: string): Promise<Session> {

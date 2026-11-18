@@ -43,12 +43,12 @@ const ready = { ...downloading, state: 'ready', downloadedBytes: 10 };
 
 beforeEach(() => {
   window.history.replaceState({}, '', '?pane=Recording');
-  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true });
+  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true, checkForUpdatesAutomatically: true });
 });
 
 afterEach(() => {
   window.history.replaceState({}, '', '/');
-  appSettings.set({ notifySummaryComplete: false, showBackgroundAnimation: true });
+  appSettings.set({ notifySummaryComplete: false, showBackgroundAnimation: true, checkForUpdatesAutomatically: true });
   vi.clearAllMocks();
 });
 
@@ -203,6 +203,24 @@ it('keeps an update event that arrives while the update snapshot is pending', as
   getUpdateState.mockResolvedValue({ state: 'idle', installable: false });
 });
 
+it('restores the persisted automatic-update switch after a failed save', async () => {
+  window.history.replaceState({}, '', '?pane=General');
+  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true, checkForUpdatesAutomatically: true });
+  setAppSettings.mockRejectedValueOnce('save failed');
+  getRecordingSettings.mockResolvedValue(settings);
+  modelsStatus.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(Settings, { target });
+  const automatic = () => [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Check for updates automatically')) as HTMLInputElement;
+  await vi.waitFor(() => expect(automatic()?.disabled).toBe(false));
+  expect(automatic().checked).toBe(true);
+  automatic().checked = false;
+  automatic().dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('save failed'));
+  await vi.waitFor(() => expect(automatic().checked).toBe(true));
+  unmount(app);
+});
+
 it('shows an alert when the install is rejected', async () => {
   window.history.replaceState({}, '', '?pane=General');
   onUpdateState.mockResolvedValue(() => {});
@@ -219,7 +237,7 @@ it('shows an alert when the install is rejected', async () => {
 });
 
 it('keeps notification permission guidance through unrelated saves and shows it once', async () => {
-  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true });
+  getAppSettings.mockResolvedValue({ notifySummaryComplete: false, showBackgroundAnimation: true, checkForUpdatesAutomatically: true });
   getRecordingSettings.mockResolvedValue(settings);
   modelsStatus.mockResolvedValue([]);
   requestNotificationPermission.mockResolvedValue(false);

@@ -111,6 +111,18 @@ describe('recording speaker-count prompt', () => {
     target.remove();
   });
 
+  it('clears the displayed job after its session is deleted', async () => {
+    sessionStorage.setItem('scribular.inFlightSession', 'queued-1');
+    getSession.mockResolvedValueOnce({ id: 'queued-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect(target.textContent).toContain('Waiting for the summary model download'));
+    await app.refreshAfterDeletion();
+    await vi.waitFor(() => expect(target.textContent).not.toContain('Waiting for the summary model download'));
+    expect(sessionStorage.getItem('scribular.inFlightSession')).toBeNull();
+    unmount(app);
+    target.remove();
+  });
+
   it.each([["2 people", 2], ["3 people", 3], ["4+ (beta)", null]] as const)(
     'forwards %s to stopRecording', async (choice, count) => {
       const { target, app } = await renderRecordView();

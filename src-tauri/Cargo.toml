@@ -49,3 +49,6 @@ sherpa-onnx-sys = { version = "=1.13.8", default-features = false, features = ["
 # plans/DEPENDENCY_REVIEW_ENCRYPTION.md: Keychain storage for the database key.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "=3.7.0"
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["NSAlert", "NSApplication", "NSButton", "NSControl", "NSResponder", "NSView"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["NSString"] }

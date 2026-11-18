@@ -14,12 +14,9 @@
     onLicense?: () => void; onTour?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
-  // Unfiltered availability: a zero-match search must not disable Delete all.
-  let hasSessions = $state(false);
   let selected = $state<Session | null>(null);
   let progress = $state<Record<string, SessionProgress>>({});
   let error = $state<string | null>(null);
-  let confirmClear = $state(false);
   let clearResult = $state('');
   let clearing = $state(false);
   let query = $state('');
@@ -33,7 +30,11 @@
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
   let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
-  $effect(() => { $accessState; void setShellMenuState({ hasSessions, selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {}); });
+  $effect(() => {
+    // Refresh native availability after a list change, even when search hides every row.
+    sessions; $accessState;
+    void setShellMenuState({ selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {});
+  });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
@@ -50,7 +51,6 @@
       const result = query ? await searchSessions(query) : await listSessions();
       if (current !== request) return;
       sessions = result;
-      if (!query || result.length) hasSessions = result.length > 0;
       error = null;
       if (!query && selected && !result.some((s) => s.id === selected?.id)) selected = null;
     } catch (e) { if (current === request) error = String(e); }
@@ -66,7 +66,6 @@
     searchField?.focus();
     searchField?.select();
   }
-  export function confirmDeleteAll() { if (hasSessions) confirmClear = true; }
   export function confirmDeleteSelected() { if (view === 'history' && selected && !['recording', 'finalizing'].includes(selected.status)) summaryPanel?.requestDelete(); }
   export async function copySelectedNote() { if (view === 'history' && selected?.summary) await summaryPanel?.copy(); }
   export async function recoverFirst() {
@@ -132,17 +131,29 @@
     }
   }
 
-  async function clear() {
-    if (clearing) return;
+  export async function confirmDeleteAll() {
+    if (recording || clearing) return;
     clearing = true;
+    clearResult = '';
     try {
       const result = await clearAllSessions();
-      clearResult = `${result.deleted} deleted${result.skipped ? `; ${result.skipped} session${result.skipped === 1 ? '' : 's'} not deleted` : ''}`;
-      confirmClear = false;
+      if (!result) return;
+      clearResult = `${result.deleted} deleted; ${result.skipped} skipped`;
       if (!result.skipped) selected = null;
       await refresh();
+      const id = selected?.id;
+      if (query && id) {
+        const session = await getSession(id);
+        if (selected?.id === id) selected = session;
+      }
       onSessionsChanged?.();
-    } catch (e) { error = String(e); } finally { clearing = false; }
+    } catch (e) {
+      await refresh();
+      onSessionsChanged?.();
+      error = String(e);
+    } finally {
+      clearing = false;
+    }
   }
 
 </script>
@@ -151,6 +162,7 @@
   <aside aria-label="Sidebar" data-tour="sessions">
     <input bind:this={searchField} type="search" aria-label="Search sessions" placeholder="Search sessions" bind:value={query} oninput={(e) => { query = e.currentTarget.value; void refresh(); }} />
     {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
+    {#if clearResult}<p role="status">{clearResult}</p>{/if}
     <nav aria-label="Main navigation">
       <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationLocked}>New Recording</button>
       <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
@@ -194,12 +206,6 @@
   </aside>
   <div class="content">
     <div hidden={view !== 'history'}>
-      {#if clearResult}<p role="status">{clearResult}</p>{/if}
-      {#if confirmClear}
-        <p>Delete all sessions? This cannot be undone.</p>
-        <button onclick={clear} disabled={clearing}>Confirm delete all</button>
-        <button onclick={() => (confirmClear = false)}>Cancel</button>
-      {/if}
       {#if selected}
         <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history'} management prompts={prompts} models={models}
           onUpdate={(s) => { selected = s; void refresh(); }} onCopied={markCopied}

@@ -69,7 +69,7 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
         let _ = window.show();
         let _ = window.set_focus();
         if id == "shell-quit" {
-            let _ = window.emit("quit-requested", ());
+            let _ = window.emit(crate::commands::QUIT_REQUESTED_EVENT, false);
             return;
         }
         let _ = window.emit("shell://menu", id);

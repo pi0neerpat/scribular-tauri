@@ -143,13 +143,19 @@ pub fn open_settings(app: AppHandle, pane: String) -> Result<(), String> {
 #[tauri::command]
 pub fn set_shell_menu_state(
     app: AppHandle,
-    has_sessions: bool,
     selected: bool,
     has_note: bool,
     recording: bool,
     recoverable: bool,
     locked: bool,
 ) -> Result<(), String> {
+    let has_sessions = app
+        .try_state::<Arc<Store>>()
+        .is_some_and(|store| store.session_count().is_ok_and(|count| count > 0));
+    let recording = recording
+        || app
+            .try_state::<Arc<Recorder>>()
+            .is_some_and(|r| r.is_recording());
     crate::shell::menu::set_state(
         &app,
         has_sessions,
@@ -355,13 +361,59 @@ pub fn get_update_state(
 
 #[tauri::command]
 pub async fn install_update(
+    app: AppHandle,
     updates: State<'_, Arc<crate::update::UpdateManager>>,
 ) -> Result<(), String> {
     // Off the main thread: the install gate can wait on a recording start or stop.
     let updates = Arc::clone(&updates);
-    tauri::async_runtime::spawn_blocking(move || updates.install())
+    let result = tauri::async_runtime::spawn_blocking(move || updates.install())
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    if result
+        .as_ref()
+        .is_err_and(|error| error == crate::update::BUSY)
+        && app
+            .try_state::<Arc<Recorder>>()
+            .is_some_and(|r| r.quit_confirmation_needed())
+    {
+        request_quit_confirmation(&app, true);
+        return Ok(());
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn show_update_ready_alert(
+    app: AppHandle,
+    updates: State<'_, Arc<crate::update::UpdateManager>>,
+    version: String,
+) -> Result<Option<bool>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let recorder = app.try_state::<Arc<Recorder>>().map(|r| Arc::clone(&r));
+        let updates = Arc::clone(&updates);
+        let choice = crate::shell::native_choice(
+            app,
+            "An update is ready.",
+            move || {
+                if recorder.as_ref().is_some_and(|r| r.is_recording())
+                    || !updates.claim_ready_alert(&version)
+                {
+                    return Ok(None);
+                }
+                Ok(Some(format!("Scribular {version} is ready to install.")))
+            },
+            ["Restart Now", "OK"],
+            false,
+        )
+        .await?;
+        Ok(choice.map(|ok| !ok))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, updates, version);
+        Err("Native alerts require macOS".into())
+    }
 }
 
 // Commands return `Result<_, String>`: the webview only shows the message.
@@ -409,15 +461,51 @@ pub struct ClearSessionsResult {
 
 #[tauri::command]
 pub async fn clear_all_sessions(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
     jobs: State<'_, Arc<JobQueue>>,
-) -> Result<ClearSessionsResult, String> {
-    let jobs = Arc::clone(&jobs);
-    let (deleted, skipped) =
-        tauri::async_runtime::spawn_blocking(move || jobs.clear_all_sessions())
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-    Ok(ClearSessionsResult { deleted, skipped })
+    recorder: State<'_, Arc<Recorder>>,
+) -> Result<Option<ClearSessionsResult>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let store = Arc::clone(&store);
+        let active_recorder = Arc::clone(&recorder);
+        let choice = crate::shell::native_choice(
+            app,
+            "Delete all sessions?",
+            move || {
+                if active_recorder.is_recording() {
+                    return Ok(None);
+                }
+                let count = store.session_count().map_err(|e| e.to_string())?;
+                let noun = if count == 1 { "session" } else { "sessions" };
+                Ok((count > 0).then(|| format!(
+                    "Delete {count} {noun} and their local audio, transcripts, and notes? This cannot be undone."
+                )))
+            },
+            ["Cancel", "Delete All Sessions"],
+            true,
+        ).await?;
+        if choice != Some(true) {
+            return Ok(None);
+        }
+        let jobs = Arc::clone(&jobs);
+        let recorder = Arc::clone(&recorder);
+        tauri::async_runtime::spawn_blocking(move || {
+            let (deleted, skipped) = recorder
+                .while_idle(|| jobs.clear_all_sessions())
+                .map_err(|_| "Stop recording before deleting all sessions".to_string())?
+                .map_err(|e| e.to_string())?;
+            Ok(Some(ClearSessionsResult { deleted, skipped }))
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, store, jobs, recorder);
+        Err("Native alerts require macOS".into())
+    }
 }
 
 #[tauri::command]
@@ -1056,15 +1144,35 @@ pub fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+pub(crate) fn request_quit_confirmation(app: &AppHandle, restart_for_update: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit(QUIT_REQUESTED_EVENT, restart_for_update);
+    }
+}
+
 #[tauri::command]
-pub(crate) fn confirm_quit(
+pub(crate) async fn confirm_quit(
     app: AppHandle,
     confirmed: State<'_, crate::QuitConfirmed>,
     recorder: State<'_, Arc<Recorder>>,
-) {
+    updates: State<'_, Arc<crate::update::UpdateManager>>,
+    restart_for_update: bool,
+) -> Result<(), String> {
+    if restart_for_update {
+        let updates = Arc::clone(&updates);
+        return tauri::async_runtime::spawn_blocking(move || updates.install_confirmed())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     confirmed.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    recorder.shutdown();
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || recorder.shutdown())
+        .await
+        .map_err(|e| e.to_string())?;
     app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1172,12 +1280,22 @@ pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String>
 pub fn set_app_settings(
     app: AppHandle,
     store: State<Arc<Store>>,
+    updates: State<Arc<crate::update::UpdateManager>>,
     settings: AppSettings,
 ) -> Result<(), String> {
+    let was_automatic = store
+        .app_settings()
+        .map_err(|e| e.to_string())?
+        .check_for_updates_automatically;
     store
         .set_app_settings(settings.clone())
         .map_err(|e| e.to_string())?;
+    let resume_updates = !was_automatic && settings.check_for_updates_automatically;
     let _ = app.emit(APP_SETTINGS_CHANGED_EVENT, settings);
+    if resume_updates && crate::update::automatic_checks_supported() {
+        let updates = Arc::clone(&updates);
+        std::thread::spawn(move || updates.check_automatically());
+    }
     Ok(())
 }
 

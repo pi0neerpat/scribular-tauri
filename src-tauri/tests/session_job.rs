@@ -1231,6 +1231,7 @@ fn recovery_with_insufficient_speech_keeps_audio_and_reports_why() {
 #[test]
 fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
     let h = Harness::new();
+    assert_eq!(h.store.session_count().unwrap(), 0);
     let recording = h.start(InputMode::Mic);
     assert!(h
         .queue
@@ -1257,8 +1258,10 @@ fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
             &Default::default(),
         )
         .unwrap();
+    assert_eq!(h.store.session_count().unwrap(), 2);
     let (deleted, skipped) = h.queue.clear_all_sessions().unwrap();
     assert_eq!((deleted, skipped), (1, 1));
+    assert_eq!(h.store.session_count().unwrap(), 1);
     assert_eq!(
         h.store
             .list_sessions()

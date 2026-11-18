@@ -456,6 +456,10 @@ impl Store {
         self.get_session(&id)?.ok_or_else(|| session_not_found(&id))
     }
 
+    pub fn session_count(&self) -> Result<i64> {
+        self.with(|c| Ok(c.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?))
+    }
+
     /// Newest first.
     pub fn list_sessions(&self) -> Result<Vec<SessionListItem>> {
         self.with(|c| {

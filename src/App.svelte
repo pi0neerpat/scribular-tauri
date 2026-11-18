@@ -6,7 +6,7 @@
   import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import NoteStyles from './lib/components/NoteStyles.svelte';
-  import UpdateBar from './lib/components/UpdateBar.svelte';
+  import UpdateAlert from './lib/components/UpdateAlert.svelte';
   import SessionHistory from './lib/components/SessionHistory.svelte';
   import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
@@ -31,15 +31,16 @@
   let navigationLocked = $derived(navigationLockedBy(modelProgress));
   let view = $derived($navigation.view);
   $effect(() => navigation.update((n) => ({ ...n, navigationLocked })));
-  $effect(() => { if (typeof gate === 'object') void setShellMenuState({ hasSessions: false, selected: false, hasNote: false, recording: false, recoverable: false, locked: true }).catch(() => {}); });
+  $effect(() => { if (typeof gate === 'object') void setShellMenuState({ selected: false, hasNote: false, recording: false, recoverable: false, locked: true }).catch(() => {}); });
   let speechReady = $state(false);
   let recording = $state(false);
-  let confirmQuitOpen = $state(false);
+  let recordingKnown = $state(false);
+  let quitIntent = $state<'quit' | 'restart' | null>(null);
   let tourOpen = $state(false);
   let tourRun = $state(0);
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
   let history = $state<{ focusSearch: () => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
-  let recordView = $state<{ copyResultNote: () => Promise<void> } | undefined>();
+  let recordView = $state<{ copyResultNote: () => Promise<void>; refreshAfterDeletion: () => Promise<void> } | undefined>();
   let recordHasNote = $state(false);
 
   function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
@@ -57,6 +58,11 @@
     interrupted = (await listSessions()).filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length;
   }
 
+  function sessionsChanged() {
+    void refreshInterrupted().catch(() => {});
+    void recordView?.refreshAfterDeletion().catch((e) => (error = String(e)));
+  }
+
   onMount(() => {
     const showRecord = () => navigate('record');
     window.addEventListener('tray-start-failed', showRecord);
@@ -72,7 +78,7 @@
         case 'shell-manage-styles': navigate('styles'); break;
         case 'shell-blank-style': if (!recording && allows($accessState)) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
         case 'shell-new-recording': if (!recording && allows($accessState)) navigate('record'); break;
-        case 'shell-delete-all': if (!recording) navigate('history', undefined, () => history?.confirmDeleteAll()); break;
+        case 'shell-delete-all': if (!recording) void history?.confirmDeleteAll(); break;
         case 'shell-delete-session': if (!recording) navigate('history', undefined, () => history?.confirmDeleteSelected()); break;
         case 'shell-copy-note': void (view === 'record' ? recordView?.copyResultNote() : history?.copySelectedNote()); break;
         case 'shell-recover': if (!recording && allows($accessState)) navigate('history', undefined, () => history?.recoverFirst()); break;
@@ -93,7 +99,10 @@
     modelEvents.then(() => modelsStatus()).then((snapshot) => {
       modelProgress = [...snapshot.filter((m) => !modelEventsSeen.has(m.modelId)), ...modelProgress.filter((m) => modelEventsSeen.has(m.modelId))];
     }).catch(() => {});
-    const quitRequest = onQuitRequested(() => { if (typeof gate === 'object') void quitApp(); else confirmQuitOpen = true; });
+    const quitRequest = onQuitRequested((restart) => {
+      if (typeof gate === 'object') void quitApp();
+      else quitIntent = restart ? 'restart' : 'quit';
+    });
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
     const closeRequest = onWindowCloseRequested(() => {
       const hide = () => { void getCurrentWindow().hide().catch((e) => (error = String(e))); };
@@ -126,7 +135,7 @@
         recordingSessionId = id;
         recording = id !== null && (latestProgress?.sessionId !== id || latestProgress.state === 'recording');
       });
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { recordingKnown = true; });
     lockedState()
       .then((reason) => {
         gate = reason ? { locked: reason } : 'open';
@@ -182,8 +191,8 @@
 <main>
   <BackgroundAnimation enabled={$appSettings.showBackgroundAnimation} {recording} />
   <header data-tauri-drag-region><span data-tauri-drag-region>Scribular</span></header>
-  {#if confirmQuitOpen}<QuitConfirm close={() => (confirmQuitOpen = false)} />{/if}
-  <UpdateBar />
+  {#if quitIntent}<QuitConfirm restart={quitIntent === 'restart'} close={() => (quitIntent = null)} />{/if}
+  <UpdateAlert recording={recording || !recordingKnown} />
   {#if notice}
     <p role="status">
       Your earlier test sessions were encrypted. Turn on FileVault to protect copies of the old file
@@ -205,7 +214,7 @@
   {:else}
     <p>Loading…</p>
   {/if}
-  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} {recordHasNote} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={() => refreshInterrupted().catch(() => {})}>
+  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} {recordHasNote} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={sessionsChanged}>
     <!-- Keep the recorder mounted so its progress survives navigation. -->
     <div hidden={view !== 'record'}><RecordView bind:this={recordView}
         {speechReady}

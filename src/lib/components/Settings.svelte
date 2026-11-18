@@ -33,6 +33,7 @@
   import LicenseSettings from './LicenseSettings.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
   import type { AudioApp } from '../types/AudioApp';
+  import type { AppSettings } from '../types/AppSettings';
   import type { InputMode } from '../types/InputMode';
   import type { Privacy } from '../types/Privacy';
   import type { RecordingSettings } from '../types/RecordingSettings';
@@ -62,7 +63,8 @@
   let speakerModel = $state<ModelProgress | null>(null);
   let version = $state<string>('');
   let update = $state<UpdateState>({ state: 'idle', installable: false });
-  let notifyWasEnabled = $state(false);
+  let persistedAppSettings = $state<AppSettings | null>(null);
+  let appSettingsSaving = $state(false);
   type Category = 'General' | 'Appearance' | 'Recording' | 'Keyboard Shortcuts' | 'License';
   let category = $state<Category>((new URLSearchParams(location.search).get('pane') as Category) || 'General');
   let telemetryOn = $state(false);
@@ -123,7 +125,7 @@
       try {
         const app = await getAppSettings();
         appSettings.set(app);
-        notifyWasEnabled = app.notifySummaryComplete;
+        persistedAppSettings = app;
       } catch (e) { error = String(e); }
       try {
         const remove = await onUpdateState((state) => { sawUpdate = true; update = state; });
@@ -195,23 +197,29 @@
     }
   }
 
-  async function saveAppSettings() {
-    const next = $appSettings;
+  async function saveAppSettings(key: keyof AppSettings, enabled: boolean) {
+    if (!persistedAppSettings || appSettingsSaving) return;
+    const next = { ...persistedAppSettings, [key]: enabled };
+    appSettingsSaving = true;
+    appSettings.set(next);
+    error = null;
     try {
-      if (next.notifySummaryComplete && !notifyWasEnabled) {
+      if (next.notifySummaryComplete && !persistedAppSettings.notifySummaryComplete) {
         if (!(await requestNotificationPermission())) {
-          appSettings.update((s) => ({ ...s, notifySummaryComplete: false }));
+          next.notifySummaryComplete = false;
           denied = 'notifications';
         } else {
-          notifyWasEnabled = true;
           denied = null;
         }
       }
-      if (!next.notifySummaryComplete) notifyWasEnabled = false;
-      await setAppSettings($appSettings);
+      await setAppSettings(next);
+      persistedAppSettings = next;
+      appSettings.set(next);
     } catch (e) {
       error = String(e);
-      appSettings.set(await getAppSettings());
+      appSettings.set(persistedAppSettings);
+    } finally {
+      appSettingsSaving = false;
     }
   }
 
@@ -302,6 +310,7 @@
   {#if category === 'General'}
     <fieldset>
       <legend>Updates</legend>
+      <label><input type="checkbox" checked={$appSettings.checkForUpdatesAutomatically} disabled={!persistedAppSettings || appSettingsSaving} onchange={(e) => saveAppSettings('checkForUpdatesAutomatically', e.currentTarget.checked)} /> Check for updates automatically</label>
       <p>Current version: {version || 'Loading…'}</p>
       <p role="status">{updateStatus(update)}</p>
       <button
@@ -341,7 +350,7 @@
   {#if category === 'General'}
     <fieldset>
       <legend>General</legend>
-      <label><input type="checkbox" bind:checked={$appSettings.notifySummaryComplete} onchange={saveAppSettings} /> Show summarization complete alert</label>
+      <label><input type="checkbox" checked={$appSettings.notifySummaryComplete} disabled={!persistedAppSettings || appSettingsSaving} onchange={(e) => saveAppSettings('notifySummaryComplete', e.currentTarget.checked)} /> Show summarization complete alert</label>
       {#if denied === 'notifications'}
         <p role="status">Notifications are disabled. Allow Scribular in System Settings to show summary alerts.
           <button onclick={() => openPrivacySettings('notifications')}>Open System Settings</button>
@@ -350,7 +359,7 @@
     </fieldset>
   {/if}
   {#if category === 'Appearance'}
-    <label><input type="checkbox" bind:checked={$appSettings.showBackgroundAnimation} onchange={saveAppSettings} /> Show background animation</label>
+    <label><input type="checkbox" checked={$appSettings.showBackgroundAnimation} disabled={!persistedAppSettings || appSettingsSaving} onchange={(e) => saveAppSettings('showBackgroundAnimation', e.currentTarget.checked)} /> Show background animation</label>
   {/if}
 
   {#if category === 'Recording'}

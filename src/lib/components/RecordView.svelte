@@ -67,6 +67,19 @@
   let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
   $effect(() => onResultNote(!!result?.summary));
   export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
+  export async function refreshAfterDeletion() {
+    const id = sessionId ?? result?.id;
+    if (!id || await getSession(id)) return;
+    if (sessionId === id) {
+      resultFetch++;
+      sessionId = null;
+      status = null;
+      progress = null;
+      transcriptWaiting = null;
+      remember(null);
+    }
+    if (result?.id === id) result = null;
+  }
   let resultFetch = 0;
   let busy = $state(false);
   let error = $state<string | null>(null);

@@ -16,6 +16,7 @@ pub const PENDING_UPDATE_INSTALL: &str = "pending_update_install";
 pub const SKIPPED_UPDATE_VERSION: &str = "skipped_update_version";
 pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
 pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
+pub const CHECK_FOR_UPDATES_AUTOMATICALLY: &str = "check_for_updates_automatically";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
@@ -28,6 +29,7 @@ pub(super) const KEEP_AUDIO: &str = "keep_audio";
 pub struct AppSettings {
     pub notify_summary_complete: bool,
     pub show_background_animation: bool,
+    pub check_for_updates_automatically: bool,
 }
 
 impl Default for AppSettings {
@@ -35,6 +37,7 @@ impl Default for AppSettings {
         Self {
             notify_summary_complete: false,
             show_background_animation: true,
+            check_for_updates_automatically: true,
         }
     }
 }
@@ -77,6 +80,9 @@ impl Store {
                     == Some("true"),
                 show_background_animation: select(c, SHOW_BACKGROUND_ANIMATION)?.as_deref()
                     != Some("false"),
+                check_for_updates_automatically: select(c, CHECK_FOR_UPDATES_AUTOMATICALLY)?
+                    .as_deref()
+                    != Some("false"),
             })
         })
     }
@@ -97,6 +103,15 @@ impl Store {
                 &tx,
                 SHOW_BACKGROUND_ANIMATION,
                 if settings.show_background_animation {
+                    "true"
+                } else {
+                    "false"
+                },
+            )?;
+            insert(
+                &tx,
+                CHECK_FOR_UPDATES_AUTOMATICALLY,
+                if settings.check_for_updates_automatically {
                     "true"
                 } else {
                     "false"

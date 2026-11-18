@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
+import { accessState } from '../license';
 
 const api = vi.hoisted(() => ({
   listSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('../api', () => ({
 }));
 vi.mock('./SummaryPanel.svelte', () => ({ default: () => null }));
 const { default: SessionHistory } = await import('./SessionHistory.svelte');
+afterEach(() => accessState.set(null));
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -32,6 +34,26 @@ it('refreshes the list when a progress event names an unknown session', async ()
   await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(1));
   api.progress?.({ sessionId: 'new', state: 'failed', stepIndex: 1, stepCount: 1, message: 'Done' });
   await vi.waitFor(() => expect(target.textContent).toContain('new'));
+  unmount(app);
+});
+
+it('reports partial deletion from the native command on the recording view even with a lapsed license', async () => {
+  accessState.set({ kind: 'licenseLapsed' });
+  api.listSessions.mockResolvedValue([row('one'), row('two')]);
+  api.clearAllSessions.mockResolvedValueOnce(null).mockResolvedValueOnce({ deleted: 1, skipped: 1 });
+  const target = document.createElement('div');
+  const props = $state({ view: 'record' as const, recording: true });
+  const app = mount(SessionHistory, { target, props });
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(2));
+  await app.confirmDeleteAll();
+  expect(api.clearAllSessions).not.toHaveBeenCalled();
+  props.recording = false;
+  await app.confirmDeleteAll();
+  expect(target.textContent).not.toContain('deleted');
+  api.listSessions.mockResolvedValue([row('two')]);
+  await app.confirmDeleteAll();
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(1));
+  expect(target.querySelector('aside [role="status"]')?.textContent).toContain('1 deleted; 1 skipped');
   unmount(app);
 });
 

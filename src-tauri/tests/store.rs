@@ -8,10 +8,45 @@ use std::{
 
 use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{
-    AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, RecordingSettings,
-    SessionPatch, SessionStatus, Store, Timings, ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
+    AppSettings, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession,
+    RecordingSettings, SessionPatch, SessionStatus, Store, Timings, ACTIVE_PROMPT_ID,
+    AUDIO_RETENTION_MS,
 };
 use scribular_lib::text::Segment;
+
+#[test]
+fn automatic_update_preference_defaults_on_and_survives_reopen() {
+    let db = TempDb::new();
+    let store = db.open();
+    assert!(
+        store
+            .app_settings()
+            .unwrap()
+            .check_for_updates_automatically
+    );
+    store
+        .set_app_settings(AppSettings {
+            check_for_updates_automatically: false,
+            ..AppSettings::default()
+        })
+        .unwrap();
+    drop(store);
+    let store = db.open();
+    assert!(
+        !store
+            .app_settings()
+            .unwrap()
+            .check_for_updates_automatically
+    );
+    store.set_app_settings(AppSettings::default()).unwrap();
+    drop(store);
+    assert!(
+        db.open()
+            .app_settings()
+            .unwrap()
+            .check_for_updates_automatically
+    );
+}
 
 /// A fresh database path, removed (with its WAL files) on drop.
 struct TempDb(PathBuf);
