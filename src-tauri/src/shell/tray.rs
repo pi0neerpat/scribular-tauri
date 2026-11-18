@@ -80,9 +80,6 @@ fn stop(app: &AppHandle, speakers: Option<u8>) {
                 Err(e) => e.to_string(),
             };
             crate::diag::log::log("ERROR", "shell", "tray stop failed");
-            if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
-                refresh(&app, recorder.is_recording());
-            }
             let _ = app.emit(crate::commands::TRAY_STOP_FAILED_EVENT, error.clone());
             use tauri_plugin_notification::NotificationExt;
             let _ = app
@@ -168,15 +165,11 @@ fn build_menu(
     Menu::with_items(app, &refs)
 }
 
-pub fn refresh(app: &AppHandle, recording: bool) {
-    let multi = app
-        .try_state::<std::sync::Arc<crate::store::Store>>()
-        .and_then(|s| s.recording_settings().ok())
-        .is_some_and(|s| s.multi_speaker);
+pub fn refresh(app: &AppHandle, recording: bool, multi_speaker: bool) {
     let Some(tray) = app.tray_by_id("main") else {
         return;
     };
-    if let Ok(menu) = build_menu(app, recording, multi) {
+    if let Ok(menu) = build_menu(app, recording, multi_speaker) {
         let _ = tray.set_menu(Some(menu));
     }
     let (bytes, template): (&[u8], bool) = if recording {

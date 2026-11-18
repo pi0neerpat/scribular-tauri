@@ -5,20 +5,24 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 pub fn show_main(app: &AppHandle) -> Option<WebviewWindow> {
     let window = app.get_webview_window("main")?;
-    let _ = show_window(&window);
+    show_window(&window).ok()?;
     let _ = window.set_focus();
     Some(window)
 }
 
 pub fn show_window(window: &WebviewWindow) -> tauri::Result<()> {
-    restore_dock_icon(window.app_handle())?;
+    restore_dock_icon(window.app_handle());
     window.show()
 }
 
-pub fn restore_dock_icon(app: &AppHandle) -> tauri::Result<()> {
+fn restore_dock_icon(app: &AppHandle) {
     #[cfg(target_os = "macos")]
-    app.set_activation_policy(tauri::ActivationPolicy::Regular)?;
-    Ok(())
+    if app
+        .set_activation_policy(tauri::ActivationPolicy::Regular)
+        .is_err()
+    {
+        crate::diag::log::log("WARN", "shell", "could not restore the Dock icon");
+    }
 }
 
 pub fn hide_dock_if_no_windows(app: &AppHandle) -> tauri::Result<()> {

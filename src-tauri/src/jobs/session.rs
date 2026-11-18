@@ -386,6 +386,7 @@ impl Recorder {
             _watched: watched,
         });
         drop(recording);
+        inner.events.recording_changed(true, multi_speaker);
         inner.emit(&session.id, SessionStatus::Recording, "Recording...");
         Ok(session)
     }
@@ -402,6 +403,7 @@ impl Recorder {
         let recording = lock(&inner.recording)
             .take()
             .ok_or(RecordError::NotRecording)?;
+        inner.events.recording_changed(false, false);
         let id = recording.session_id;
         let diarize = recording.multi_speaker && num_speakers != Some(0);
         let mut samples = 0;

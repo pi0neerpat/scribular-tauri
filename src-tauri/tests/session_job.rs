@@ -74,6 +74,7 @@ impl Drop for TempDb {
 /// what each event says.
 struct Events {
     store: Arc<Store>,
+    recording_changes: Mutex<Vec<(bool, bool)>>,
     progress: Mutex<Vec<SessionProgress>>,
     segments: Mutex<Vec<SessionSegments>>,
     waiting: Mutex<Vec<TranscriptWaiting>>,
@@ -121,6 +122,13 @@ impl Events {
 }
 
 impl JobEvents for Events {
+    fn recording_changed(&self, recording: bool, multi_speaker: bool) {
+        self.recording_changes
+            .lock()
+            .unwrap()
+            .push((recording, multi_speaker));
+    }
+
     fn progress(&self, p: SessionProgress) {
         let row = self.store.get_session(&p.session_id).unwrap().unwrap();
         if row.status != p.state {
@@ -213,6 +221,7 @@ impl Harness {
         let store = Arc::new(Store::open(&db.0, &MemoryKeyStore::with_key([7; 32])).unwrap());
         let events = Arc::new(Events {
             store: store.clone(),
+            recording_changes: Mutex::default(),
             progress: Mutex::default(),
             segments: Mutex::default(),
             waiting: Mutex::default(),
@@ -633,6 +642,10 @@ fn cancelling_during_speaker_identification_saves_plain_transcript() {
     assert_eq!(session.status, SessionStatus::Cancelled);
     assert_eq!(session.transcript, TRANSCRIPT);
     assert_eq!(session.raw_transcript, None);
+    assert_eq!(
+        *h.events.recording_changes.lock().unwrap(),
+        [(true, true), (false, false)]
+    );
     assert!(
         h.summarizer.summarizer.calls().is_empty(),
         "cancelled sessions are not summarized"

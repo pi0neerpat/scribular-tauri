@@ -23,12 +23,16 @@ pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
         )
         .into(),
     );
+    super::restore_dock_icon(app);
     WebviewWindowBuilder::new(app, "settings", url)
         .title("Scribular Settings")
         .inner_size(680.0, 560.0)
         .build()
+        .inspect_err(|_| {
+            let _ = super::hide_dock_if_no_windows(app);
+        })
         .map_err(|e| e.to_string())?;
-    super::restore_dock_icon(app).map_err(|e| e.to_string())
+    Ok(())
 }
 
 pub fn handle(app: &AppHandle, event: MenuEvent) {

@@ -385,9 +385,6 @@ pub async fn install_update(
     if result
         .as_ref()
         .is_err_and(|error| error == crate::update::BUSY)
-        && app
-            .try_state::<Arc<Recorder>>()
-            .is_some_and(|r| r.quit_confirmation_needed())
     {
         request_quit_confirmation(&app, true);
         return Ok(());
@@ -434,6 +431,14 @@ pub async fn show_update_ready_alert(
 #[tauri::command]
 pub fn list_sessions(store: State<Arc<Store>>) -> Result<Vec<SessionListItem>, String> {
     store.list_sessions().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn count_sessions(store: State<'_, Arc<Store>>) -> Result<i64, String> {
+    let store = Arc::clone(&store);
+    tauri::async_runtime::spawn_blocking(move || store.session_count().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1415,47 +1420,51 @@ fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -
 }
 
 impl JobEvents for TauriJobEvents {
-    fn progress(&self, progress: SessionProgress) {
-        // Quit can join a finalizer on the main thread. Workers must not wait for native UI.
+    fn recording_changed(&self, recording: bool, multi_speaker: bool) {
         let app = self.0.clone();
         let _ = self.0.run_on_main_thread(move || {
-            let recording = app
-                .try_state::<Arc<Recorder>>()
-                .is_some_and(|r| r.is_recording());
-            crate::shell::tray::refresh(&app, recording);
-            if progress.state == crate::store::SessionStatus::Done {
-                if let Some(store) = app.try_state::<Arc<Store>>() {
-                    let enabled = store
-                        .app_settings()
-                        .is_ok_and(|s| s.notify_summary_complete);
+            crate::shell::tray::refresh(&app, recording, multi_speaker);
+        });
+    }
+
+    fn progress(&self, progress: SessionProgress) {
+        let _ = self.0.emit(SESSION_PROGRESS_EVENT, &progress);
+        if progress.state != crate::store::SessionStatus::Done {
+            return;
+        }
+        let session_id = progress.session_id;
+
+        // Read settings off the main thread without holding up job callbacks.
+        let app = self.0.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let enabled = app.try_state::<Arc<Store>>().is_some_and(|store| {
+                store
+                    .app_settings()
+                    .is_ok_and(|s| s.notify_summary_complete)
+            });
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let focused = handle.get_webview_window("main").is_some_and(|w| {
+                    w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+                });
+                let Some(notices) = handle.try_state::<SummaryNotices>() else {
+                    return;
+                };
+                let mut sent = notices.0.lock().unwrap_or_else(|e| e.into_inner());
+                if should_notify_summary(enabled, focused, sent.contains(&session_id)) {
+                    use tauri_plugin_notification::NotificationExt;
+                    if handle
+                        .notification()
+                        .builder()
+                        .title("Scribular")
+                        .body("Summary ready")
+                        .show()
+                        .is_ok()
                     {
-                        let focused = app.get_webview_window("main").is_some_and(|w| {
-                            w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
-                        });
-                        if let Some(notices) = app.try_state::<SummaryNotices>() {
-                            let mut sent = notices.0.lock().unwrap_or_else(|e| e.into_inner());
-                            if should_notify_summary(
-                                enabled,
-                                focused,
-                                sent.contains(&progress.session_id),
-                            ) {
-                                use tauri_plugin_notification::NotificationExt;
-                                if app
-                                    .notification()
-                                    .builder()
-                                    .title("Scribular")
-                                    .body("Summary ready")
-                                    .show()
-                                    .is_ok()
-                                {
-                                    sent.insert(progress.session_id.clone());
-                                }
-                            }
-                        }
+                        sent.insert(session_id);
                     }
                 }
-            }
-            let _ = app.emit(SESSION_PROGRESS_EVENT, progress);
+            });
         });
     }
 

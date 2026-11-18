@@ -4,7 +4,7 @@ import { mount, unmount } from 'svelte';
 import { accessState } from '../license';
 
 const api = vi.hoisted(() => ({
-  listSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
+  listSessions: vi.fn(), countSessions: vi.fn(), searchSessions: vi.fn(), getSession: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
   onSessionProgress: vi.fn(), cancelJob: vi.fn(), clearAllSessions: vi.fn(), deleteSession: vi.fn(), recoverSession: vi.fn(),
   setShellMenuState: vi.fn().mockResolvedValue(undefined), openSettings: vi.fn().mockResolvedValue(undefined),
   progress: undefined as ((p: unknown) => void) | undefined,
@@ -60,8 +60,12 @@ it('reports partial deletion from the native command on the recording view even 
 it('keeps Delete All available for real sessions even when search hides them and the license lapses', async () => {
   accessState.set({ kind: 'licenseLapsed' });
   api.listSessions.mockResolvedValue([row('one'), row('two')]);
+  api.countSessions.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
   api.searchSessions.mockResolvedValue([]);
-  api.clearAllSessions.mockResolvedValueOnce(null).mockResolvedValueOnce({ deleted: 2, skipped: 0 });
+  let cancelClear!: (value: null) => void;
+  api.clearAllSessions
+    .mockReturnValueOnce(new Promise<null>((resolve) => { cancelClear = resolve; }))
+    .mockResolvedValueOnce({ deleted: 2, skipped: 0 });
   const target = document.createElement('div');
   const props = $state({ recording: false });
   const app = mount(SessionHistory, { target, props });
@@ -79,7 +83,9 @@ it('keeps Delete All available for real sessions even when search hides them and
   await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(0));
   expect(button.disabled).toBe(false);
   button.click();
-  await vi.waitFor(() => expect(api.clearAllSessions).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(button.disabled).toBe(true));
+  expect(api.clearAllSessions).toHaveBeenCalledTimes(1);
+  cancelClear(null);
   await vi.waitFor(() => expect(button.disabled).toBe(false));
   api.listSessions.mockResolvedValue([]);
   button.click();
@@ -87,8 +93,26 @@ it('keeps Delete All available for real sessions even when search hides them and
   await vi.waitFor(() => expect(button.disabled).toBe(true));
   search.value = '';
   search.dispatchEvent(new Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(4));
+  await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+  expect(api.countSessions).toHaveBeenCalledTimes(2);
   expect(target.querySelectorAll('.session')).toHaveLength(0);
+  unmount(app);
+});
+
+it('shows an empty search result even when checking the total session count fails', async () => {
+  api.listSessions.mockResolvedValue([row('one')]);
+  api.searchSessions.mockResolvedValue([]);
+  api.countSessions.mockRejectedValue(new Error('count unavailable'));
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target });
+  await vi.waitFor(() => expect(target.querySelectorAll('.session')).toHaveLength(1));
+  const search = target.querySelector<HTMLInputElement>('input[type="search"]')!;
+  search.value = 'no match';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await vi.waitFor(() => expect(target.textContent).toContain('count unavailable'));
+  expect(target.querySelectorAll('.session')).toHaveLength(0);
+  expect(target.querySelector<HTMLButtonElement>('.delete-all')!.disabled).toBe(false);
+  expect(api.listSessions).toHaveBeenCalledTimes(1);
   unmount(app);
 });
 

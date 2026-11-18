@@ -5,8 +5,8 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 ## What it does
 
 - **Tray (menu bar).** Tooltip "Scribular". Menu: Show Scribular, Start Recording or Stop Recording, Quit. The icon is `tray-idle.png` when idle and `tray-recording.png` while recording. With multi-speaker on, Stop becomes a submenu: "2 speakers", "3 speakers", "4+ speakers", "Skip speaker detection".
-- **Close-to-hide.** The red close button does not quit. The window is hidden and recording continues. The tray's Show item, or a Dock click, brings it back. If the tray failed to install, closing exits the app.
-- **Cmd+Q / Quit during recording.** If a recording is active, quitting is blocked, the window is shown and focused, and a confirm dialog (`QuitConfirm.svelte`) opens. Confirming stops the recorder and exits.
+- **Close-to-hide.** Closing the main window keeps the app and any recording running. When no window is visible, the app hides its Dock icon. Show Scribular in the tray restores the main window and Dock icon. If the tray failed to install, closing exits the app.
+- **Cmd+Q / Quit during recording or summarization.** While a recording or summary is running, Quit shows and focuses the window and opens `QuitConfirm.svelte`. Confirming shuts down the app.
 - **Summary notification.** When a summary reaches Done, a native "Summary ready" notification is sent if the setting is on, the window is not visible and focused, and that session has not already been notified.
 - **Tray failures.** A failed tray Start (renderer side) or tray Stop shows a native notification with the error. A tray Start failure also shows the window.
 - **External links.** Clicks on `http(s)` links to another origin, and on `mailto:` links, open in the system handler. `open_external_link` rejects every other scheme.
@@ -15,7 +15,7 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 
 ## How it works
 
-- `src-tauri/src/shell/tray.rs`: `tray_model` (pure menu description), `install`, `build_menu`, `refresh(app, recording)` (rebuilds menu and icon), `stop` (calls `Recorder::stop_with_speakers`, logs, emits `tray-stop-failed`, notifies), `show_window`. `src-tauri/src/shell/mod.rs` only exports `tray`.
+- `src-tauri/src/shell/tray.rs` builds the menu from `tray_model`, refreshes the menu and icon when recording starts or stops, and routes Stop through `Recorder::stop_with_speakers`. `src-tauri/src/shell/mod.rs` manages window visibility and the Dock activation policy.
 - `src-tauri/src/lib.rs`:
   - The `on_window_event` handler turns `CloseRequested` into `prevent_close` plus a `window-close-requested` event.
   - `RunEvent::ExitRequested` checks `Recorder::quit_confirmation_needed()` and the `QuitConfirmed` flag, and emits `quit-requested`.
@@ -25,9 +25,9 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 - `src-tauri/src/commands.rs`:
   - `quit_app`, `confirm_quit`.
   - `notify_tray_start_failure`, `request_notification_permission`, `open_external_link`.
-  - `TauriJobEvents::progress` refreshes the tray on every progress event and sends the summary notification. `should_notify_summary` and `SummaryNotices` do the gating and de-duplication.
+  - `TauriJobEvents::recording_changed` refreshes the tray. `TauriJobEvents::progress` emits job progress and schedules the summary notification when a summary finishes. `should_notify_summary` and `SummaryNotices` control when the notification is sent.
 - Frontend:
-  - `src/App.svelte` listens for `window-close-requested` (if Settings has unsaved changes it asks first, then calls `getCurrentWindow().hide()`), `quit-requested`, `tray-start-recording` and `tray-stop-failed`.
+  - `src/App.svelte` listens for `window-close-requested`, asks before leaving an unsaved Note Styles edit, and calls `setMainWindowVisible(false)`. The `set_main_window_visible` command hides the main window and updates the Dock. The app also listens for `quit-requested`, `tray-start-recording`, and `tray-stop-failed`.
   - `src/lib/api.ts` wraps the commands and events.
   - `src/main.ts` holds the global link-click handler.
   - `src/lib/navigation.ts` holds `navigationLockedBy`.
@@ -39,7 +39,7 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 
 - `AppSettings` (`src/lib/types/AppSettings.ts`, persisted by the Rust store): `notifySummaryComplete` (default false in the frontend store) and `showBackgroundAnimation` (default true).
 - Turning on "Show summarization complete alert" calls `request_notification_permission`. If macOS denies it, the toggle reverts to off.
-- `src-tauri/capabilities/default.json` (window `main`) grants `core:event:default`, `core:window:allow-destroy`, `core:window:allow-hide`, `core:window:allow-show` and `core:window:allow-start-dragging`. Without `allow-hide` the close-to-hide call from the frontend fails.
+- `src-tauri/capabilities/default.json` grants the main window event and window permissions. The Rust visibility command handles close-to-hide.
 - Crate: `tauri-plugin-notification = "=2.5.0"`. Tray icons are `src-tauri/icons/tray-idle.png` and `tray-recording.png`, embedded with `include_bytes!`.
 
 ## How to test

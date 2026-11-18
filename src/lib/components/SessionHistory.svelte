@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
-  import { cancelJob, clearAllSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
+  import { cancelJob, clearAllSessions, countSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
   import type { AppView } from '../navigation';
   import type { Session } from '../types/Session';
   import type { SessionListItem } from '../types/SessionListItem';
@@ -52,12 +52,15 @@
     try {
       const result = filter ? await searchSessions(filter) : await listSessions();
       if (current !== request) return;
-      const hasAny = result.length > 0 || (!!filter && (await listSessions()).length > 0);
-      if (current !== request) return;
       sessions = result;
-      hasSessions = hasAny;
       error = null;
       if (!filter && selected && !result.some((s) => s.id === selected?.id)) selected = null;
+      if (filter && !result.length) {
+        const count = await countSessions();
+        if (current === request) hasSessions = count > 0;
+      } else {
+        hasSessions = result.length > 0;
+      }
     } catch (e) { if (current === request) error = String(e); }
   }
 
@@ -165,52 +168,54 @@
 
 <div class="shell">
   <aside aria-label="Sidebar" data-tour="sessions">
-    <input bind:this={searchField} type="search" aria-label="Search sessions" placeholder="Search sessions" bind:value={query} oninput={(e) => { query = e.currentTarget.value; void refresh(); }} />
-    {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
-    {#if clearResult}<p role="status">{clearResult}</p>{/if}
-    <nav aria-label="Main navigation">
-      <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationLocked}>New Recording</button>
-      <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
-    </nav>
-    <div class="sessions">
-      {#each groups as group (group.label)}
-        {#if group.rows.length}
-          <h2>{group.label}</h2>
-          <ul>
-            {#each group.rows as item (item.id)}
-              {@const event = progress[item.id]}
-              <li>
-                <button class="session" onclick={(e) => open(item, e.currentTarget)} oncontextmenu={(e) => { e.preventDefault(); const menu = e.currentTarget.nextElementSibling; if (menu instanceof HTMLDetailsElement) menu.open = true; }} aria-current={view === 'history' && selected?.id === item.id ? 'page' : undefined} disabled={navigationLocked}>
-                  <strong>{item.title || new Date(item.createdAt).toLocaleString()}</strong>
-                  <time>{new Date(item.createdAt).toLocaleDateString('en-US')}</time>
-                  <span>{event?.message ?? item.status} {item.isSample ? 'Sample' : ''}</span>
-                  {#if item.interrupted && item.hasAudio && item.status === 'failed'}<span>Recover</span>{/if}
-                  {#if ['awaitingModel', 'summarizing'].includes(item.status)}<span>Writing…</span>{/if}
-                  {#if copiedId === item.id}<span aria-label="Copied">✓</span>{/if}
-                </button>
-                <details class="actions">
-                  <summary aria-label="Actions for {item.title || 'session'}">•••</summary>
-                  {#if item.interrupted && item.hasAudio && item.status === 'failed'}<button disabled={!allows($accessState)} onclick={() => recover(item.id)}>Recover</button>{/if}
-                  {#if item.status === 'awaitingModel'}<button onclick={() => cancel(item.id)}>Cancel</button>{/if}
-                  {#if item.status === 'finalizing' || item.status === 'summarizing'}<button onclick={() => cancel(item.id)}>Stop</button>{/if}
-                  {#if item.interrupted && !item.hasAudio}<span>Audio no longer available</span>{/if}
-                  {#if !['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(item.status)}
-                    <button onclick={() => confirmRemove(item.id)}>{deleteConfirmId === item.id ? 'Confirm Delete' : 'Delete'}</button>
-                  {/if}
-                </details>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      {/each}
+    <div class="sidebar">
+      <input bind:this={searchField} type="search" aria-label="Search sessions" placeholder="Search sessions" bind:value={query} oninput={(e) => { query = e.currentTarget.value; void refresh(); }} />
+      {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
+      {#if clearResult}<p role="status">{clearResult}</p>{/if}
+      <nav aria-label="Main navigation">
+        <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationLocked}>New Recording</button>
+        <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
+      </nav>
+      <div class="sessions">
+        {#each groups as group (group.label)}
+          {#if group.rows.length}
+            <h2>{group.label}</h2>
+            <ul>
+              {#each group.rows as item (item.id)}
+                {@const event = progress[item.id]}
+                <li>
+                  <button class="session" onclick={(e) => open(item, e.currentTarget)} oncontextmenu={(e) => { e.preventDefault(); const menu = e.currentTarget.nextElementSibling; if (menu instanceof HTMLDetailsElement) menu.open = true; }} aria-current={view === 'history' && selected?.id === item.id ? 'page' : undefined} disabled={navigationLocked}>
+                    <strong>{item.title || new Date(item.createdAt).toLocaleString()}</strong>
+                    <time>{new Date(item.createdAt).toLocaleDateString('en-US')}</time>
+                    <span>{event?.message ?? item.status} {item.isSample ? 'Sample' : ''}</span>
+                    {#if item.interrupted && item.hasAudio && item.status === 'failed'}<span>Recover</span>{/if}
+                    {#if ['awaitingModel', 'summarizing'].includes(item.status)}<span>Writing…</span>{/if}
+                    {#if copiedId === item.id}<span aria-label="Copied">✓</span>{/if}
+                  </button>
+                  <details class="actions">
+                    <summary aria-label="Actions for {item.title || 'session'}">•••</summary>
+                    {#if item.interrupted && item.hasAudio && item.status === 'failed'}<button disabled={!allows($accessState)} onclick={() => recover(item.id)}>Recover</button>{/if}
+                    {#if item.status === 'awaitingModel'}<button onclick={() => cancel(item.id)}>Cancel</button>{/if}
+                    {#if item.status === 'finalizing' || item.status === 'summarizing'}<button onclick={() => cancel(item.id)}>Stop</button>{/if}
+                    {#if item.interrupted && !item.hasAudio}<span>Audio no longer available</span>{/if}
+                    {#if !['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(item.status)}
+                      <button onclick={() => confirmRemove(item.id)}>{deleteConfirmId === item.id ? 'Confirm Delete' : 'Delete'}</button>
+                    {/if}
+                  </details>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {/each}
+      </div>
+      <nav aria-label="More">
+        <button data-tour="settings" onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
+        <button onclick={onTour}>Show tour</button>
+        <TrialBadge onclick={onLicense} />
+      </nav>
+      {#if interrupted}<p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'}</p>{/if}
+      <button class="delete-all" disabled={!hasSessions || recording || clearing} onclick={confirmDeleteAll}>Delete All…</button>
     </div>
-    <nav aria-label="More">
-      <button data-tour="settings" onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
-      <button onclick={onTour}>Show tour</button>
-      <TrialBadge onclick={onLicense} />
-    </nav>
-    {#if interrupted}<p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'}</p>{/if}
-    <button class="delete-all" disabled={!hasSessions || recording || clearing} onclick={confirmDeleteAll}>Delete All…</button>
   </aside>
   <div class="content">
     <div hidden={view !== 'history'}>
@@ -226,7 +231,8 @@
 
 <style>
   .shell { display: grid; grid-template-columns: minmax(14rem, 17rem) minmax(0, 1fr); gap: 1rem; }
-  aside { border-right: 1px solid #8884; padding: 1rem; height: 70vh; display: flex; flex-direction: column; }
+  aside { border-right: 1px solid #8884; padding: 1rem; }
+  .sidebar { display: flex; flex-direction: column; height: 70vh; }
   .sessions { flex: 1; overflow-y: auto; }
   .delete-all { align-self: start; margin-top: .75rem; }
   aside input, aside nav button { width: 100%; }

@@ -144,6 +144,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::trigger_test_panic,
             commands::list_sessions,
+            commands::count_sessions,
             commands::search_sessions,
             commands::get_session,
             commands::update_session,

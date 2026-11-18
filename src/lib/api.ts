@@ -90,6 +90,10 @@ export function listSessions(): Promise<SessionListItem[]> {
   return invoke<SessionListItem[]>('list_sessions');
 }
 
+export function countSessions(): Promise<number> {
+  return invoke<number>('count_sessions');
+}
+
 export function searchSessions(query: string): Promise<SessionListItem[]> {
   return invoke<SessionListItem[]>('search_sessions', { query });
 }

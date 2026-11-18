@@ -178,6 +178,6 @@ Patrick, after manual testing of the p4 build (design updated in docs `f4f2a3d`)
 1. Closing the main window keeps the tray but the Dock icon stays. Wanted: only the tray icon while no window is shown; the Dock icon returns when a window is shown (R15, AS18).
 2. The tray had extra items (New Blank Style, Recover Interrupted Recording, New Style from…). Keep only Show Scribular, Start/Stop Recording with its speaker submenu, and Quit (R14, AS17).
 3. Quit shows the warning even when idle. Warn only while recording or the LLM is running (R16, AS19).
-4. The happy-path demo did not show Delete All. The re-recorded demo MUST exercise Delete All (sidebar button and File menu, the confirmation, the resulting empty sidebar).
+4. The happy-path demo must show Delete All through the sidebar button, native confirmation, and resulting empty sidebar. The File menu path is manual-only under AS12.
 5. Add a Delete All button to the main window sidebar near the session list, with R10 rules and the same native confirmation (R10 amended, AS16).
 6. Manual Check for Updates shows "Last check failed: Could not fetch a valid release JSON from the remote." because the release feed is not published (HTTP 404) and `tauri.conf.json` still has the placeholder pubkey. Accepted as a known environment limitation; behaviour unchanged.

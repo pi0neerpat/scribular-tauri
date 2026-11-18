@@ -59,6 +59,7 @@ pub struct TranscriptWaiting {
 
 /// Where jobs report; the app emits Tauri events, tests record.
 pub trait JobEvents: Send + Sync {
+    fn recording_changed(&self, _recording: bool, _multi_speaker: bool) {}
     fn progress(&self, progress: SessionProgress);
     fn summary_delta(&self, delta: SummaryDelta);
     fn segments(&self, segments: SessionSegments);
