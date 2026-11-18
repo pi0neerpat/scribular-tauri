@@ -109,10 +109,7 @@ pub fn run() {
     diag::panic::install();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            shell::show_main(app);
         }))
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
@@ -133,6 +130,7 @@ pub fn run() {
             commands::app_version,
             commands::open_settings,
             commands::set_shell_menu_state,
+            commands::set_main_window_visible,
             commands::get_onboarding_state,
             commands::complete_onboarding,
             commands::restore_sample_sessions,
@@ -146,6 +144,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             commands::trigger_test_panic,
             commands::list_sessions,
+            commands::count_sessions,
             commands::search_sessions,
             commands::get_session,
             commands::update_session,
@@ -200,7 +199,8 @@ pub fn run() {
             commands::open_external_link,
             commands::check_for_updates,
             commands::get_update_state,
-            commands::install_update
+            commands::install_update,
+            commands::show_update_ready_alert,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -394,17 +394,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
                 if let Some(recorder) = app.try_state::<Arc<Recorder>>() {
-                    if recorder.quit_confirmation_needed()
+                    if code != Some(tauri::RESTART_EXIT_CODE)
+                        && recorder.quit_confirmation_needed()
                         && !app.state::<QuitConfirmed>().0.load(Ordering::SeqCst)
                     {
                         api.prevent_exit();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                        let _ = app.emit(commands::QUIT_REQUESTED_EVENT, ());
+                        commands::request_quit_confirmation(app, false);
                         return;
                     }
                 }
@@ -421,10 +418,14 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                shell::show_main(app);
+            }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } if label == "settings" => {
+                let _ = shell::hide_dock_if_no_windows(app);
             }
             _ => {}
         });
@@ -446,7 +447,7 @@ fn setup_updates(
         Arc::new(move |state| {
             let _ = emit_handle.emit(commands::UPDATE_STATE_EVENT, state);
         }),
-        Arc::new(move || restart_handle.restart()),
+        Arc::new(move || restart_handle.request_restart()),
     ));
     app.manage(Arc::clone(&updates));
     if let Some(store) = store {
@@ -455,12 +456,11 @@ fn setup_updates(
     let manager = Arc::clone(&updates);
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(15));
-        #[cfg(debug_assertions)]
-        if std::env::var_os("SCRIBULAR_UPDATE_ENDPOINT").is_none() {
+        if !update::automatic_checks_supported() {
             return;
         }
         loop {
-            manager.check();
+            manager.check_automatically();
             std::thread::sleep(Duration::from_secs(60 * 60));
         }
     });

@@ -67,9 +67,12 @@ Clinicians using the Mac app need a reliable place to start a recording, find pa
 
 ### License, deletion, and updates
 - **R9** Use one shared access decision for trial/licensed/grace versus trial ended/invalid/lapsed. In denied states, the record screen, each note, and Note Styles show the approved renewal banner with Enter License… and Buy, and keep existing sessions, notes, transcripts, and retained audio viewable and copyable. Disable starting recording, note rewrite/edit, coach, style creation/edit/visibility changes, and other new content mutations in UI and native menus; allow an already-started recording/job to finish or cancel safely. Rust mutation commands recheck access and return a stable denial without changing data; viewing, copying, license entry, and renewal remain available. Deletion is never gated by license: Delete Session, Delete All Sessions and deleting a custom note style stay available in every access state (data sovereignty, Patrick 2026-11-16). Locked-store state still takes precedence over the shell.
-- **R10** File ▸ Delete All Sessions… is unavailable when recording is active or there are no sessions, and opens a native destructive confirmation naming the current session count and loss of local audio, transcripts, and notes. Cancel is the default; Escape/Return cancel. Only an explicit click on Delete All Sessions calls the existing clear operation. Refresh the sidebar and report deleted/skipped counts or an error; a partial failure must not claim all sessions were removed. A denied license never disables deletion; the only availability rules are recording-active and no-sessions.
+- **R10** File ▸ Delete All Sessions… is unavailable when recording is active or there are no sessions, and opens a native destructive confirmation naming the current session count and loss of local audio, transcripts, and notes. Cancel is the default; Escape/Return cancel. Only an explicit click on Delete All Sessions calls the existing clear operation. Refresh the sidebar and report deleted/skipped counts or an error; a partial failure must not claim all sessions were removed. A denied license never disables deletion; the only availability rules are recording-active and no-sessions. Amended 2026-11-17 (Patrick): the main window's sidebar also has a **Delete All…** button pinned below the session list (`app-shell/README.md` screens 1 and 10); it follows the same availability rules (dimmed while recording or with no sessions, never blocked by a lapsed license) and opens the same native confirmation and clear path as the File menu item.
 - **R11** When a downloaded update becomes ready, show one alert per version with “An update is ready.”, version text, OK and Restart Now. Defer it throughout recording and show it after Stop; do not interrupt capture. OK leaves the staged update to install on normal quit; Restart Now uses the existing guarded quit/relaunch path, respecting active-work confirmation. Do not show the main-window UpdateBar. Alert failure must leave the ready update installable on quit and provide a recoverable error or manual Check for Updates path.
 - **R12** Mount the note-style-coach-owned Note Styles banner and the recording-and-session-owned per-note fallback at their shell destinations; consume the shared coach availability gate for coach entry points. The shell must not block recording or session access because summary/coach work is unavailable.
+- **R14** (Patrick, 2026-11-17) The tray menu contains only Show Scribular, Start/Stop Recording with its speaker submenu, and Quit. Delete All Sessions stays in the File menu and sidebar. Style and recovery commands stay in the File menu.
+- **R15** (Patrick, 2026-11-17) When the main window is closed the app keeps only the tray icon and hides its Dock icon (macOS accessory activation policy); the Dock icon returns whenever a window is shown again (tray Show, New Recording that shows the window, reopen).
+- **R16** (Patrick, 2026-11-17) The quit confirmation (`QuitConfirm.svelte`, `recorder.quit_confirmation_needed()`) is shown only while a recording is active or the LLM (note generation/summary) is running. With neither, quitting proceeds without a prompt.
 - **R13** Protect private data and failure paths across shell IPC: search and menu payloads contain IDs/actions rather than transcript, audio, or note bodies where possible; no such content appears in logs/telemetry; listener setup uses a snapshot after subscription so reloads do not miss license/update/recording state; background update/search/coach failure never loses a session or blocks recording.
 
 ## Acceptance scenarios (numbered AS1..; Given/When/Then; each tagged automated or manual)
@@ -88,6 +91,10 @@ Clinicians using the Mac app need a reliable place to start a recording, find pa
 - **AS13** (automated, cargo test + vitest; R11) Given a Ready update event during recording and duplicate Ready events for the same version, when recording stops, then exactly one alert is queued; OK preserves install-on-quit and Restart Now uses the guarded relaunch path.
 - **AS14** (manual real-app; R11) Given a downloadable test update, when it becomes ready during recording, then no alert appears until Stop; record the alert/version/choices and verify OK followed by normal quit installs it, then repeat with Restart Now and record the resulting version. Report unverified if no signed test update is available.
 - **AS15** (automated, cargo test + vitest; R13) Given reload between event subscription and snapshot, stale menu state, and failed search/update availability calls, when the shell resumes, then the latest state wins, private bodies are absent from diagnostics, the session remains accessible, and recording can still start when access allows.
+- **AS16** (automated, vitest + cargo test; R10) Given the sidebar with zero, several, recording and lapsed-license states, when the Delete All… button is rendered and clicked, then it is disabled while recording or with no sessions, enabled under a lapsed license, and opens the same confirmation (Cancel default) and clear path as File ▸ Delete All Sessions…; after confirmation the sidebar is empty.
+- **AS17** (automated, cargo test; R14) Given the tray menu builder, when its items are listed, then the commands are exactly Show Scribular, Start/Stop Recording with its speaker submenu, and Quit.
+- **AS18** (manual real-app; R14,R15) Given the app with the main window open, when the window is closed, then the tray icon remains, the Dock icon disappears and the tray lists only the R14 items; when Show Scribular is chosen, then the window and Dock icon return. Record a screen capture of the Dock and tray.
+- **AS19** (automated, cargo test + vitest; R16) Given idle, recording, summary-running and idle-with-completed-notes states, when quit is requested, then the confirmation is requested only in the recording and summary-running states. Manual spot check in the real app (idle quit has no prompt).
 
 ## Design notes (modules, commands/events, data model + migration, UI components)
 - **Where it runs / data flow:** Rust owns the app menu, Settings window creation, access enforcement, persisted preferences, search, and updater schedule. The main Svelte webview owns sidebar selection, visible alerts, and content routing. Menu events carry command IDs and selected session IDs; the receiving flow verifies its current context before acting. The Settings webview reads/writes the same Rust settings and access state; both windows subscribe then snapshot to converge after missed events.
@@ -100,6 +107,8 @@ Clinicians using the Mac app need a reliable place to start a recording, find pa
 
 ## Dependencies and security check
 **New dependencies: none planned.** Reuse the existing Tauri stack, macOS native alert facilities, updater, SQLite, and ts-rs. If implementation requires a new dialog crate/plugin, record its exact pin, closed-source-compatible license, vulnerability check, install-time code, and artifact source/hash in this section before adding it; stop only for a concrete material issue. Implementation review must verify the local encrypted search path, Rust authorization for mutations, and no session content in logs or menu events.
+
+**P4 native alert implementation (2026-11-17):** Direct AppKit bindings use pinned `objc2 = 0.6.5` (MIT), `objc2-app-kit = 0.3.2` (Zlib OR Apache-2.0 OR MIT), and `objc2-foundation = 0.3.2` (MIT). All were already transitive dependencies; the new direct AppKit feature set is limited to alert and button APIs. Cargo.lock records crates.io registry checksums `08849bbd4767dfae9457696856ae1c84fe4e0281bbe4a7abff2d0e06fb7981f8`, `d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c`, and `e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272`, respectively. No installer or runtime download is added; `objc2` has its existing build script, while the two framework crates have none. A RustSec advisory search for these package names found no matching advisory on this date; `cargo-audit` is unavailable locally, so this is not a full lockfile audit.
 
 ## Out of scope
 - `recording-and-session`: source picker, manual call-app picker, two modes only (In the room = mic; On a call = mic plus app audio), recorder controls/levels/late attach, style chosen at Stop, Stop-to-session, note-first tabs, editable note/Undo, copied marker, and action semantics for session row controls.
@@ -138,7 +147,7 @@ All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 
 - Approved by Patrick 2026-11-16, including all default decisions. Patrick asked Darby to implement this spec.
 - Workflow: cwf, reviewer cubic, harness codex, review phase claude (`--harness codex --phase-harness review=claude`).
-- Design source on the coding VM: `/Users/admin/Projects/Scribular/docs/design/app-shell/README.md` (scribular-docs `main` at `0c06526`), with `mockup.html` and `screens/`; gaps in `design/_gaps/app-shell.md`. The design overrides older specs.
+- Design source on the coding VM: `/Users/admin/Projects/Scribular/docs/design/app-shell/README.md` (scribular-docs `main` at `1f83f50`, 2026-11-17 product feedback), with `mockup.html` and `screens/`; gaps in `design/_gaps/app-shell.md`. The design overrides older specs.
 - PR plan (one cwf task per PR, run one at a time, following the split above):
   - p1 sidebar, grouping, `search_sessions`, navigation, session row actions, stable selection (R1-R4; AS1-AS4), base `main`
   - p2 native menu structure/routing and separate Settings window/panes (R5-R7; AS5, AS7)
@@ -154,8 +163,21 @@ All defaults below approved by Patrick on 2026-11-16 unless marked otherwise.
 ### Done (update)
 - p2 merged as PR #27 (`dd1f309`, 2026-11-17): native menus and separate Settings window.
 
-### This task (p3)
-- This task = p3 (PR3 in the split above): shared read-only gate at the command boundary and renewal/summary-unavailable placements (R9, R12, R13; AS6, AS9, AS10, AS15). Build on the p2 menu/Settings structure; menu enablement for denied-license states per R6/AS5 follows from the gate.
-- Out of bounds: automatic-update preference, update alert, Delete All native alert, final menu enablement (R8, R10, R11; p4). Deletion is never blocked in any access state (decision 1).
-- Reviewer: Knightwatch (`samthereviewer`) plus Cubic. Address all findings from both; Knightwatch posts as plain PR comments, not review threads. PR base = `main`.
+### Done (update 2)
+- p3 merged as PR #28 (`b040889`, 2026-11-17): shared read-only gate, renewal and summary-unavailable placements. Shell Recover stays licence-gated (decision above, line 96). Open manual checks (AS5 denied-license menus, AS10) tracked in issue #29.
+
+### This task (p4)
+- This task = p4 (PR4 in the split above): automatic-update preference, ready-update alert, Delete All native confirmation, final menu enablement (R8, R10, R11; AS8, AS11-AS14, repeat AS5). Build on the p2 menus/Settings and the p3 read-only gate.
+- Deletion is never blocked in any access state (decision 1).
+- Source of truth: this spec and the app-shell design. `plans/parity/` is obsolete; never follow it.
+- Reviewer: Cubic only. PR base = `main`.
 - cwf note for Codex phase sessions: shell commands run under the shared Codex app-server daemon and do not inherit `CWF_SESSION_ID`; prefix phase-session cwf commands (record-verification, demo add, screenshot, handoff, session end) with `CWF_SESSION_ID=<session.id from task.json>`.
+
+#### Product feedback (2026-11-17)
+Patrick, after manual testing of the p4 build (design updated in docs `f4f2a3d`):
+1. Closing the main window keeps the tray but the Dock icon stays. Wanted: only the tray icon while no window is shown; the Dock icon returns when a window is shown (R15, AS18).
+2. The tray had extra items (New Blank Style, Recover Interrupted Recording, New Style from…). Keep only Show Scribular, Start/Stop Recording with its speaker submenu, and Quit (R14, AS17).
+3. Quit shows the warning even when idle. Warn only while recording or the LLM is running (R16, AS19).
+4. The happy-path demo must show Delete All through the sidebar button, native confirmation, and resulting empty sidebar. The File menu path is manual-only under AS12.
+5. Add a Delete All button to the main window sidebar near the session list, with R10 rules and the same native confirmation (R10 amended, AS16).
+6. Manual Check for Updates shows "Last check failed: Could not fetch a valid release JSON from the remote." because the release feed is not published (HTTP 404) and `tauri.conf.json` still has the placeholder pubkey. Accepted as a known environment limitation; behaviour unchanged.

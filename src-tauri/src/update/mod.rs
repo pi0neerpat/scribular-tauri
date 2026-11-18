@@ -1,10 +1,19 @@
-use std::sync::{Arc, Mutex, TryLockError};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, TryLockError},
+};
 
 use serde::Serialize;
 use tauri_plugin_updater::{Update, UpdaterExt};
 use ts_rs::TS;
 
 use crate::store::{Store, PENDING_UPDATE_INSTALL, SKIPPED_UPDATE_VERSION};
+
+pub(crate) const BUSY: &str = "busy";
+
+pub(crate) fn automatic_checks_supported() -> bool {
+    !cfg!(debug_assertions) || std::env::var_os("SCRIBULAR_UPDATE_ENDPOINT").is_some()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -170,6 +179,7 @@ pub struct UpdateManager {
     source: Arc<dyn UpdateSource>,
     state: Mutex<UpdateState>,
     staged: Mutex<Option<(UpdateInfo, Vec<u8>)>>,
+    alerted_versions: Mutex<HashSet<String>>,
     busy: Arc<dyn Fn() -> bool + Send + Sync>,
     gate: Arc<Mutex<()>>,
     emit: Arc<dyn Fn(UpdateState) + Send + Sync>,
@@ -189,6 +199,7 @@ impl UpdateManager {
             source,
             state: Mutex::new(UpdateState::Idle { installable: false }),
             staged: Mutex::new(None),
+            alerted_versions: Mutex::default(),
             busy,
             gate,
             emit,
@@ -204,6 +215,40 @@ impl UpdateManager {
 
     pub fn state(&self) -> UpdateState {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub fn claim_ready_alert(&self, version: &str) -> bool {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        matches!(&*state, UpdateState::Ready { version: ready, .. } if ready == version)
+            && self
+                .alerted_versions
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(version.to_owned())
+    }
+
+    pub fn check_automatically(&self) {
+        // No store means no saved preference, so the default (on) applies.
+        let enabled = match self.store.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            None => true,
+            Some(store) => match store.app_settings() {
+                Ok(settings) => settings.check_for_updates_automatically,
+                Err(error) => {
+                    crate::diag::log::log(
+                        "ERROR",
+                        "update",
+                        &format!(
+                            "reading automatic update preference failed ({})",
+                            crate::diag::log::kind(&error)
+                        ),
+                    );
+                    false
+                }
+            },
+        };
+        if enabled {
+            self.check();
+        }
     }
 
     pub fn check(&self) {
@@ -294,28 +339,28 @@ impl UpdateManager {
     }
 
     pub fn refresh_installable(&self) {
-        if let UpdateState::Ready {
-            version,
-            notes,
-            installable,
-        } = self.state()
-        {
-            let next = !(self.busy)();
-            if next != installable {
-                self.publish(UpdateState::Ready {
-                    version,
-                    notes,
-                    installable: next,
-                });
+        if !matches!(self.state(), UpdateState::Ready { .. }) {
+            return;
+        }
+        let next = !(self.busy)();
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let UpdateState::Ready { installable, .. } = &mut *state {
+            if next != *installable {
+                *installable = next;
+                (self.emit)(state.clone());
             }
         }
     }
 
     pub fn install(&self) -> Result<(), String> {
-        self.install_staged(true)
+        self.install_staged(true, false)
     }
 
-    fn install_staged(&self, restart: bool) -> Result<(), String> {
+    pub fn install_confirmed(&self) -> Result<(), String> {
+        self.install_staged(true, true)
+    }
+
+    fn install_staged(&self, restart: bool, confirmed: bool) -> Result<(), String> {
         let _gate = if restart {
             self.gate.lock().unwrap_or_else(|p| p.into_inner())
         } else {
@@ -325,8 +370,8 @@ impl UpdateManager {
                 Err(TryLockError::WouldBlock) => return Err("updater is busy".into()),
             }
         };
-        if (self.busy)() {
-            return Err("busy".into());
+        if !confirmed && (self.busy)() {
+            return Err(BUSY.into());
         }
         let (info, bytes) = self
             .staged
@@ -385,7 +430,7 @@ impl UpdateManager {
         if !matches!(self.state(), UpdateState::Ready { .. }) {
             return;
         }
-        if let Err(_error) = self.install_staged(false) {
+        if let Err(_error) = self.install_staged(false, false) {
             crate::diag::log::log("ERROR", "update", "install on quit failed");
         }
     }
@@ -659,6 +704,43 @@ mod tests {
         assert!(manager.install().is_err());
         assert_eq!(restarts.load(Ordering::SeqCst), 0);
         assert!(matches!(manager.state(), UpdateState::Ready { .. }));
+    }
+
+    #[test]
+    fn automatic_checks_obey_persisted_preference_and_manual_checks_still_work() {
+        let db = store();
+        let source = fake(Some("0.2.0"));
+        let (updates, _, _) = manager(Arc::clone(&source), Arc::new(AtomicBool::new(false)));
+        db.set_app_settings(crate::store::AppSettings {
+            check_for_updates_automatically: false,
+            ..Default::default()
+        })
+        .unwrap();
+        updates.set_store(Arc::clone(&db));
+        updates.check_automatically();
+        assert_eq!(source.downloads.load(Ordering::SeqCst), 0);
+        updates.check();
+        assert_eq!(source.downloads.load(Ordering::SeqCst), 1);
+        updates.install_on_quit();
+        db.set_app_settings(crate::store::AppSettings::default())
+            .unwrap();
+        updates.check_automatically();
+        assert_eq!(source.downloads.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn ready_alert_is_claimed_once_and_busy_restart_requires_confirmation() {
+        let source = fake(Some("0.2.0"));
+        let (updates, restarts, _) = manager(Arc::clone(&source), Arc::new(AtomicBool::new(true)));
+        assert!(!updates.claim_ready_alert("0.2.0"));
+        updates.check();
+        assert!(!updates.claim_ready_alert("0.1.0"));
+        assert!(updates.claim_ready_alert("0.2.0"));
+        assert!(!updates.claim_ready_alert("0.2.0"));
+        assert_eq!(updates.install(), Err(BUSY.into()));
+        assert_eq!(source.installs.load(Ordering::SeqCst), 0);
+        updates.install_confirmed().unwrap();
+        assert_eq!(restarts.load(Ordering::SeqCst), 1);
     }
 
     #[test]

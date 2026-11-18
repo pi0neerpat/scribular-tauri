@@ -2,7 +2,6 @@
   // Note styles (parity spec 03 R12, R13): list, star, default, and an inline
   // editor that asks before dropping unsaved edits.
   import { onMount, tick } from 'svelte';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
     createPrompt,
     deletePrompt,
@@ -63,18 +62,8 @@
 
   onMount(() => {
     void call(getPromptList);
-    let unlisten: (() => void) | undefined;
     watchSummary();
-    void getCurrentWindow().onCloseRequested((event) => {
-      if (!dirty) return;
-      event.preventDefault();
-      dialogOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      pending = () => { void getCurrentWindow().destroy(); };
-    }).then((removeListener) => {
-      if (disposed) removeListener();
-      else unlisten = removeListener;
-    });
-    return () => { disposed = true; unlisten?.(); unlistenSummary?.(); };
+    return () => { disposed = true; unlistenSummary?.(); };
   });
 
   $effect(() => {
@@ -169,6 +158,7 @@
     const action = pending;
     if (choice === 'cancel') { pending = null; return; }
     if (choice === 'save' && !(await save())) return;
+    if (choice === 'discard') edit(open?.id ?? null);
     pending = null;
     const opener = dialogOpener;
     dialogOpener = null;

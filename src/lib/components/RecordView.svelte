@@ -18,7 +18,6 @@
     stopRecording,
     notifyTrayStartFailure,
   } from '../api';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
   import type { Privacy } from '../types/Privacy';
   import type { PromptList } from '../types/PromptList';
   import type { Session } from '../types/Session';
@@ -67,6 +66,19 @@
   let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
   $effect(() => onResultNote(!!result?.summary));
   export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
+  export async function refreshAfterDeletion() {
+    const id = sessionId ?? result?.id;
+    if (!id || await getSession(id)) return;
+    if (sessionId === id) {
+      resultFetch++;
+      sessionId = null;
+      status = null;
+      progress = null;
+      transcriptWaiting = null;
+      remember(null);
+    }
+    if (result?.id === id) result = null;
+  }
   let resultFetch = 0;
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -239,7 +251,6 @@
         if (trayStart) {
           window.dispatchEvent(new Event('tray-start-failed'));
           try {
-            await getCurrentWindow().show();
             await notifyTrayStartFailure(String(e));
           } catch (noticeError) { error = `${String(e)} (notification failed: ${String(noticeError)})`; }
           trayStart = false;

@@ -38,7 +38,9 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_window(app),
+            "show" => {
+                super::show_main(app);
+            }
             "start" => {
                 let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
             }
@@ -78,9 +80,6 @@ fn stop(app: &AppHandle, speakers: Option<u8>) {
                 Err(e) => e.to_string(),
             };
             crate::diag::log::log("ERROR", "shell", "tray stop failed");
-            if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
-                refresh(&app, recorder.is_recording());
-            }
             let _ = app.emit(crate::commands::TRAY_STOP_FAILED_EVENT, error.clone());
             use tauri_plugin_notification::NotificationExt;
             let _ = app
@@ -90,13 +89,6 @@ fn stop(app: &AppHandle, speakers: Option<u8>) {
                 .body(error)
                 .show();
         });
-    }
-}
-
-fn show_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
     }
 }
 
@@ -173,15 +165,11 @@ fn build_menu(
     Menu::with_items(app, &refs)
 }
 
-pub fn refresh(app: &AppHandle, recording: bool) {
-    let multi = app
-        .try_state::<std::sync::Arc<crate::store::Store>>()
-        .and_then(|s| s.recording_settings().ok())
-        .is_some_and(|s| s.multi_speaker);
+pub fn refresh(app: &AppHandle, recording: bool, multi_speaker: bool) {
     let Some(tray) = app.tray_by_id("main") else {
         return;
     };
-    if let Ok(menu) = build_menu(app, recording, multi) {
+    if let Ok(menu) = build_menu(app, recording, multi_speaker) {
         let _ = tray.set_menu(Some(menu));
     }
     let (bytes, template): (&[u8], bool) = if recording {
@@ -200,18 +188,23 @@ mod tests {
     use super::*;
     #[test]
     fn tray_model_matches_menu_states() {
-        assert_eq!(
-            tray_model(false, false),
-            [
-                TrayItem::Show,
-                TrayItem::Separator,
-                TrayItem::Start,
-                TrayItem::Separator,
-                TrayItem::Quit
-            ]
-        );
-        assert_eq!(tray_model(true, false)[2], TrayItem::Stop);
-        assert_eq!(tray_model(true, true)[2], TrayItem::SpeakerSubmenu);
+        for (recording, multi_speaker, action) in [
+            (false, false, TrayItem::Start),
+            (false, true, TrayItem::Start),
+            (true, false, TrayItem::Stop),
+            (true, true, TrayItem::SpeakerSubmenu),
+        ] {
+            assert_eq!(
+                tray_model(recording, multi_speaker),
+                [
+                    TrayItem::Show,
+                    TrayItem::Separator,
+                    action,
+                    TrayItem::Separator,
+                    TrayItem::Quit
+                ]
+            );
+        }
     }
 
     #[test]
