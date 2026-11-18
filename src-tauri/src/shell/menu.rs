@@ -29,7 +29,13 @@ pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
         .inner_size(680.0, 560.0)
         .build()
         .inspect_err(|_| {
-            let _ = super::hide_dock_if_no_windows(app);
+            if let Err(e) = super::hide_dock_if_no_windows(app) {
+                crate::diag::log::log(
+                    "WARN",
+                    "shell",
+                    &format!("could not hide the Dock icon: {e}"),
+                );
+            }
         })
         .map_err(|e| e.to_string())?;
     Ok(())

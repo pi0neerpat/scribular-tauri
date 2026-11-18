@@ -5,7 +5,13 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 
 pub fn show_main(app: &AppHandle) -> Option<WebviewWindow> {
     let window = app.get_webview_window("main")?;
-    show_window(&window).ok()?;
+    if let Err(e) = show_window(&window) {
+        crate::diag::log::log(
+            "WARN",
+            "shell",
+            &format!("could not show the main window: {e}"),
+        );
+    }
     let _ = window.set_focus();
     Some(window)
 }

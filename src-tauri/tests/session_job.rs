@@ -731,6 +731,10 @@ fn a_lost_source_fails_the_recording_and_keeps_its_audio() {
     h.system.lose();
     h.events.wait_for(&id, SessionStatus::Failed);
 
+    assert_eq!(
+        *h.events.recording_changes.lock().unwrap(),
+        [(true, false), (false, false)]
+    );
     let s = h.get(&id);
     assert_eq!(
         s.error.as_deref(),

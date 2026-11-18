@@ -385,8 +385,8 @@ impl Recorder {
             cancel,
             _watched: watched,
         });
-        drop(recording);
         inner.events.recording_changed(true, multi_speaker);
+        drop(recording);
         inner.emit(&session.id, SessionStatus::Recording, "Recording...");
         Ok(session)
     }
@@ -400,10 +400,10 @@ impl Recorder {
     pub fn stop_with_speakers(&self, num_speakers: Option<u8>) -> Result<String, RecordError> {
         let _gate = lock(&self.install_gate);
         let inner = &self.inner;
-        let recording = lock(&inner.recording)
-            .take()
-            .ok_or(RecordError::NotRecording)?;
+        let mut current = lock(&inner.recording);
+        let recording = current.take().ok_or(RecordError::NotRecording)?;
         inner.events.recording_changed(false, false);
+        drop(current);
         let id = recording.session_id;
         let diarize = recording.multi_speaker && num_speakers != Some(0);
         let mut samples = 0;
@@ -941,6 +941,7 @@ impl Inner {
             lock(&self.state)
                 .finalizing
                 .insert(id.into(), Arc::clone(&recording.cancel));
+            self.events.recording_changed(false, false);
             drop(current);
             let error = abandon(recording.sources, &recording.cancel, true);
             let error = error.unwrap_or_else(|| match stopped {

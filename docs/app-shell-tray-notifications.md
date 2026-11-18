@@ -39,7 +39,7 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 
 - `AppSettings` (`src/lib/types/AppSettings.ts`, persisted by the Rust store): `notifySummaryComplete` (default false in the frontend store) and `showBackgroundAnimation` (default true).
 - Turning on "Show summarization complete alert" calls `request_notification_permission`. If macOS denies it, the toggle reverts to off.
-- `src-tauri/capabilities/default.json` grants the main window event and window permissions. The Rust visibility command handles close-to-hide.
+- `src-tauri/capabilities/default.json` grants core event and window permissions to `main` and `settings`. The Rust visibility command handles close-to-hide.
 - Crate: `tauri-plugin-notification = "=2.5.0"`. Tray icons are `src-tauri/icons/tray-idle.png` and `tray-recording.png`, embedded with `include_bytes!`.
 
 ## How to test
