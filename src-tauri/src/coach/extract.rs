@@ -221,15 +221,19 @@ pub fn quote_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
     let mut opening = None;
     text.char_indices()
         .filter_map(move |(index, c)| match (opening, c) {
-            (_, '\'')
-                if text[..index]
-                    .chars()
-                    .next_back()
-                    .is_some_and(char::is_alphanumeric)
-                    && text[index + c.len_utf8()..]
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_alphanumeric) =>
+            (_, '\'' | '’')
+                if text[..index].ends_with(char::is_alphanumeric)
+                    && (opening.is_none()
+                        || text[index + c.len_utf8()..].starts_with(char::is_alphanumeric)) =>
+            {
+                None
+            }
+            (None, '\'')
+                if matches!(
+                    text.as_bytes()[index + 1..],
+                    [b'0'..=b'9', b'0'..=b'9', b's' | b'S', ..]
+                ) && !text[index + 4..]
+                    .starts_with(|c: char| c.is_alphanumeric() || matches!(c, '\'' | '’')) =>
             {
                 None
             }
@@ -532,7 +536,7 @@ mod tests {
     }
 
     #[test]
-    fn quote_ranges_include_single_quoted_dialogue_without_opening_on_contractions() {
+    fn quote_ranges_distinguish_single_quotes_from_apostrophes() {
         assert_eq!(
             quotes("Client said 'hello there' and don't know.").collect::<Vec<_>>(),
             ["hello there"]
@@ -540,6 +544,15 @@ mod tests {
         assert_eq!(
             quotes("Client said ‘hello there’.").collect::<Vec<_>>(),
             ["hello there"]
+        );
+        assert_eq!(quotes("parents' goals and the client’s plan").count(), 0);
+        assert_eq!(
+            quotes("'I don’t know'").collect::<Vec<_>>(),
+            ["I don’t know"]
+        );
+        assert_eq!(
+            quotes("It was the '90s. Client said 'hello'.").collect::<Vec<_>>(),
+            ["hello"]
         );
     }
 

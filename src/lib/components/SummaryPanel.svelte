@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, openSettings, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
@@ -43,6 +43,8 @@
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  const sessionId = $derived(session.id);
+  const savedSummary = $derived(session.summary);
   const working = $derived(['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(session.status));
   const provenance = $derived(byline || [
     session.promptId && prompts
@@ -61,16 +63,19 @@
   });
 
   $effect(() => {
-    const id = session.id;
-    untrack(() => {
-      preview = '';
-      copied = false;
-      error = null;
-      busy = false;
-      confirmDelete = false;
-      clearTimeout(deleteTimer);
-      clearTimeout(copyTimer);
-    });
+    sessionId;
+    preview = '';
+    copied = false;
+    error = null;
+    busy = false;
+    confirmDelete = false;
+    clearTimeout(deleteTimer);
+    clearTimeout(copyTimer);
+  });
+
+  $effect(() => {
+    savedSummary;
+    if (!working) preview = '';
   });
 
   onMount(() => {
@@ -99,7 +104,9 @@
     subscribe();
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
-    const unlisten = management || (session.summary && coach) ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
+    const unlisten = management || coach ? onSummaryDelta((d) => {
+      if (d.sessionId === sessionId && (management || savedSummary)) preview += d.text;
+    }) : null;
     return () => {
       disposed = true;
       summaryAttempt++;

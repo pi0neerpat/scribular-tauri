@@ -17,6 +17,7 @@ const getPromptList = vi.fn();
 const updatePrompt = vi.fn();
 const createPrompt = vi.fn();
 const deletePrompt = vi.fn();
+const retrySummaryModel = vi.fn();
 const ready: CoachAvailability = { reason: null, retry: null, message: null, sessionMessage: null };
 const availability = writable(ready);
 const openCoach = vi.fn();
@@ -33,7 +34,7 @@ const coach: CoachContext = {
 vi.mock('../api', () => ({
   getPromptList, updatePrompt, createPrompt, deletePrompt, duplicatePrompt: vi.fn(),
   setPromptVisibility: vi.fn(),
-  openSettings: vi.fn(), openExternalLink: vi.fn(), retrySummaryModel: vi.fn(),
+  openSettings: vi.fn(), openExternalLink: vi.fn(), retrySummaryModel,
 }));
 const { default: NoteStyles } = await import('./NoteStyles.svelte');
 const { accessState } = await import('../license');
@@ -86,6 +87,31 @@ it('shares coach availability and only offers retry for recoverable failures', (
   flushSync();
   button('New Style from Example Note…').click();
   expect(openCoach).toHaveBeenCalled();
+});
+
+it('clears a coach retry error on the next attempt and when availability changes', async () => {
+  const loadFailed: CoachAvailability = { reason: 'loadFailed', retry: 'tryAgain', message: "Summaries couldn't load.", sessionMessage: null };
+  const error = 'Couldn’t try again.';
+  retrySummaryModel.mockRejectedValueOnce(new Error('failed'));
+  availability.set(loadFailed);
+  flushSync();
+  button('Try Again').click();
+  await vi.waitFor(() => expect(target.textContent).toContain(error));
+
+  let reject!: (error: Error) => void;
+  retrySummaryModel.mockReturnValueOnce(new Promise<void>((_, fail) => { reject = fail; }));
+  button('Try Again').click();
+  flushSync();
+  expect(target.textContent).not.toContain(error);
+  reject(new Error('failed again'));
+  await vi.waitFor(() => expect(target.textContent).toContain(error));
+
+  availability.set(ready);
+  flushSync();
+  availability.set(loadFailed);
+  flushSync();
+  expect(button('Try Again')).toBeDefined();
+  expect(target.textContent).not.toContain(error);
 });
 
 function typeName(value: string) {

@@ -272,18 +272,20 @@ pub fn interpret(spec: &StyleSpec, request: &str) -> Interpretation {
                     .iter()
                     .filter_map(|section| {
                         let offset = section.heading.len();
-                        (original
-                            .get(..offset)
-                            .is_some_and(|name| name.eq_ignore_ascii_case(&section.heading)))
-                        .then(|| {
-                            let replacement = original
-                                .get(offset..)
-                                .and_then(|tail| tail.strip_prefix(" to "))
-                                .map(str::trim);
-                            (&original[..offset], replacement)
-                        })
+                        let name = original.get(..offset)?;
+                        if !name.eq_ignore_ascii_case(&section.heading) {
+                            return None;
+                        }
+                        let replacement = match &tail[offset..] {
+                            "" | " to" => None,
+                            suffix if suffix.starts_with(" to ") => {
+                                Some(original[offset + " to ".len()..].trim())
+                            }
+                            _ => return None,
+                        };
+                        Some((name, replacement))
                     })
-                    .max_by_key(|(name, _)| name.len())
+                    .max_by_key(|(name, replacement)| (replacement.is_some(), name.len()))
                     .unwrap_or((original, None)),
                 _ => (original, None),
             };
@@ -456,5 +458,30 @@ mod tests {
         };
         let (next, _) = patch.apply(&spec).unwrap();
         assert_eq!(next.sections[0].heading, "Education");
+    }
+
+    #[test]
+    fn rename_requires_a_heading_boundary_and_prefers_a_complete_instruction() {
+        let (mut spec, _) = extract(SAMPLES[2].text).unwrap();
+        assert!(matches!(
+            interpret(&spec, "Rename Planning to Notes"),
+            Interpretation::Question(q) if q.text == "Which section do you mean?"
+        ));
+        assert!(matches!(
+            interpret(&spec, "Rename section Plan to"),
+            Interpretation::Question(q) if q.text.starts_with("What should I call Plan?")
+        ));
+        spec.sections.push(section("Plan to Notes", false));
+        let Interpretation::Patch(Patch::Section {
+            before: Some(old),
+            after: Some(new),
+        }) = interpret(&spec, "Rename Plan TO Notes")
+        else {
+            panic!()
+        };
+        assert_eq!(
+            (old.heading.as_str(), new.heading.as_str()),
+            ("Plan", "Notes")
+        );
     }
 }

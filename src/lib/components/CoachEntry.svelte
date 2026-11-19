@@ -10,14 +10,20 @@
   let retrying = $state(false);
   let retryError = $state(false);
 
+  $effect(() => {
+    availability;
+    retryError = false;
+  });
+
   async function retry() {
+    const requested = availability;
     retrying = true;
     retryError = false;
     try {
-      if (availability?.retry === 'license') await openSettings('License');
-      else if (availability?.retry === 'tryAgain') await retrySummaryModel();
+      if (requested?.retry === 'license') await openSettings('License');
+      else if (requested?.retry === 'tryAgain') await retrySummaryModel();
     } catch {
-      retryError = true;
+      if (availability === requested) retryError = true;
     } finally {
       retrying = false;
     }
