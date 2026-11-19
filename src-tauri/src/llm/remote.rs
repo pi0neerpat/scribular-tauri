@@ -102,6 +102,10 @@ impl RemoteSummarizer {
     pub fn new(base: &str, params: Params) -> Result<Self> {
         let mut url =
             reqwest::Url::parse(base).map_err(|e| LlmError::Engine(format!("{base}: {e}")))?;
+        // `localhost:5801` parses with scheme `localhost`; `endpoint` needs an http(s) base.
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(LlmError::Engine(format!("{base}: expected an http(s) URL")));
+        }
         // `join` replaces the last path segment unless the base ends in '/'.
         if !url.path().ends_with('/') {
             url.set_path(&format!("{}/", url.path()));
@@ -109,6 +113,9 @@ impl RemoteSummarizer {
         let client = reqwest::Client::builder()
             // A wrong host fails the job instead of hanging it.
             .connect_timeout(Duration::from_secs(5))
+            // Per read, so a stalled server fails the job; long enough for a
+            // request queued behind busy llama-server slots.
+            .read_timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| LlmError::Engine(format!("{base}: {e}")))?;
         Ok(Self {
@@ -122,9 +129,15 @@ impl RemoteSummarizer {
         self.base.join(path).expect("fixed relative path")
     }
 
-    fn tokenize(&self, content: &str) -> Result<usize> {
+    /// `special` mirrors the local engine's `tokenize(add_bos, parse_special)` flags.
+    fn tokenize(&self, content: &str, special: bool) -> Result<usize> {
         let url = self.endpoint("tokenize");
-        let body = serde_json::json!({ "content": content }).to_string();
+        let body = serde_json::json!({
+            "content": content,
+            "add_special": special,
+            "parse_special": special,
+        })
+        .to_string();
         let reply = tauri::async_runtime::block_on(async {
             let resp = post(&self.client, &url, body).await?;
             resp.bytes().await.map_err(|e| e.without_url().to_string())
@@ -220,11 +233,11 @@ impl Summarizer for RemoteSummarizer {
     }
 
     fn count_tokens(&self, text: &str) -> Result<usize> {
-        self.tokenize(text)
+        self.tokenize(text, false)
     }
 
     fn prompt_tokens(&self, prompt: &str) -> Result<usize> {
-        self.tokenize(&format_gemma4_user_prompt(prompt))
+        self.tokenize(&format_gemma4_user_prompt(prompt), true)
     }
 
     /// The caller is a plain worker thread: the streams run on tauri's
@@ -402,6 +415,32 @@ mod tests {
         summarizer(&root).prompt_tokens("hi").unwrap();
         let body: serde_json::Value = serde_json::from_str(&bodies.lock().unwrap()[0]).unwrap();
         assert_eq!(body["content"], "<|turn>user\nhi\n<turn|>\n<|turn>model\n");
+        assert_eq!(
+            body["add_special"], true,
+            "BOS counted like the local engine"
+        );
+        assert_eq!(body["parse_special"], true);
+    }
+
+    #[test]
+    fn count_tokens_is_plain_text() {
+        let (root, bodies) = stub(|_, _, s| json_reply(s, r#"{"tokens":[1]}"#));
+        summarizer(&root).count_tokens("hi").unwrap();
+        let body: serde_json::Value = serde_json::from_str(&bodies.lock().unwrap()[0]).unwrap();
+        assert_eq!(body["add_special"], false);
+        assert_eq!(body["parse_special"], false);
+    }
+
+    #[test]
+    fn url_without_scheme_is_engine_error() {
+        let params = llama::params(crate::models::GEMMA_4_E2B);
+        for bad in ["localhost:5801", "ftp://host/"] {
+            match RemoteSummarizer::new(bad, params) {
+                Err(LlmError::Engine(msg)) => assert!(msg.contains(bad), "{msg}"),
+                Ok(_) => panic!("{bad} accepted"),
+                Err(other) => panic!("{bad}: {other:?}"),
+            }
+        }
     }
 
     #[test]

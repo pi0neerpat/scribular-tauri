@@ -49,7 +49,7 @@ generation to a `llama-server` on the host, for testing only.
 - Model readiness/onboarding unchanged: the VM still uses the cached GGUF from
   `~/Library/Caches/scribular-uitest/models`.
 - Docs: a "Host llama-server" section in `tools/uitest/README.md`:
-  `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 0.0.0.0 --port 5801 -np 4`,
+  `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4`,
   VM URL `http://192.168.64.1:5801` (Softnet already allows `192.168.64.1/32`),
   build with `npm run tauri -- build --bundles app -- --features remote-llm`.
 

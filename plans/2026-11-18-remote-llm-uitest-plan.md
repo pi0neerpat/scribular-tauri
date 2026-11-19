@@ -21,7 +21,7 @@
 
 ## Review Focus
 
-1. Host server unreachable / wrong URL → summary job fails with `LlmError::Engine` naming the URL, not a hang. Owned by Task 1 (`unreachable_server_is_engine_error`).
+1. Host server unreachable / wrong URL → summary job fails with `LlmError::Engine` naming the URL, not a hang: the client sets a 5 s `connect_timeout` and a 300 s per-read `read_timeout` (a stalled server between SSE chunks also fails). Owned by Task 1 (`unreachable_server_is_engine_error`).
 2. Cancel mid-stream → `generate` returns `Cancelled` promptly and stops reading. Task 1 (`cancel_stops_generation`).
 3. A streamed UTF-8 token or SSE event split across HTTP chunks → text is reassembled, not dropped or garbled. Task 1 (`events_split_across_chunks`).
 4. Batch of several requests → outputs returned in request order regardless of finish order. Task 1 (`batch_returns_in_request_order`).
@@ -151,7 +151,7 @@ if let url = ProcessInfo.processInfo.environment["SCRIBULAR_LLM_URL"], !url.isEm
 
 Run: `swift build --package-path tools/uitest` → builds. `swift test --package-path tools/uitest` → passes.
 
-- [ ] **Step 2: README section** — host command `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 0.0.0.0 --port 5801 -np 4`; why `--host` (default loopback is unreachable from the VM; Softnet already allows `192.168.64.1/32`); VM check `curl http://192.168.64.1:5801/health`; build `APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --bundles app --features remote-llm`; run `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`; note: same GGUF on host as the app manifest, or results won't match on-device.
+- [ ] **Step 2: README section** — host command `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4`; why `--host` (default loopback is unreachable from the VM; Softnet already allows `192.168.64.1/32`; not `0.0.0.0`, which exposes the unauthenticated server to the LAN); VM check `curl http://192.168.64.1:5801/health`; build `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY=... npm run tauri -- build --bundles app --features remote-llm`; run `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`; note: same GGUF on host as the app manifest, or results won't match on-device.
 
 - [ ] **Step 3: Real run on the VM**
 
