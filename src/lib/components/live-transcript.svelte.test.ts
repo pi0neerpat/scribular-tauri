@@ -9,7 +9,7 @@ const { default: LiveTranscript } = await import('./LiveTranscript.svelte');
 
 async function render(waiting: boolean) {
   const target = document.createElement('div');
-  const props = $state({ sessionId: 'session-a', labeled: false, waiting });
+  const props = $state({ sessionId: 'session-a', labeled: false, waiting, activeElapsedMs: 0 });
   const app = mount(LiveTranscript, { target, props });
   await vi.waitFor(() => expect(onSessionSegments).toHaveBeenCalled());
   return { target, props, app };
@@ -44,6 +44,30 @@ describe('LiveTranscript waiting indication', () => {
     onSessionSegments.mockImplementation(() => Promise.resolve(() => {}));
     const { target, app } = await render(false);
     expect(target.textContent).not.toContain('Live transcript will start');
+    unmount(app);
+  });
+
+  it('folds after five words from each source or 60 active seconds and honors manual Show', async () => {
+    let receive!: (segments: SessionSegments) => void;
+    onSessionSegments.mockImplementation((handler: typeof receive) => { receive = handler; return Promise.resolve(() => {}); });
+    const { target, props, app } = await render(false);
+    props.labeled = true;
+    receive({ sessionId: 'session-a', source: 'mic', segments: [{ startMs: 0, endMs: 1000, text: 'one two three four five' }] });
+    flushSync();
+    expect(target.querySelector('pre')).not.toBeNull();
+    expect(target.textContent).not.toContain('5 words');
+    receive({ sessionId: 'session-a', source: 'system', segments: [{ startMs: 0, endMs: 1000, text: 'one two three four five' }] });
+    flushSync();
+    expect(target.querySelector('pre')).toBeNull();
+    [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Show transcript')!.click();
+    props.activeElapsedMs = 60_000;
+    flushSync();
+    expect(target.querySelector('pre')).not.toBeNull();
+    props.sessionId = 'session-b';
+    flushSync();
+    receive({ sessionId: 'session-b', source: 'mic', segments: [{ startMs: 0, endMs: 1000, text: 'one' }] });
+    flushSync();
+    expect(target.querySelector('pre')).toBeNull();
     unmount(app);
   });
 });

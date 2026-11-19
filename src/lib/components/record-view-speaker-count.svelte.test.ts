@@ -7,6 +7,12 @@ import type { Session } from '../types/Session';
 const cancelJob = vi.fn();
 const currentRecording = vi.fn();
 const getRecordingSettings = vi.fn();
+const getRecordingSource = vi.fn();
+const setRecordingSource = vi.fn();
+const recordingState = vi.fn();
+const onRecordingState = vi.fn();
+const onSessionLevels = vi.fn();
+const listAudioApps = vi.fn();
 const getSession = vi.fn();
 const onSessionProgress = vi.fn();
 const onSessionTranscriptWaiting = vi.fn(async (_handler: (state: { sessionId: string; waiting: boolean }) => void) => () => {});
@@ -19,6 +25,8 @@ let emitProgress: ((progress: SessionProgress) => void) | undefined;
 let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
   accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy: () => null, getRecordingSettings, getSession,
+  getRecordingSource, setRecordingSource, recordingState, onRecordingState, onSessionLevels,
+  listAudioApps, openPrivacySettings: vi.fn(), pauseRecording: vi.fn(), resumeRecording: vi.fn(),
   onSessionProgress, onSessionTranscriptWaiting, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
   getSummaryAvailability, onSummaryAvailability,
@@ -35,6 +43,12 @@ beforeEach(() => {
   sessionStorage.clear();
   currentRecording.mockResolvedValue(null);
   getRecordingSettings.mockResolvedValue(settings(true));
+  getRecordingSource.mockResolvedValue({ location: 'inRoom', targetApp: null });
+  recordingState.mockResolvedValue(null);
+  onRecordingState.mockResolvedValue(() => {});
+  onSessionLevels.mockResolvedValue(() => {});
+  listAudioApps.mockResolvedValue([{ name: 'Playing Other App', icon: null }]);
+  setRecordingSource.mockResolvedValue(undefined);
   getSession.mockResolvedValue(null);
   onSessionProgress.mockResolvedValue(() => {});
   emitProgress = undefined;
@@ -65,6 +79,22 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it('chooses and persists a call app from the record screen', async () => {
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    const call = target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1];
+    call.click();
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    await clickButton(target, 'Choose an app');
+    await vi.waitFor(() => expect(target.textContent).toContain('Playing Other App'));
+    await clickButton(target, 'Playing Other App');
+    expect(setRecordingSource).toHaveBeenCalledWith({ location: 'onCall', targetApp: 'Playing Other App' });
+    await vi.waitFor(() => expect(target.textContent).toContain('App: Playing Other App'));
+    await clickButton(target, 'Start recording');
+    expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Playing Other App', expect.any(String));
+    unmount(app);
+    target.remove();
+  });
   it('allows starting a recording while a summary is running', async () => {
     sessionStorage.setItem('scribular.inFlightSession', 'summary-1');
     getSession.mockResolvedValueOnce({ id: 'summary-1', status: 'summarizing', inputMode: 'mic', createdAt: 0 });
@@ -244,7 +274,7 @@ describe('recording speaker-count prompt', () => {
     target.remove();
   });
 
-  it('uses the recording-start setting after the saved setting changes and confines focus', async () => {
+  it('uses the recording-start setting after the saved setting changes and closes on Escape', async () => {
     const { target, app } = await renderRecordView();
     await clickButton(target, 'Start recording');
     await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
@@ -254,14 +284,9 @@ describe('recording speaker-count prompt', () => {
     await clickButton(target, 'Stop');
     const dialog = target.querySelector('[role="dialog"]')!;
     await vi.waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
-    const buttons = [...dialog.querySelectorAll('button')];
-    buttons.at(-1)!.focus();
-    buttons.at(-1)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
-    expect(document.activeElement).toBe(buttons[0]);
-    buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }));
-    expect(document.activeElement).toBe(buttons.at(-1));
-
-    await clickButton(target, 'Keep recording');
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.waitFor(() => expect(target.querySelector('[role="dialog"]')).toBeNull());
+    expect(stopRecording).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(stopButton);
     expect(getRecordingSettings).toHaveBeenCalledTimes(1);
     unmount(app);

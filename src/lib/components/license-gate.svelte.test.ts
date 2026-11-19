@@ -9,6 +9,10 @@ vi.mock('../api', async (orig) => ({
   ...(await orig<typeof import('../api')>()),
   openExternalLink,
   currentRecording: vi.fn(() => Promise.resolve(null)),
+  getRecordingSource: vi.fn(() => Promise.resolve({ location: 'inRoom', targetApp: null })),
+  recordingState: vi.fn(() => Promise.resolve(null)),
+  onRecordingState: vi.fn(() => Promise.resolve(() => {})),
+  onSessionLevels: vi.fn(() => Promise.resolve(() => {})),
   onSessionProgress: vi.fn(() => Promise.resolve(() => {})),
   onSessionTranscriptWaiting: vi.fn(() => Promise.resolve(() => {})),
 }));

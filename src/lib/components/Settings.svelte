@@ -3,10 +3,8 @@
   // Every change saves immediately.
   import { onMount } from 'svelte';
   import {
-    deniedPrivacy,
     downloadModel,
     getRecordingSettings,
-    listAudioApps,
     modelsStatus,
     onModelsProgress,
     openPrivacySettings,
@@ -32,9 +30,7 @@
   import { appSettings } from '../app-settings';
   import LicenseSettings from './LicenseSettings.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
-  import type { AudioApp } from '../types/AudioApp';
   import type { AppSettings } from '../types/AppSettings';
-  import type { InputMode } from '../types/InputMode';
   import type { Privacy } from '../types/Privacy';
   import type { RecordingSettings } from '../types/RecordingSettings';
   import type { ModelProgress } from '../types/ModelProgress';
@@ -50,13 +46,7 @@
 
   const SPEAKER_MODEL = 'speaker-campplus';
 
-  const modes: [InputMode, string][] = [
-    ['mic', 'Microphone'],
-    ['micAndSystem', 'Microphone and app audio'],
-  ];
-
   let settings = $state<RecordingSettings | null>(null);
-  let apps = $state<AudioApp[]>([]);
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let speakerModel = $state<ModelProgress | null>(null);
@@ -80,14 +70,6 @@
     if (next === category) return;
     category = next;
   }
-
-  // The saved app stays selectable while it isn't playing.
-  let appNames = $derived.by(() => {
-    const names = apps.map((a) => a.name);
-    const saved = settings?.targetApp;
-    return saved && !names.includes(saved) ? [saved, ...names] : names;
-  });
-  let selectedIcon = $derived(apps.find((a) => a.name === settings?.targetApp)?.icon ?? null);
 
   onMount(() => {
     const paneListener = onSettingsPane((pane) => {
@@ -162,34 +144,16 @@
       } catch (e) {
         error = String(e);
       }
-      if (settings && settings.inputMode !== 'mic') await refreshApps();
     })();
     return () => { disposed = true; summaryAttempt++; unlisten?.(); updateUnlisten?.(); summaryUnlisten?.(); paneListener.then((fn) => fn()); retrySummaryAvailability = null; };
   });
 
-  async function refreshApps() {
-    try {
-      apps = await listAudioApps();
-      if (denied !== 'notifications') denied = null;
-    } catch (e) {
-      const pane = deniedPrivacy(String(e));
-      if (pane) denied = pane;
-      else error = String(e);
-    }
-  }
-
-  // Listing apps runs AudioCapCLI, so only when the picker shows.
-  async function changeMode() {
-    await save();
-    if (settings && settings.inputMode !== 'mic') await refreshApps();
-    else if (denied !== 'notifications') denied = null;
-  }
-
   async function save() {
     if (!settings) return;
     try {
-      // This settings save leaves the active style unchanged.
-      await setRecordingSettings({ ...settings, inputMode: settings.targetApp ? settings.inputMode : 'mic', promptId: null });
+      // The record screen owns source choice, so this pane saves only its own controls.
+      const current = await getRecordingSettings();
+      await setRecordingSettings({ ...current, keepAudio: settings.keepAudio, multiSpeaker: settings.multiSpeaker, promptId: null });
       error = null;
     } catch (e) {
       error = String(e);
@@ -277,18 +241,6 @@
   {#if settings}
   {#if category === 'Recording'}
     <fieldset>
-      <legend>Record</legend>
-      {#each modes as [mode, label] (mode)}
-        <label>
-          <input type="radio" bind:group={settings.inputMode} value={mode} onchange={changeMode} />
-          {label}
-        </label>
-      {/each}
-    </fieldset>
-  {/if}
-
-  {#if category === 'Recording'}
-    <fieldset>
       <legend>Multi-speaker</legend>
       <p>Identify different speakers after recording. The speaker model downloads once and stays on this Mac.</p>
       {#if speakerModel?.state === 'ready'}
@@ -325,25 +277,6 @@
         {#if !update.installable}<p>Finish your recording or summary first</p>{/if}
       {/if}
     </fieldset>
-  {/if}
-
-  {#if category === 'Recording'}
-    {#if settings.inputMode !== 'mic'}
-      <label>
-        App
-        {#if selectedIcon}
-          <img src="data:image/png;base64,{selectedIcon}" alt="" width="16" height="16" />
-        {/if}
-        <select bind:value={settings.targetApp} onchange={save}>
-          <option value={null}>Choose an app…</option>
-          {#each appNames as name (name)}
-            <option value={name}>{name}</option>
-          {/each}
-        </select>
-      </label>
-      <button onclick={refreshApps}>Refresh</button>
-      <p>Only apps playing audio right now are listed.</p>
-    {/if}
   {/if}
 
   {#if category === 'General'}
