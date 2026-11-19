@@ -9,6 +9,7 @@ const listAudioApps = vi.fn();
 const modelsStatus = vi.fn();
 const onModelsProgress = vi.fn();
 const setRecordingSettings = vi.fn();
+const setRecordingPreferences = vi.fn();
 const appVersion = vi.fn().mockResolvedValue({ version: '0.1.0' });
 const checkForUpdates = vi.fn();
 const getUpdateState = vi.fn().mockResolvedValue({ state: 'idle', installable: false });
@@ -28,7 +29,7 @@ vi.mock('../api', () => ({
   appVersion, checkForUpdates, getAppSettings, getUpdateState, installUpdate, onUpdateState,
   deniedPrivacy: () => null, downloadModel, getRecordingSettings, listAudioApps,
   modelsStatus, onModelsProgress, openPrivacySettings: vi.fn(), requestNotificationPermission,
-  setAppSettings, setRecordingSettings, getTelemetrySetting,
+  setAppSettings, setRecordingSettings, setRecordingPreferences, getTelemetrySetting,
   getSummaryAvailability, onSummaryAvailability, subscribeSummaryAvailability, retrySummaryModel,
   onSettingsPane: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -71,26 +72,26 @@ it('opens on General and keeps recording and appearance controls in their panes'
   unmount(app);
 });
 
-it('saves call mode only after an app is selected', async () => {
+it('keeps source controls off Settings and saves only recording preferences', async () => {
   onModelsProgress.mockResolvedValue(() => {});
   getRecordingSettings.mockResolvedValue(settings);
   modelsStatus.mockResolvedValue([]);
   listAudioApps.mockResolvedValue([{ name: 'Zoom', sampleRate: 48000, channels: 2, icon: null }]);
   const target = document.createElement('div');
   const app = mount(Settings, { target });
-  await vi.waitFor(() => expect(target.querySelector('input[value="micAndSystem"]')).toBeTruthy());
-  const call = target.querySelector<HTMLInputElement>('input[value="micAndSystem"]')!;
-  call.checked = true;
-  call.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(target.querySelector('option[value="Zoom"]')).toBeTruthy());
-  expect(setRecordingSettings).toHaveBeenCalledTimes(1);
-  expect(setRecordingSettings).toHaveBeenLastCalledWith({ ...settings, promptId: null });
-  const picker = target.querySelector('select')!;
-  picker.value = 'Zoom';
-  picker.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(setRecordingSettings).toHaveBeenLastCalledWith({
-    ...settings, inputMode: 'micAndSystem', targetApp: 'Zoom', promptId: null,
-  }));
+  await vi.waitFor(() => expect(target.textContent).toContain('Multi-speaker'));
+  expect(target.querySelector('input[value="micAndSystem"]')).toBeNull();
+  expect(target.querySelector('input[value="mic"]')).toBeNull();
+  expect(target.querySelector('select')).toBeNull();
+  expect(listAudioApps).not.toHaveBeenCalled();
+  const keepAudio = target.querySelector<HTMLInputElement>('input[type="radio"][value="true"]')!;
+  keepAudio.checked = true;
+  keepAudio.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => {
+    expect(setRecordingPreferences).toHaveBeenCalledTimes(1);
+    expect(setRecordingPreferences).toHaveBeenCalledWith(true, false);
+  });
+  expect(setRecordingSettings).not.toHaveBeenCalled();
   unmount(app);
 });
 

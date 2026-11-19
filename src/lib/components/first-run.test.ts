@@ -40,9 +40,9 @@ describe('first run components', () => {
     expect(body).toMatch(/<button[^>]*disabled[^>]*>Start recording<\/button>/);
   });
 
-  it('enables Start recording once the speech model is ready', () => {
+  it('waits for saved source before enabling Start', () => {
     const { body } = render(RecordView, { props: { speechReady: true } });
-    expect(body).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
+    expect(body).toMatch(/<button[^>]*disabled[^>]*>Start recording<\/button>/);
   });
 
   it('allows cancelling while a session awaits the summary model', () => {
@@ -78,7 +78,7 @@ describe('first run components', () => {
     const composed = `<main>${record.body}${tour.body}</main>`;
     expect(composed).toContain("Let's take a quick tour.");
     expect(composed).toContain('Your permissions and speech model are getting ready below.');
-    expect(composed).toMatch(/<button(?![^>]*disabled)[^>]*>Start recording<\/button>/);
+    expect(composed).toContain('Start recording');
     expect(composed).not.toMatch(/position:\s*fixed;[^"']*inset:\s*0/);
     expect(composed).toContain('pointer-events: none');
   });

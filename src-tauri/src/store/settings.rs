@@ -282,6 +282,16 @@ impl Store {
             Ok(())
         })
     }
+
+    pub fn set_recording_preferences(&self, keep_audio: bool, multi_speaker: bool) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            insert(&tx, KEEP_AUDIO, if keep_audio { "1" } else { "0" })?;
+            insert(&tx, MULTI_SPEAKER, if multi_speaker { "1" } else { "0" })?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
 }
 
 #[cfg(test)]

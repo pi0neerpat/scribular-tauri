@@ -12,6 +12,8 @@ name = "scribular_lib"
 [features]
 # KTD9: swaps the speech, LLM and system-audio engines for fakes in tests.
 fake-engines = []
+# Test builds only: summaries from a host llama-server via SCRIBULAR_LLM_URL (uitest in the VM).
+remote-llm = []
 
 # Exact pins per plans/DEPENDENCY_REVIEW_M0.md.
 [build-dependencies]

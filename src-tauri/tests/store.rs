@@ -844,6 +844,22 @@ fn recording_settings_round_trip_and_clear() {
 }
 
 #[test]
+fn recording_preferences_do_not_replace_source() {
+    let db = TempDb::new();
+    let store = db.open();
+    let source = RecordingSource {
+        location: RecordLocation::OnCall,
+        target_app: Some("Zoom".into()),
+    };
+    store.set_recording_source(&source).unwrap();
+    store.set_recording_preferences(true, true).unwrap();
+    let saved = store.recording_settings().unwrap();
+    assert_eq!(store.recording_source().unwrap(), source);
+    assert!(saved.keep_audio);
+    assert!(saved.multi_speaker);
+}
+
+#[test]
 fn recording_settings_are_read_whole_while_saving() {
     let db = TempDb::new();
     let store = db.open();

@@ -105,30 +105,40 @@ impl AudioCapCli {
             ))
         })?;
         let stderr = String::from_utf8_lossy(&stderr);
-        if is_permission_denied(&stderr) {
-            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
-        }
         if !status.success() {
-            return Err(AudioError::Device(source_list_failure(&stderr).into()));
+            if let Some(message) = source_list_failure(&stderr) {
+                return Err(AudioError::Device(message.into()));
+            }
+            if is_permission_denied(&stderr) {
+                return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+            }
+            // AudioCapCLI exits silently when macOS denies System Audio permission.
+            if stderr.trim().is_empty() {
+                return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+            }
+            return Err(AudioError::Device(
+                "Couldn't list app audio sources. Refresh the app list or restart Scribular."
+                    .into(),
+            ));
         }
         Ok(parse_sources(&String::from_utf8_lossy(&stdout)))
     }
 }
 
-fn source_list_failure(stderr: &str) -> &'static str {
+fn source_list_failure(stderr: &str) -> Option<&'static str> {
     for line in stderr.lines().map(str::trim) {
         if line.starts_with("Error reading process list")
             || line.starts_with("Error reading data")
             || line.starts_with("Error reading array")
             || line.starts_with("Failed to read format")
         {
-            return "Couldn't read macOS audio sources. Check your sound output and refresh the app list.";
+            return Some("Couldn't read macOS audio sources. Check your sound output and refresh the app list.");
         }
         if line.starts_with("Usage:") || line.starts_with("dyld[") {
-            return "The installed AudioCapCLI couldn't list sources. Reinstall Scribular and try again.";
+            return Some("The installed AudioCapCLI couldn't list sources. Reinstall Scribular and try again.");
         }
     }
-    "Couldn't list app audio sources. Refresh the app list or restart Scribular."
+    None
 }
 
 fn check_cancel(cancel: &AtomicBool) -> std::io::Result<()> {
@@ -432,12 +442,22 @@ mod tests {
             Err(AudioError::PermissionDenied(Privacy::SystemAudio))
         ));
 
+        let cli = fixture.cli("#!/bin/sh\nexit 1\n");
+        assert!(matches!(
+            cli.list_apps(),
+            Err(AudioError::PermissionDenied(Privacy::SystemAudio))
+        ));
+
         for (stderr, action) in [
             (
                 "Error reading process list: Private Browser",
                 "Check your sound output",
             ),
             ("Usage: Private Browser", "Reinstall Scribular"),
+            (
+                "Usage: Private Browser permission denied",
+                "Reinstall Scribular",
+            ),
             (
                 "Unexpected failure from Private Browser",
                 "restart Scribular",

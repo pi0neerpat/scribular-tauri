@@ -50,6 +50,17 @@ swift run --package-path tools/uitest uitest tools/uitest/scenarios/as13-dirty-c
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/keychain-after-rebuild.uitest --app /path/to/Scribular.app
 ```
 
+### Host llama-server (VM)
+
+Summaries on the VM's CPU are slow. A `remote-llm` test build sends summary generation to a `llama-server` on the host instead; tokenizing, prompt format, context (8192) and sampling stay the same as on-device. Shipping builds never contain this path.
+
+1. On the host, serve the same GGUF the app manifest uses (otherwise results won't match on-device): `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4 -c 32768`. `-c 32768` is 8192 × 4: llama-server splits `-c` across the `-np` slots, so each slot keeps the 8192-token context the on-device summarizer uses. Bind the Softnet bridge address: the default loopback address is unreachable from the VM, and Softnet already allows `192.168.64.1/32`. Avoid `0.0.0.0`: the server has no auth and receives transcript text over plain HTTP, so it would be open to the whole LAN. The bridge address exists only while a VM is running; start the VM first.
+2. In the VM, check it: `curl http://192.168.64.1:5801/health`.
+3. Build with the feature: `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app --features remote-llm`.
+4. Run with the URL set; uitest forwards it to the app: `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`.
+
+The app logs `SCRIBULAR_LLM_URL set: summaries use <url>` at launch. Unset or empty, the app uses the on-device model as usual. The model still has to be downloaded and verified (onboarding is unchanged).
+
 ### Model cache
 
 `launch` points the app's `models` folder (`~/Library/Application Support/com.app.scribular.tauri/models`) at a symlink to `~/Library/Caches/scribular-uitest/models`. The first run downloads about 1.85 GB of models into it; later runs reuse it and skip the download. If app data already holds a real `models` folder from a manual run, `launch` moves its files into the cache instead of into the run folder. Files already in the cache are never overwritten or deleted; the app verifies them itself.
