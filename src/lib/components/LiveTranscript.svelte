@@ -10,8 +10,8 @@
   let text = $derived(liveTranscript(segments, labeled));
   let manuallyVisible = $state<boolean | null>(null);
   let collapsed = $derived(manuallyVisible === null
-    ? activeElapsedMs >= 60_000 || (wordCount(segments.mic.map((s) => s.text).join(' '), false) >= 5
-      && (!labeled || wordCount(segments.system.map((s) => s.text).join(' '), false) >= 5))
+    ? activeElapsedMs >= 60_000 || (wordCount(liveTranscript({ mic: segments.mic, system: [] }, false), false) >= 5
+      && (!labeled || wordCount(liveTranscript({ mic: [], system: segments.system }, false), false) >= 5))
     : !manuallyVisible);
 
   $effect(() => {

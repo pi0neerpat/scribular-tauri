@@ -174,6 +174,7 @@ pub fn run() {
             commands::transcribe_file,
             commands::get_recording_settings,
             commands::set_recording_settings,
+            commands::set_recording_preferences,
             commands::get_recording_source,
             commands::set_recording_source,
             commands::get_app_settings,

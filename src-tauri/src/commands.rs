@@ -988,6 +988,21 @@ pub fn set_recording_settings(
 }
 
 #[tauri::command]
+pub fn set_recording_preferences(
+    store: State<Arc<Store>>,
+    models: State<Arc<ModelManager>>,
+    keep_audio: bool,
+    multi_speaker: bool,
+) -> Result<(), String> {
+    if multi_speaker && models.readiness.get(SPEAKER_CAMPPLUS) != ModelState::Ready {
+        return Err("download the speaker model before enabling multi-speaker".into());
+    }
+    store
+        .set_recording_preferences(keep_audio, multi_speaker)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn confirm_speaker_labels(
     store: State<Arc<Store>>,
     jobs: State<Arc<JobQueue>>,

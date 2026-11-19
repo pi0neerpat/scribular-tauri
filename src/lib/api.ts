@@ -319,6 +319,10 @@ export function setRecordingSettings(settings: RecordingSettings): Promise<void>
   return invoke<void>('set_recording_settings', { settings });
 }
 
+export function setRecordingPreferences(keepAudio: boolean, multiSpeaker: boolean): Promise<void> {
+  return invoke<void>('set_recording_preferences', { keepAudio, multiSpeaker });
+}
+
 export function getRecordingSource(): Promise<RecordingSource> {
   return invoke<RecordingSource>('get_recording_source');
 }

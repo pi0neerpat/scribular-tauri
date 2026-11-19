@@ -8,7 +8,7 @@
     modelsStatus,
     onModelsProgress,
     openPrivacySettings,
-    setRecordingSettings,
+    setRecordingPreferences,
     appVersion,
     checkForUpdates,
     getUpdateState,
@@ -151,9 +151,7 @@
   async function save() {
     if (!settings) return;
     try {
-      // The record screen owns source choice, so this pane saves only its own controls.
-      const current = await getRecordingSettings();
-      await setRecordingSettings({ ...current, keepAudio: settings.keepAudio, multiSpeaker: settings.multiSpeaker, promptId: null });
+      await setRecordingPreferences(settings.keepAudio, settings.multiSpeaker);
       error = null;
     } catch (e) {
       error = String(e);

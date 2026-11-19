@@ -55,8 +55,10 @@ describe('LiveTranscript waiting indication', () => {
     receive({ sessionId: 'session-a', source: 'mic', segments: [{ startMs: 0, endMs: 1000, text: 'one two three four five' }] });
     flushSync();
     expect(target.querySelector('pre')).not.toBeNull();
-    expect(target.textContent).not.toContain('5 words');
-    receive({ sessionId: 'session-a', source: 'system', segments: [{ startMs: 0, endMs: 1000, text: 'one two three four five' }] });
+    receive({ sessionId: 'session-a', source: 'system', segments: [{ startMs: 0, endMs: 1000, text: '[BLANK_AUDIO] one two three four' }] });
+    flushSync();
+    expect(target.querySelector('pre')).not.toBeNull();
+    receive({ sessionId: 'session-a', source: 'system', segments: [{ startMs: 1000, endMs: 2000, text: 'five' }] });
     flushSync();
     expect(target.querySelector('pre')).toBeNull();
     [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Show transcript')!.click();
@@ -68,6 +70,16 @@ describe('LiveTranscript waiting indication', () => {
     receive({ sessionId: 'session-b', source: 'mic', segments: [{ startMs: 0, endMs: 1000, text: 'one' }] });
     flushSync();
     expect(target.querySelector('pre')).toBeNull();
+    unmount(app);
+  });
+
+  it('does not count non-speech tags toward the fold threshold', async () => {
+    let receive!: (segments: SessionSegments) => void;
+    onSessionSegments.mockImplementation((handler: typeof receive) => { receive = handler; return Promise.resolve(() => {}); });
+    const { target, app } = await render(false);
+    receive({ sessionId: 'session-a', source: 'mic', segments: [{ startMs: 0, endMs: 1000, text: '[BLANK_AUDIO] [music] one two three' }] });
+    flushSync();
+    expect(target.querySelector('pre')).not.toBeNull();
     unmount(app);
   });
 });

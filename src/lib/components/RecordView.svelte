@@ -105,6 +105,7 @@
   let apps = $state<string[]>([]);
   let level = $state<Partial<Record<'mic' | 'system', SessionLevel>>>({});
   let capture = $state<RecordingState | null>(null);
+  let finalElapsedMs = $state<number | null>(null);
   const commonApps = ['Zoom', 'Microsoft Teams', 'FaceTime', 'Slack', 'Discord', 'Google Chrome', 'Safari', 'Firefox'];
   let askSpeakerCount = $state(false);
   let styles = $state<PromptList | null>(null);
@@ -141,13 +142,22 @@
   function confineDialogFocus(event: KeyboardEvent) {
     if (event.key === 'Escape') { askSpeakerCount = false; return; }
     if (event.key === 'Enter' && event.target === speakerDialog) { void stopWithCount(2); return; }
+    if (event.key !== 'Tab' || !speakerDialog) return;
+    const buttons = speakerDialog.querySelectorAll('button');
+    if (event.shiftKey && (document.activeElement === buttons[0] || document.activeElement === speakerDialog)) {
+      event.preventDefault();
+      buttons[buttons.length - 1]?.focus();
+    } else if (!event.shiftKey && (document.activeElement === buttons[buttons.length - 1] || document.activeElement === speakerDialog)) {
+      event.preventDefault();
+      buttons[0]?.focus();
+    }
   }
 
   let recording = $derived(status === 'recording');
   let working = $derived(isWorking(status));
   let elapsedMs = $derived(capture?.sessionId === sessionId
     ? (capture.status === 'paused' ? capture.activeElapsedMs : (level.mic?.activeElapsedMs ?? capture.activeElapsedMs))
-    : Math.max(0, now - startedAt));
+    : (finalElapsedMs ?? Math.max(0, now - startedAt)));
   let elapsed = $derived(Math.floor(elapsedMs / 1000));
 
   // The clock only ticks during a recording.
@@ -231,6 +241,7 @@
       return;
     }
     busy = true;
+    finalElapsedMs = null;
     resultFetch++;
     error = denied = null;
     result = progress = null;
@@ -306,6 +317,7 @@
   async function stopWithCount(numSpeakers: number | null) {
     askSpeakerCount = false;
     busy = true;
+    finalElapsedMs = elapsedMs;
     try {
       await stopRecording(numSpeakers);
       capture = null;
@@ -326,12 +338,14 @@
   }
 
   async function openPicker() {
+    if (busy) return;
     pickerOpen = true;
-    try { apps = (await listAudioApps()).map((app) => app.name); error = null; }
+    try { apps = (await listAudioApps()).map((app) => app.name); denied = error = null; }
     catch (e) { denied = deniedPrivacy(String(e)); error = String(e); }
   }
 
   async function chooseApp(name: string) {
+    if (busy) return;
     const next = { location: 'onCall' as const, targetApp: name };
     try { await setRecordingSource(next); source = next; pickerOpen = false; error = null; }
     catch (e) { error = String(e); }
@@ -362,7 +376,7 @@
   }
 </script>
 
-<section>
+<section inert={askSpeakerCount}>
   <h2>Record</h2>
   {#if !recording}
     <fieldset disabled={!sourceReady || busy}>
@@ -371,7 +385,7 @@
       <label><input type="radio" name="recording-source" checked={source.location === 'onCall'} onclick={() => chooseLocation('onCall')} /> On a call</label>
     </fieldset>
     {#if source.location === 'onCall'}
-      <button onclick={openPicker}>App: {source.targetApp ?? 'Choose an app…'}</button>
+      <button onclick={openPicker} disabled={busy}>App: {source.targetApp ?? 'Choose an app…'}</button>
       {#if /Chrome|Safari|Firefox|Edge|Brave/i.test(source.targetApp ?? '')}<p>Audio from all browser tabs will be recorded.</p>{/if}
     {/if}
     {#if firstCall}
@@ -384,11 +398,11 @@
     {#if pickerOpen}
       <div role="dialog" aria-label="Choose a call app">
         <p>Common apps and browsers</p>
-        {#each commonApps as name}<button onclick={() => chooseApp(name)}>{name}</button>{/each}
+        {#each commonApps as name}<button disabled={busy} onclick={() => chooseApp(name)}>{name}</button>{/each}
         <p>Other App — currently playing audio</p>
-        {#each apps.filter((name) => !commonApps.includes(name)) as name}<button onclick={() => chooseApp(name)}>{name}</button>{/each}
-        <button onclick={openPicker}>Refresh</button>
-        <button onclick={() => (pickerOpen = false)}>Close</button>
+        {#each apps.filter((name) => !commonApps.includes(name)) as name}<button disabled={busy} onclick={() => chooseApp(name)}>{name}</button>{/each}
+        <button disabled={busy} onclick={openPicker}>Refresh</button>
+        <button disabled={busy} onclick={() => (pickerOpen = false)}>Close</button>
       </div>
     {/if}
   {/if}
@@ -427,16 +441,6 @@
   {/if}
 
   </div>
-  {#if askSpeakerCount}
-    <div bind:this={speakerDialog} onkeydown={confineDialogFocus} role="dialog" aria-labelledby="speaker-count-title" tabindex="-1">
-      <h3 id="speaker-count-title">How many people spoke?</h3>
-      <button onclick={() => stopWithCount(2)}>2 people</button>
-      <button onclick={() => stopWithCount(3)}>3 people</button>
-      <button onclick={() => stopWithCount(null)}>4+ (beta)</button>
-      <button onclick={() => (askSpeakerCount = false)}>Keep recording</button>
-    </div>
-  {/if}
-
   {#if sessionId && (recording || working || status === 'failed')}
     <LiveTranscript {sessionId} {labeled} activeElapsedMs={elapsedMs} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
@@ -457,3 +461,12 @@
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>
+{#if askSpeakerCount}
+  <div bind:this={speakerDialog} onkeydown={confineDialogFocus} role="dialog" aria-modal="true" aria-labelledby="speaker-count-title" tabindex="-1">
+    <h3 id="speaker-count-title">How many people spoke?</h3>
+    <button onclick={() => stopWithCount(2)}>2 people</button>
+    <button onclick={() => stopWithCount(3)}>3 people</button>
+    <button onclick={() => stopWithCount(null)}>4+ (beta)</button>
+    <button onclick={() => (askSpeakerCount = false)}>Keep recording</button>
+  </div>
+{/if}
