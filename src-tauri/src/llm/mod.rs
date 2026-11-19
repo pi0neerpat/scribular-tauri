@@ -6,6 +6,9 @@ pub mod prompt;
 #[cfg(not(feature = "fake-engines"))]
 pub mod llama;
 
+#[cfg(all(feature = "remote-llm", not(feature = "fake-engines")))]
+pub mod remote;
+
 use std::{
     fmt,
     sync::{atomic::AtomicBool, Arc},

@@ -58,6 +58,15 @@ fn summarizer_loader(_models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
 
 #[cfg(not(feature = "fake-engines"))]
 fn summarizer_loader(models: &Arc<ModelManager>) -> Arc<dyn SummarizerLoader> {
+    #[cfg(feature = "remote-llm")]
+    if let Some(url) = llm::remote::remote_url(std::env::var("SCRIBULAR_LLM_URL").ok()) {
+        diag::log::log(
+            "INFO",
+            "llm",
+            &format!("SCRIBULAR_LLM_URL set: summaries use {url}"),
+        );
+        return Arc::new(llm::remote::RemoteLoader::new(Arc::clone(models), url));
+    }
     Arc::new(llm::llama::LlamaLoader::new(Arc::clone(models)))
 }
 
