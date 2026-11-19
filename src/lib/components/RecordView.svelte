@@ -367,8 +367,8 @@
   {#if !recording}
     <fieldset disabled={!sourceReady || busy}>
       <legend>Recording source</legend>
-      <label><input type="radio" checked={source.location === 'inRoom'} onchange={() => chooseLocation('inRoom')} /> In the room</label>
-      <label><input type="radio" checked={source.location === 'onCall'} onchange={() => chooseLocation('onCall')} /> On a call</label>
+      <label><input type="radio" name="recording-source" checked={source.location === 'inRoom' && !firstCall} onclick={() => chooseLocation('inRoom')} /> In the room</label>
+      <label><input type="radio" name="recording-source" checked={source.location === 'onCall'} onclick={() => chooseLocation('onCall')} /> On a call</label>
     </fieldset>
     {#if source.location === 'onCall'}
       <button onclick={openPicker}>App: {source.targetApp ?? 'Choose an app…'}</button>

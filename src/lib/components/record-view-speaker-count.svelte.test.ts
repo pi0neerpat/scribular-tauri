@@ -79,6 +79,22 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
+  it('reopens the first-call sheet after Not Now', async () => {
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    const call = target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1];
+    call.click();
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    await clickButton(target, 'Not Now');
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
+    expect(setRecordingSource).toHaveBeenCalledWith({ location: 'inRoom', targetApp: null });
+    expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[0].checked).toBe(true);
+    expect(call.checked).toBe(false);
+    call.click();
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    unmount(app);
+    target.remove();
+  });
   it('chooses and persists a call app from the record screen', async () => {
     const { target, app } = await renderRecordView();
     await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
