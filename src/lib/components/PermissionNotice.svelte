@@ -7,5 +7,5 @@
 
 <p role="alert">
   {pane === 'microphone' ? 'Microphone' : 'App audio'} access is off.
-  <button onclick={() => openPrivacySettings(pane)}>Open System Settings</button>
+  <button onclick={() => openPrivacySettings(pane)}>{pane === 'systemAudio' ? 'Reopen System Audio Settings' : 'Open System Settings'}</button>
 </p>

@@ -536,13 +536,18 @@ impl Licensing {
     }
 
     pub fn state(&self) -> AccessState {
-        access_status(self.clock.now_ms(), &self.record())
+        let state = access_status(self.clock.now_ms(), &self.record());
+        // The dev skip must reach the UI too, or its gates stay locked.
+        if self.skip && !state.allows() {
+            return AccessState::Trial { days_left: TRIAL_DAYS };
+        }
+        state
     }
 
     /// The R9 gate. Call it only where a new session is created.
     pub fn require_access(&self) -> Result<(), AccessDenied> {
         let state = self.state();
-        if self.skip || state.allows() {
+        if state.allows() {
             Ok(())
         } else {
             Err(AccessDenied { state })
@@ -1279,6 +1284,7 @@ mod tests {
         )
         .with_skip(true);
         assert!(skipping.require_access().is_ok());
+        assert_eq!(skipping.state(), AccessState::Trial { days_left: TRIAL_DAYS });
     }
 
     #[test]
