@@ -317,9 +317,10 @@
   async function stopWithCount(numSpeakers: number | null) {
     askSpeakerCount = false;
     busy = true;
-    finalElapsedMs = elapsedMs;
+    const stoppedElapsedMs = elapsedMs;
     try {
       await stopRecording(numSpeakers);
+      finalElapsedMs = stoppedElapsedMs;
       capture = null;
       // Its "Transcribing…" event may already have moved it on.
       if (status === 'recording') status = 'finalizing';

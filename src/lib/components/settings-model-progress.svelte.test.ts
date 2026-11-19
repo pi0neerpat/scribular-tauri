@@ -87,8 +87,10 @@ it('keeps source controls off Settings and saves only recording preferences', as
   const keepAudio = target.querySelector<HTMLInputElement>('input[type="radio"][value="true"]')!;
   keepAudio.checked = true;
   keepAudio.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(setRecordingPreferences).toHaveBeenCalledWith(true, false));
-  expect(setRecordingPreferences).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => {
+    expect(setRecordingPreferences).toHaveBeenCalledTimes(1);
+    expect(setRecordingPreferences).toHaveBeenCalledWith(true, false);
+  });
   expect(setRecordingSettings).not.toHaveBeenCalled();
   unmount(app);
 });

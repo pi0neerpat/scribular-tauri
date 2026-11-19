@@ -149,7 +149,7 @@ describe('recording speaker-count prompt', () => {
   it('keeps a short active transcript expanded after a long paused recording', async () => {
     let emitSegments!: (event: { sessionId: string; source: 'mic'; segments: { startMs: number; endMs: number; text: string }[] }) => void;
     onSessionSegments.mockImplementation(async (handler) => { emitSegments = handler; return () => {}; });
-    recordingState.mockResolvedValue({ sessionId: recording.id, status: 'recording', activeElapsedMs: 10_000 });
+    recordingState.mockResolvedValue({ sessionId: recording.id, status: 'paused', activeElapsedMs: 10_000 });
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const { target, app } = await renderRecordView();
     await clickButton(target, 'Start recording');
@@ -236,6 +236,22 @@ describe('recording speaker-count prompt', () => {
       target.remove();
     },
   );
+
+  it('keeps the recording clock running when Stop fails', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    stopRecording.mockRejectedValueOnce(new Error('stop failed'));
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    await clickButton(target, 'Stop');
+    await clickButton(target, '2 people');
+    await vi.waitFor(() => expect(target.textContent).toContain('stop failed'));
+    clock.mockReturnValue(4_000);
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Recording…\s+0:03/));
+    clock.mockRestore();
+    unmount(app);
+    target.remove();
+  });
 
   it('stores the speaker marker before startup IPC and clears it if startup fails', async () => {
     let resolveStart!: (value: typeof recording) => void;
