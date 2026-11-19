@@ -1,6 +1,6 @@
-# Recording sources and capture (recording spec, PR1)
+# Recording sources and capture (recording spec, PR1 and PR2)
 
-Spec: `plans/2026-11-16-recording-and-session-spec.md` (R1, R4 to R6, R17; acceptance AS1, AS4, AS5, AS6, AS18). Shipped in PR #32 (merge `bdd0f5c`, "Add mic-first recording and pause timeline"). This is the Rust source contract only; the record-screen UI is not part of it.
+Spec: `plans/2026-11-16-recording-and-session-spec.md` (R1, R4 to R6, R17; acceptance AS1, AS4, AS5, AS6, AS18). Shipped in PR #32 (merge `bdd0f5c`, "Add mic-first recording and pause timeline"). PR1 is the Rust source contract; the record-screen UI is PR2 (see "Record screen (PR2)" below).
 
 ## What it does
 
@@ -42,6 +42,52 @@ Spec: `plans/2026-11-16-recording-and-session-spec.md` (R1, R4 to R6, R17; accep
 
 ## Known limits
 
-- The record-screen source picker and meters UI arrive in PR2; Stop handoff and the session page in PR3; the real-Mac capture and playback walkthrough (AS17) in PR4.
+- Stop handoff and the session page are PR3; the real-Mac capture and playback walkthrough (AS17) is PR4.
 - AS5 (meters and amber warning with real app audio) is manual. The native meters and warning are unverified on real hardware; tests use fake sources.
 - AS4, AS6 and AS18 are covered by fake-source tests, not real AudioCapCLI capture.
+
+## Record screen (PR2)
+
+Shipped in PR #34 (merge `328915c`, "move recording controls onto record screen"). Spec: R7 to R9 (live transcript fold, Stop popover) and R5/R6 UI; AS8 for the transcript fold. Source choice, pause and meters moved from Settings to the Record screen.
+
+### What it does
+
+- **Source picker** (`src/lib/components/RecordView.svelte`): a "Recording source" radio group (In the room / On a call), shown only while not recording. On a call shows an `App:` button that opens the app picker. The picker lists common apps (Zoom, Microsoft Teams, FaceTime, Slack, Discord, Google Chrome, Safari, Firefox) plus "Other App" entries currently playing audio, with Refresh and Close. A browser app shows "Audio from all browser tabs will be recorded."
+- **First-call sheet**: choosing On a call with no saved app opens a dialog (macOS asks for System Audio Recording access when capture starts) with Choose an app and Not Now. Not Now returns to In the room.
+- **Start** is disabled while busy, until the source is loaded, with microphone access denied, with On a call and no app, until speech is ready, or without access. Start maps In the room to `mic` and On a call to `micAndSystem`; On a call with no app throws "Choose an app before recording a call."
+- **While recording**: Pause/Resume, Stop, a Microphone `<meter>`, and with two sources an App audio `<meter>`. The `hearing: warning` level on the app source shows "No app audio heard yet. Your microphone is still recording." The clock shows active time (paused time excluded) from `session://levels`, or `activeElapsedMs` from `recording_state` while paused.
+- **Stop with Identify speakers on** opens the "How many people spoke?" dialog (2 people, 3 people, 4+ beta, Keep recording). Escape closes it and keeps recording; Enter on the dialog selects 2. The dialog now renders outside the main `<section>`, which is `inert` while it is open.
+- **Style picker** stays on the Record screen (moved below the Start/Stop controls).
+- **Settings > Recording** no longer has the source radios or app picker. It keeps Multi-speaker and Keep audio and saves them with `set_recording_preferences`.
+- **Live transcript** (`src/lib/components/LiveTranscript.svelte`): starts visible with a Hide/Show transcript button and no word count. It folds automatically only once it has shown text for 20 active seconds (`shownAtMs`, since transcription arrives in batches) and either `activeElapsedMs >= 60_000` or at least 20 words from each selected source (mic only when not `labeled`). Non-speech tags do not count. A manual Hide/Show overrides the fold for the rest of that session. It resets when `sessionId` changes.
+- **System Audio denial**: `PermissionNotice.svelte` shows "Reopen System Audio Settings" for `systemAudio`, and RecordView adds Retry app audio, which reopens the picker and re-lists apps. A successful listing clears the denial.
+
+### How it works
+
+- **App listing and permission** (`src-tauri/src/audio/system.rs`, `AudioCapCli::list_apps`, :152): runs `AudioCapCLI --list-sources`. On a non-zero exit: known stderr markers ("Error reading process list", "Usage:", `dyld[`, and others via `source_list_failure`) map to `AudioError::Device` with a specific message first; otherwise "permission denied" in stderr, or an empty stderr, maps to `AudioError::PermissionDenied(Privacy::SystemAudio)`; anything else is the generic "Couldn't list app audio sources" Device error. The empty-stderr rule exists because AudioCapCLI exits 1 silently when macOS denies System Audio permission. Marker lines win over "permission denied" text, so `Usage: ... permission denied` is a reinstall error. Unit test: `source_list_distinguishes_empty_permission_and_safe_failures`.
+- **Command**: `list_audio_apps` (`src-tauri/src/commands.rs:1252`) runs the listing on `spawn_blocking`. The frontend maps the error text to a pane with `deniedPrivacy`.
+- **Preferences command**: `set_recording_preferences(keep_audio, multi_speaker)` (`commands.rs`, registered in `lib.rs`; `setRecordingPreferences` in `src/lib/api.ts`) writes only `KEEP_AUDIO` and `MULTI_SPEAKER` in one transaction (`Store::set_recording_preferences`, `src-tauri/src/store/settings.rs`), so a Settings save cannot overwrite the Record screen's source. Enabling multi-speaker is rejected until the speaker model (`SPEAKER_CAMPPLUS`) is Ready.
+- **State**: on mount RecordView loads `get_recording_source`, `recording_state`, and listens to `session://recording-state` and `session://levels`. A reload mid-recording restores the true state from `recording_state`.
+- **License skip** (`src-tauri/src/license/mod.rs`): `Licensing::state()` now reports a Trial state when the dev skip is on and access would otherwise be denied, so UI gates unlock too (before, only `require_access` honoured it). `SCRIBULAR_SKIP_LICENSE` (any non-empty value other than `0`) is read only in debug builds; release builds never read it (`dev_skip`, `skip_requested`).
+
+### Config and data
+
+- No new tables or settings keys. Source: `record_location` and `record_target_app`; preferences: keep-audio and multi-speaker keys, all in the `settings` table.
+- Env var: `SCRIBULAR_SKIP_LICENSE=1` (debug builds only).
+- `sessionStorage` keys in RecordView track the in-flight session across a window reload (`IN_FLIGHT_KEY`, `IN_FLIGHT_START_KEY`, `IN_FLIGHT_SPEAKERS_KEY`).
+
+### How to test
+
+- Frontend: `npm test` (new or changed: `live-transcript.svelte.test.ts`, `record-view-speaker-count.svelte.test.ts`, `settings-model-progress.svelte.test.ts`, `license-gate.svelte.test.ts`, `first-run.test.ts`); `npm run check`. Cases include first-call sheet and Not Now, persisting a chosen app, picker inactive during a slow Start, System Audio denial clearing after a successful listing, short transcript staying open after a long pause, Escape closing the speaker dialog.
+- Rust: `cargo test --locked --manifest-path src-tauri/Cargo.toml --features fake-engines --test store` (`recording_preferences_do_not_replace_source`); `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` for the `system.rs` and `license` unit tests (`skipping.state()` assertion).
+- Native UI: build and run steps in `tools/uitest/README.md`. Existing scenarios `as11-note-style-default.uitest` and `system-audio-smoke.uitest`; there is no scenario for the record-screen picker, meters, pause or transcript fold yet.
+- **Manual only: System Audio permission denial.** Deny System Audio Recording for Scribular (System Settings > Privacy & Security), choose On a call, open the app picker. Expect the "App audio access is off." notice with Reopen System Audio Settings and Retry app audio. Grant access, press Retry app audio, and the notice clears. Cannot be automated because the real AudioCapCLI is needed to exit 1 with empty stderr; the unit test only fakes it with a shell script.
+- Manual only: meters and the amber warning with real app audio (AS5).
+
+### Known limits
+
+- `tools/uitest/scenarios/system-audio-smoke.uitest` still selects the app through Settings ("App audio" and `pick-app`), which this PR removed from Settings; it needs updating to use the Record screen picker before it can be relied on.
+- The picker's common-app list is a fixed frontend list and is offered whether or not the app is installed or playing.
+- Selected app is matched by name; the capture follows the process running at Start (see the uitest README on `afplay` loops).
+- The auto-fold needs 20 active seconds of visible text, so a transcript never hides sooner, even at 20 words per source.
+- Native behaviour of the new screen (picker, meters, pause, fold) is covered by component tests only, not by a signed-app uitest.
