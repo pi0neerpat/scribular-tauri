@@ -227,6 +227,7 @@ fn summarize(
         model.as_ref(),
         &prompt.text,
         &session.transcript,
+        usize::MAX,
         cancel,
         &mut timings,
         &mut |event| match event {
@@ -270,6 +271,7 @@ pub(super) fn generate(
     model: &dyn Summarizer,
     base: &str,
     transcript: &str,
+    output_limit: usize,
     cancel: &AtomicBool,
     timings: &mut Timings,
     report: &mut dyn FnMut(SummaryEvent<'_>),
@@ -293,7 +295,13 @@ pub(super) fn generate(
     let summary = if n == 1 {
         report(SummaryEvent::Step(2, 2, "Generating summary...".into()));
         let started = Instant::now();
-        let summary = final_pass(model, chunk_prompt(base, &chunks[0]), cancel, report)?;
+        let summary = final_pass(
+            model,
+            chunk_prompt(base, &chunks[0]),
+            output_limit,
+            cancel,
+            report,
+        )?;
         timings.chunk_ms.push(ms(started));
         summary
     } else {
@@ -335,7 +343,13 @@ pub(super) fn generate(
             "Combining chunk summaries...".into(),
         ));
         let started = Instant::now();
-        let summary = final_pass(model, combine_prompt(base, &notes), cancel, report)?;
+        let summary = final_pass(
+            model,
+            combine_prompt(base, &notes),
+            output_limit,
+            cancel,
+            report,
+        )?;
         timings.combine_ms = Some(ms(started));
         summary
     };
@@ -348,6 +362,7 @@ pub(super) fn generate(
 fn final_pass(
     model: &dyn Summarizer,
     prompt: String,
+    output_limit: usize,
     cancel: &AtomicBool,
     report: &mut dyn FnMut(SummaryEvent<'_>),
 ) -> Result<String, Stop> {
@@ -356,7 +371,8 @@ fn final_pass(
         .context_tokens()
         .checked_sub(used)
         .filter(|&m| m > 0)
-        .ok_or_else(|| Stop::Failed("The transcript is too long to summarize.".into()))?;
+        .ok_or_else(|| Stop::Failed("The transcript is too long to summarize.".into()))?
+        .min(output_limit);
     let mut out = model.generate(&[Generation { prompt, max_tokens }], cancel, &mut |event| {
         if let GenEvent::Token { text, .. } = event {
             report(SummaryEvent::Text(text));

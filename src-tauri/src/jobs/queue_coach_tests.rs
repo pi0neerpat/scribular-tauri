@@ -50,6 +50,7 @@ impl JobEvents for Silent {
 struct Scripted {
     attempts: AtomicUsize,
     calls: Mutex<Vec<Vec<String>>>,
+    limits: Mutex<Vec<Vec<usize>>>,
     first: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
     pass: bool,
 }
@@ -77,6 +78,10 @@ impl Summarizer for Scripted {
             .lock()
             .unwrap()
             .push(requests.iter().map(|r| r.prompt.clone()).collect());
+        self.limits
+            .lock()
+            .unwrap()
+            .push(requests.iter().map(|r| r.max_tokens).collect());
         let prompt = &requests[0].prompt;
         if !prompt.contains(INSTRUCTIONS) {
             return Ok(vec!["Real summary.".into()]);
@@ -144,6 +149,7 @@ fn engine(pass: bool) -> (Arc<Scripted>, mpsc::Receiver<()>, mpsc::Sender<()>) {
         Arc::new(Scripted {
             attempts: AtomicUsize::new(0),
             calls: Mutex::default(),
+            limits: Mutex::default(),
             first: Mutex::new(Some((arrived, wait))),
             pass,
         }),
@@ -209,6 +215,12 @@ fn practice_uses_chunk_and_combine_with_retries_and_real_work_first() {
         );
         assert!(calls[3][0].contains(practice::Check::NoPreamble.correction()));
         assert!(calls[5][0].contains(practice::Check::SectionsPresent.correction()));
+        let limits = engine.limits.lock().unwrap();
+        assert_eq!(limits[1][0], practice::NOTE_TOKENS);
+        assert!(
+            limits[2][0] > practice::NOTE_TOKENS,
+            "real summaries keep their context budget"
+        );
         assert_eq!(
             store.get_session(&real.id).unwrap().unwrap().summary,
             "Real summary."

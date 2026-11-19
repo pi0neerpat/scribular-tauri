@@ -10,6 +10,8 @@ use super::{
 
 pub const TRANSCRIPT: &str = include_str!("samples/practice.txt");
 pub const MAX_ATTEMPTS: u8 = 3;
+// shortcut: very long practice styles may truncate; raise this after measuring native decode time.
+pub const NOTE_TOKENS: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

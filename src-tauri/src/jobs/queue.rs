@@ -14,7 +14,7 @@ use std::{
 
 use super::{state::can_transition, summarize, JobEvents, SessionProgress};
 use crate::coach::{
-    practice::{self, PracticeNote, PracticeSource, MAX_ATTEMPTS},
+    practice::{self, PracticeNote, PracticeSource, MAX_ATTEMPTS, NOTE_TOKENS},
     StyleSpec,
 };
 use crate::llm::{LlmError, Summarizer, SummarizerLoader};
@@ -91,6 +91,7 @@ impl PracticeRun {
             model,
             &self.instructions,
             self.job.source.transcript,
+            NOTE_TOKENS,
             &self.job.cancel,
             &mut Default::default(),
             &mut |_| {},
