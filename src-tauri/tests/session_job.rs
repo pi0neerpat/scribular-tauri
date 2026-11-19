@@ -845,6 +845,124 @@ fn app_audio_attaches_late_and_reattaches_on_the_mic_timeline() {
 }
 
 #[test]
+fn a_failed_live_window_is_replayed_before_reattached_app_audio() {
+    let h = Harness::new();
+    h.store.set_setting("keep_audio", "1").unwrap();
+    let id = h.start(InputMode::MicAndSystem);
+    let silence = vec![0.0; SECOND];
+    let signal = vec![0.5; SECOND];
+    let feed_call = |seconds| {
+        for _ in 0..seconds {
+            assert!(h.mic.feed(&silence));
+            assert!(h.system.feed(&signal));
+        }
+    };
+    let live_starts = || {
+        h.events
+            .segments
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.source == AudioSource::System)
+            .flat_map(|event| event.segments.iter().map(|segment| segment.start_ms))
+            .collect::<Vec<_>>()
+    };
+    feed_call(16);
+    wait_until("initial app window publishes", || live_starts().len() == 2);
+    h.stt.failures_remaining.store(1, Ordering::Relaxed);
+    feed_call(16);
+    wait_until("next app window fails", || {
+        h.stt.failures_remaining.load(Ordering::Relaxed) == 0
+    });
+    feed_call(16);
+    h.system.available.store(false, Ordering::Relaxed);
+    h.system.lose();
+    wait_until("failed app span is saved", || {
+        h.store
+            .audio_samples(&id, AudioSource::System)
+            .unwrap()
+            .len()
+            == 48 * 16_000
+    });
+
+    h.recorder.pause().unwrap();
+    assert!(!h.mic.feed(&silence));
+    h.recorder.resume().unwrap();
+    for _ in 0..2 {
+        assert!(h.mic.feed(&silence));
+    }
+    h.system.available.store(true, Ordering::Relaxed);
+    wait_until("app audio reattaches", || h.system.is_open());
+    feed_call(17);
+    wait_until("reattached app publishes before Stop", || {
+        live_starts().contains(&50_000)
+    });
+    let expected = [
+        0, 1000, 10_000, 11_000, 25_000, 26_000, 40_000, 41_000, 50_000, 51_000,
+    ];
+    assert_eq!(live_starts(), expected);
+
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(67_000));
+    let saved: Vec<_> = h
+        .store
+        .segments(&id, AudioSource::System)
+        .unwrap()
+        .into_iter()
+        .map(|segment| segment.start_ms)
+        .collect();
+    assert_eq!(saved, [expected.as_slice(), &[60_000, 61_000]].concat());
+}
+
+#[test]
+fn stop_retries_after_a_failed_reattach_and_keeps_audio_if_errors_persist() {
+    for still_failing in [false, true] {
+        let h = Harness::new();
+        let id = h.start(InputMode::Mic);
+        h.stt.failures_remaining.store(20, Ordering::Relaxed);
+        h.feed(16);
+        wait_until("the live window fails", || {
+            h.stt.failures_remaining.load(Ordering::Relaxed) == 19
+        });
+        h.recorder.pause().unwrap();
+        h.recorder.resume().unwrap();
+        h.feed(3);
+        wait_until("the replay fails after reattach", || {
+            h.stt.failures_remaining.load(Ordering::Relaxed) == 18
+        });
+        if !still_failing {
+            h.stt.failures_remaining.store(0, Ordering::Relaxed);
+        }
+
+        assert_eq!(h.recorder.stop().unwrap(), id);
+        if still_failing {
+            h.events.wait_for(&id, SessionStatus::Failed);
+            assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+            assert_eq!(
+                h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+                19 * 16_000
+            );
+            h.stt.failures_remaining.store(0, Ordering::Relaxed);
+            h.recorder.recover(&id).unwrap();
+        }
+        h.events.wait_for(&id, SessionStatus::Done);
+        assert_eq!(h.get(&id).duration_ms, Some(19_000));
+        assert_eq!(h.chunks(&id), 0);
+        if !still_failing {
+            let starts: Vec<_> = h
+                .store
+                .segments(&id, AudioSource::Mic)
+                .unwrap()
+                .into_iter()
+                .map(|segment| segment.start_ms)
+                .collect();
+            assert_eq!(starts, [0, 1000, 10_000, 11_000, 16_000, 17_000]);
+        }
+    }
+}
+
+#[test]
 fn pause_freezes_capture_and_live_transcription_and_stop_accepts_paused_state() {
     let h = Harness::new();
     assert!(matches!(h.recorder.pause(), Err(RecordError::NotRecording)));

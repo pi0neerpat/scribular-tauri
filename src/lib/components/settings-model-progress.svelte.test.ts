@@ -83,6 +83,7 @@ it('saves call mode only after an app is selected', async () => {
   call.checked = true;
   call.dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(target.querySelector('option[value="Zoom"]')).toBeTruthy());
+  expect(setRecordingSettings).toHaveBeenCalledTimes(1);
   expect(setRecordingSettings).toHaveBeenLastCalledWith({ ...settings, promptId: null });
   const picker = target.querySelector('select')!;
   picker.value = 'Zoom';

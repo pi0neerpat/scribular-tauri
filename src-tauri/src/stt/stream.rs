@@ -109,6 +109,14 @@ impl Stream {
         self.base + self.audio.len()
     }
 
+    pub(crate) fn received_end(&self) -> usize {
+        self.offset + self.received()
+    }
+
+    pub(crate) fn retry(&mut self, window: Window) {
+        self.queue.push_front(window);
+    }
+
     fn cut(&mut self, start: usize, end: usize, last: bool) {
         let samples = self.audio[start - self.base..end - self.base].to_vec();
         self.queue.push_back(Window {

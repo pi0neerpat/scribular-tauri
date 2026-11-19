@@ -4,12 +4,12 @@
 //! audio with it) and queues the summary, whose model starts loading at Stop.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, TryRecvError},
-        Arc, Condvar, Mutex, MutexGuard,
+        Arc, Condvar, Mutex, MutexGuard, OnceLock,
     },
     thread::JoinHandle,
     time::Instant,
@@ -91,6 +91,12 @@ fn sources(mode: InputMode) -> &'static [AudioSource] {
 mod capture;
 
 use capture::{Recording, Source, SpanAudio, Streamer};
+
+struct PendingSpan {
+    stream: Stream,
+    /// Cleared once all saved PCM has been read and the tail queued.
+    saved_end: Option<Arc<OnceLock<usize>>>,
+}
 
 #[derive(Default)]
 struct Transcription {
@@ -569,9 +575,7 @@ impl Recorder {
         if let Some(mut recording) = recording {
             recording.transcription.cancel();
             let _ = recording.close(&self.inner);
-            for (_, streamer) in recording.take_streamers() {
-                let _ = streamer.join();
-            }
+            let _ = self.inner.drain(recording.take_streamers());
         }
         for worker in lock(&self.finalizers).drain(..) {
             let _ = worker.join();
@@ -805,15 +809,54 @@ impl Inner {
         source: AudioSource,
         spans: &mpsc::Receiver<SpanAudio>,
         transcription: &Transcription,
-    ) -> Result<Option<Stream>, String> {
-        let mut stream = Stream::default();
-        for audio in spans {
-            if self.drain_span(id, source, &mut stream, transcription)? {
-                return Ok(None);
+    ) -> Result<bool, String> {
+        let cancel = &transcription.cancelled;
+        let mut pending = VecDeque::<PendingSpan>::new();
+        loop {
+            let next = spans.recv().ok();
+            while let Some(span) = pending.front_mut() {
+                let mut finish = || self.finish_span(id, source, span, transcription);
+                let result = match finish() {
+                    Err(_) if cancel.load(Ordering::Relaxed) => return Ok(true),
+                    Err(_) if !transcription.store_failed.load(Ordering::Relaxed) => {
+                        if next.is_some() {
+                            break;
+                        }
+                        finish()
+                    }
+                    result => result,
+                };
+                if result? {
+                    return Ok(true);
+                }
+                pending.pop_front();
             }
-            stream = self.stream_span(id, source, &audio, transcription)?;
+            let Some(SpanAudio { live, saved_end }) = next else {
+                return Ok(cancel.load(Ordering::Relaxed));
+            };
+            // Keep the eager model load on an unblocked track, even before its first PCM.
+            let stt = pending.is_empty().then(|| self.transcriber(id, cancel));
+            let Ok((start, samples)) = live.recv() else {
+                continue;
+            };
+            let mut stream = Stream::at(start);
+            if let Some(stt) = stt {
+                stream.push(&samples);
+                let result = stt.and_then(|stt| {
+                    self.stream_span(id, source, live, &mut stream, &*stt, transcription)
+                });
+                if let Err(error) = result {
+                    if transcription.store_failed.load(Ordering::Relaxed) {
+                        return Err(error);
+                    }
+                }
+            }
+            // On failure, drop live PCM and use the committed span at the next attach or Stop.
+            pending.push_back(PendingSpan {
+                stream,
+                saved_end: Some(saved_end),
+            });
         }
-        Ok(Some(stream))
     }
 
     /// Transcribes a capture span while it records, leaving remaining windows for the drain.
@@ -821,25 +864,17 @@ impl Inner {
         &self,
         id: &str,
         source: AudioSource,
-        audio: &SpanAudio,
+        audio: mpsc::Receiver<(usize, Vec<f32>)>,
+        stream: &mut Stream,
+        stt: &dyn Transcriber,
         transcription: &Transcription,
-    ) -> Result<Stream, String> {
+    ) -> Result<(), String> {
         let cancel = &transcription.cancelled;
-        let stt = match self.transcriber(id, cancel) {
-            Ok(stt) => stt,
-            Err(_) if cancel.load(Ordering::Relaxed) => return Ok(Stream::default()),
-            Err(e) => return Err(e),
-        };
-        let Ok((start, samples)) = audio.recv() else {
-            return Ok(Stream::default());
-        };
-        let mut stream = Stream::at(start);
-        stream.push(&samples);
         let mut catching_up = false;
         loop {
             if stream.queued() == 0 {
                 let Ok((_, samples)) = audio.recv() else {
-                    return Ok(stream);
+                    return Ok(());
                 };
                 stream.push(&samples);
             }
@@ -847,11 +882,11 @@ impl Inner {
                 match audio.try_recv() {
                     Ok((_, samples)) => stream.push(&samples),
                     Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return Ok(stream),
+                    Err(TryRecvError::Disconnected) => return Ok(()),
                 }
             }
             if cancel.load(Ordering::Relaxed) {
-                return Ok(stream);
+                return Ok(());
             }
             if stream.catching_up() != catching_up {
                 catching_up = !catching_up;
@@ -872,8 +907,13 @@ impl Inner {
             let Some(window) = stream.next() else {
                 continue;
             };
-            if !self.window(id, source, &mut stream, &window, &*stt, transcription)? {
-                return Ok(stream);
+            match self.window(id, source, stream, &window, stt, transcription) {
+                Ok(true) => {}
+                Ok(false) => return Ok(()),
+                Err(error) => {
+                    stream.retry(window);
+                    return Err(error);
+                }
             }
         }
     }
@@ -979,7 +1019,7 @@ impl Inner {
         let started = Instant::now();
         // The summary model loads while the tail transcribes (M5b).
         self.jobs.preload();
-        let drained = self.drain(id, streamers, transcription);
+        let drained = self.drain(streamers);
         if transcription.store_failed.load(Ordering::Relaxed) {
             return self.interrupt_audio(id, "Couldn't save transcript segments.", transcription);
         }
@@ -1121,40 +1161,76 @@ impl Inner {
         }
     }
 
-    /// Transcribes what each source's streamer left: its queued windows and
-    /// the tail after them. Returns whether a cancel cut it short.
-    fn drain(
-        &self,
-        id: &str,
-        streamers: Vec<Streamer>,
-        transcription: &Transcription,
-    ) -> Result<bool, String> {
-        // Joined first, so none outlives a failure.
-        let streams: Vec<_> = streamers
-            .into_iter()
-            .map(|(source, streamer)| {
-                (
-                    source,
-                    streamer
-                        .join()
-                        .unwrap_or_else(|_| Err("the transcriber crashed".into())),
-                )
-            })
-            .collect();
-        let mut partial = false;
-        for (source, stream) in streams {
-            match stream? {
-                Some(mut stream) if !partial => {
-                    partial = self.drain_span(id, source, &mut stream, transcription)?;
-                }
-                Some(_) => {}
-                None => partial = true,
-            }
+    /// Joins every source's remaining transcription even if one fails.
+    fn drain(&self, streamers: Vec<Streamer>) -> Result<bool, String> {
+        let mut drained = Ok(false);
+        // Complete the call track first so cancellation keeps its finished tail.
+        for (spans, streamer) in streamers {
+            drop(spans);
+            let result = streamer
+                .join()
+                .unwrap_or_else(|_| Err("the transcriber crashed".into()));
+            drained = drained.and_then(|partial| result.map(|other| partial || other));
         }
-        Ok(partial)
+        drained
     }
 
-    fn drain_span(
+    fn finish_span(
+        &self,
+        id: &str,
+        source: AudioSource,
+        span: &mut PendingSpan,
+        transcription: &Transcription,
+    ) -> Result<bool, String> {
+        if let Some(saved_end) = &span.saved_end {
+            if transcription.cancelled.load(Ordering::Relaxed) {
+                return Ok(true);
+            }
+            let end = *saved_end
+                .get()
+                .ok_or("The transcription span was not saved.")?;
+            if self.replay_span(id, source, &mut span.stream, end, transcription)? {
+                return Ok(true);
+            }
+            span.stream.finish();
+            span.saved_end = None;
+        }
+        self.drain_windows(id, source, &mut span.stream, transcription)
+    }
+
+    fn replay_span(
+        &self,
+        id: &str,
+        source: AudioSource,
+        stream: &mut Stream,
+        end: usize,
+        transcription: &Transcription,
+    ) -> Result<bool, String> {
+        let mut reader = self.store.audio_range_reader(id);
+        loop {
+            if self.drain_windows(id, source, stream, transcription)? {
+                return Ok(true);
+            }
+            let start = stream.received_end();
+            if start == end {
+                return Ok(false);
+            }
+            let stop = end.min(start + crate::audio::CHUNK_SAMPLES);
+            let samples = reader
+                .sample_range(source, start as u64, stop as u64)
+                .map_err(|error| error.to_string())?;
+            if stop.checked_sub(start) != Some(samples.len()) {
+                return Err("The failed transcription span is missing saved audio.".into());
+            }
+            let pcm = samples
+                .into_iter()
+                .map(|sample| f32::from(sample) / 32768.0)
+                .collect::<Vec<_>>();
+            stream.push(&pcm);
+        }
+    }
+
+    fn drain_windows(
         &self,
         id: &str,
         source: AudioSource,
@@ -1162,14 +1238,21 @@ impl Inner {
         transcription: &Transcription,
     ) -> Result<bool, String> {
         let cancel = &transcription.cancelled;
-        stream.finish();
         while let Some(window) = stream.next() {
             if cancel.load(Ordering::Relaxed) {
                 return Ok(true);
             }
-            let stt = self.transcriber(id, cancel)?;
-            if !self.window(id, source, stream, &window, &*stt, transcription)? {
-                return Ok(true);
+            let result = (|| {
+                let stt = self.transcriber(id, cancel)?;
+                self.window(id, source, stream, &window, &*stt, transcription)
+            })();
+            match result {
+                Ok(true) => {}
+                Ok(false) => return Ok(true),
+                Err(error) => {
+                    stream.retry(window);
+                    return Err(error);
+                }
             }
         }
         Ok(false)

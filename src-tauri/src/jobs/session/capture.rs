@@ -16,10 +16,7 @@ use crate::{
     audio::{chunk_writer, ring, AudioError, Capture, Format},
     jobs::{HearingState, JobEvents, RecordingState, RecordingStatus, SessionLevel},
     store::{self, AudioSource, SessionStatus},
-    stt::{
-        stream::{Stream, SILENCE_RMS},
-        SAMPLE_RATE,
-    },
+    stt::{stream::SILENCE_RMS, SAMPLE_RATE},
 };
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
@@ -28,8 +25,12 @@ const CALL_WARNING_MS: u32 = 20_000;
 const MIC_LOST: &str = "Recording stopped: the microphone was lost.";
 const WRITE_FAILED: &str = "Recording stopped: couldn't save audio.";
 
-pub(super) type Streamer = (AudioSource, JoinHandle<Result<Option<Stream>, String>>);
-pub(super) type SpanAudio = mpsc::Receiver<(usize, Vec<f32>)>;
+pub(super) type Streamer = (mpsc::Sender<SpanAudio>, JoinHandle<Result<bool, String>>);
+
+pub(super) struct SpanAudio {
+    pub(super) live: mpsc::Receiver<(usize, Vec<f32>)>,
+    pub(super) saved_end: Arc<OnceLock<usize>>,
+}
 
 pub(super) struct Source {
     capture: Box<dyn Capture>,
@@ -87,13 +88,18 @@ impl SamplePosition {
 struct Span {
     capture: Box<dyn Capture>,
     position: SamplePosition,
-    writer: JoinHandle<store::Result<chunk_writer::Timeline>>,
+    writer: SpanWriter,
+}
+
+struct SpanWriter {
+    worker: JoinHandle<store::Result<chunk_writer::Timeline>>,
+    saved_end: Arc<OnceLock<usize>>,
 }
 
 #[derive(Default)]
 struct Track {
     span: Option<Span>,
-    stream: Option<(mpsc::Sender<SpanAudio>, Streamer)>,
+    stream: Option<Streamer>,
     timeline: chunk_writer::Timeline,
     level: Arc<AtomicU32>,
 }
@@ -119,7 +125,8 @@ impl Track {
             start: self.timeline.samples,
         };
         self.level.store(0, Ordering::Relaxed);
-        let (live, audio) = mpsc::channel();
+        let (sender, live) = mpsc::channel();
+        let saved_end = Arc::new(OnceLock::new());
         if self.stream.is_none() {
             let (next_span, spans) = mpsc::channel();
             let inner = Arc::clone(inner);
@@ -128,9 +135,9 @@ impl Track {
             let worker = thread::Builder::new()
                 .name(format!("stream-{}", source.as_str()))
                 .spawn(move || inner.stream_spans(&id, source, &spans, &transcription))?;
-            self.stream = Some((next_span, (source, worker)));
+            self.stream = Some((next_span, worker));
         }
-        let writer = chunk_writer::spawn(
+        let worker = chunk_writer::spawn(
             Arc::clone(&inner.store),
             id.into(),
             source,
@@ -141,16 +148,19 @@ impl Track {
                 level: Arc::clone(&self.level),
                 align,
             },
-            live,
+            sender,
         )?;
         let (next_span, _) = self.stream.as_ref().expect("track has a streamer");
-        // A failed streamer must leave the chunk writer running for recovery.
-        let _ = next_span.send(audio);
+        // Capture must keep saving PCM if transcription is cancelled or fails to save segments.
+        let _ = next_span.send(SpanAudio {
+            live,
+            saved_end: Arc::clone(&saved_end),
+        });
         self.timeline = chunk_writer::Timeline::default();
         self.span = Some(Span {
             capture,
             position,
-            writer,
+            writer: SpanWriter { worker, saved_end },
         });
         Ok(())
     }
@@ -158,10 +168,10 @@ impl Track {
     fn lost(&self) -> bool {
         self.span
             .as_ref()
-            .is_some_and(|span| span.writer.is_finished())
+            .is_some_and(|span| span.writer.worker.is_finished())
     }
 
-    fn stop_capture(&mut self) -> Option<JoinHandle<store::Result<chunk_writer::Timeline>>> {
+    fn stop_capture(&mut self) -> Option<SpanWriter> {
         let Span {
             capture, writer, ..
         } = self.span.take()?;
@@ -169,13 +179,13 @@ impl Track {
         Some(writer)
     }
 
-    fn flush(
-        &mut self,
-        writer: Option<JoinHandle<store::Result<chunk_writer::Timeline>>>,
-    ) -> Result<(), &'static str> {
+    fn flush(&mut self, writer: Option<SpanWriter>) -> Result<(), &'static str> {
         if let Some(writer) = writer {
-            match writer.join() {
-                Ok(Ok(timeline)) => self.timeline = timeline,
+            match writer.worker.join() {
+                Ok(Ok(timeline)) => {
+                    let _ = writer.saved_end.set(timeline.samples);
+                    self.timeline = timeline;
+                }
                 Ok(Err(error)) => {
                     crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&error));
                     return Err(WRITE_FAILED);
@@ -289,7 +299,7 @@ impl Recording {
     pub(super) fn take_streamers(&mut self) -> Vec<Streamer> {
         [&mut self.system, &mut self.mic]
             .into_iter()
-            .filter_map(|track| track.stream.take().map(|(_, worker)| worker))
+            .filter_map(|track| track.stream.take())
             .collect()
     }
 

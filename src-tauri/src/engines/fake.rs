@@ -170,6 +170,8 @@ pub struct FakeTranscriber {
     pub block_from: usize,
     /// While set, calls wait before answering, as a slow machine would.
     pub hold: AtomicBool,
+    /// How many upcoming calls fail with an engine error.
+    pub failures_remaining: AtomicUsize,
     /// How many times the loader handed this transcriber out.
     pub loads: AtomicUsize,
 }
@@ -181,6 +183,7 @@ impl FakeTranscriber {
             calls: Mutex::default(),
             block_from: usize::MAX,
             hold: AtomicBool::new(false),
+            failures_remaining: AtomicUsize::new(0),
             loads: AtomicUsize::new(0),
         }
     }
@@ -211,6 +214,15 @@ impl Transcriber for FakeTranscriber {
         }
         if cancel.load(Ordering::Relaxed) {
             return Err(SttError::Cancelled);
+        }
+        if self
+            .failures_remaining
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(SttError::Engine("injected transcription failure".into()));
         }
         Ok(self.segments.clone())
     }

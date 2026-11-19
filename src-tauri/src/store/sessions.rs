@@ -1074,8 +1074,19 @@ impl AudioRangeReader<'_> {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<Vec<i16>> {
-        let start = start_ms.max(0).saturating_mul(16) as u64;
-        let end = end_ms.max(0).saturating_mul(16) as u64;
+        self.sample_range(
+            source,
+            start_ms.max(0).saturating_mul(16) as u64,
+            end_ms.max(0).saturating_mul(16) as u64,
+        )
+    }
+
+    pub(crate) fn sample_range(
+        &mut self,
+        source: AudioSource,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<i16>> {
         if end <= start {
             return Ok(Vec::new());
         }
