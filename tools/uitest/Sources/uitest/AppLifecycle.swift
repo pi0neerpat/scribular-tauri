@@ -54,6 +54,10 @@ final class AppLifecycle {
                 let completed = DispatchSemaphore(value: 0)
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true
+                // remote-llm test builds send summaries to this host llama-server (README "Host llama-server (VM)").
+                if let url = ProcessInfo.processInfo.environment["SCRIBULAR_LLM_URL"], !url.isEmpty {
+                    configuration.environment = ["SCRIBULAR_LLM_URL": url]
+                }
                 NSWorkspace.shared.openApplication(at: appPath, configuration: configuration) { application, error in
                     result.set(app: application, error: error)
                     completed.signal()
