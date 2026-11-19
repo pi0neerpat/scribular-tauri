@@ -105,7 +105,8 @@ impl AudioCapCli {
             ))
         })?;
         let stderr = String::from_utf8_lossy(&stderr);
-        if is_permission_denied(&stderr) {
+        // `--list-sources` doesn't report a denial itself, so ask macOS on failure.
+        if is_permission_denied(&stderr) || (!status.success() && system_audio_denied()) {
             return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
         }
         if !status.success() {
@@ -256,6 +257,43 @@ impl Drop for CliCapture {
             let _ = thread.join();
         }
     }
+}
+
+/// Whether macOS reports System Audio Recording denied for this app, using the
+/// same private `TCCAccessPreflight` AudioCapCLI calls (0 granted, 1 denied, 2 unknown).
+#[cfg(target_os = "macos")]
+fn system_audio_denied() -> bool {
+    use objc2_foundation::NSString;
+    use std::ffi::{c_char, c_int, c_void};
+    extern "C" {
+        fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+    const RTLD_LAZY: c_int = 1;
+    // SAFETY: TCCAccessPreflight(CFStringRef service, CFDictionaryRef options) -> int;
+    // NSString is toll-free bridged to CFString. A missing symbol counts as not denied.
+    unsafe {
+        let lib = dlopen(
+            c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(),
+            RTLD_LAZY,
+        );
+        if lib.is_null() {
+            return false;
+        }
+        let sym = dlsym(lib, c"TCCAccessPreflight".as_ptr());
+        if sym.is_null() {
+            return false;
+        }
+        let preflight: extern "C" fn(*const c_void, *const c_void) -> c_int =
+            std::mem::transmute(sym);
+        let service = NSString::from_str("kTCCServiceAudioCapture");
+        preflight((&*service as *const NSString).cast(), std::ptr::null()) == 1
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_audio_denied() -> bool {
+    false
 }
 
 fn is_permission_denied(stderr: &str) -> bool {
@@ -500,5 +538,7 @@ mod tests {
     fn detects_permission_denied() {
         assert!(is_permission_denied("Audio recording permission denied.\n"));
         assert!(!is_permission_denied("no such source"));
+        // Smoke-checks the TCC lookup links and runs; the answer depends on this Mac.
+        let _ = system_audio_denied();
     }
 }
