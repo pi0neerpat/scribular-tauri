@@ -86,7 +86,7 @@ fn as3_blank_text_is_refused_and_a_blank_name_is_untitled() {
 }
 
 #[test]
-fn hiding_the_last_visible_style_is_allowed() {
+fn as4_hiding_the_last_visible_style_is_allowed() {
     let db = TempDb::new();
     let s = db.open();
     for p in s.list_prompts().unwrap() {
@@ -101,7 +101,7 @@ fn hiding_the_last_visible_style_is_allowed() {
 }
 
 #[test]
-fn hiding_the_active_style_keeps_it_active() {
+fn as5_hiding_the_active_style_keeps_it_active() {
     let db = TempDb::new();
     let s = db.open();
     let x = s.create_prompt("X", "text").unwrap();

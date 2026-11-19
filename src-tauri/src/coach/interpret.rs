@@ -267,16 +267,24 @@ pub fn interpret(spec: &StyleSpec, request: &str) -> Interpretation {
                 .unwrap_or(tail);
             let original = &request[request.len() - tail.len()..];
             let (name, replacement) = match edit {
-                SectionEdit::Rename => match tail.split_once(" to") {
-                    Some((name, _)) => {
-                        let offset = name.len();
-                        (
-                            &original[..offset],
-                            original.get(offset + 3..).map(str::trim),
-                        )
-                    }
-                    None => (original, None),
-                },
+                SectionEdit::Rename => spec
+                    .sections
+                    .iter()
+                    .filter_map(|section| {
+                        let offset = section.heading.len();
+                        (original
+                            .get(..offset)
+                            .is_some_and(|name| name.eq_ignore_ascii_case(&section.heading)))
+                        .then(|| {
+                            let replacement = original
+                                .get(offset..)
+                                .and_then(|tail| tail.strip_prefix(" to "))
+                                .map(str::trim);
+                            (&original[..offset], replacement)
+                        })
+                    })
+                    .max_by_key(|(name, _)| name.len())
+                    .unwrap_or((original, None)),
                 _ => (original, None),
             };
             return edit.interpret(spec, name, replacement);
@@ -434,5 +442,19 @@ mod tests {
             };
             assert!(patch.apply(&spec).is_err(), "{request}");
         }
+    }
+
+    #[test]
+    fn rename_matches_headings_that_contain_to() {
+        let (mut spec, _) = extract(SAMPLES[0].text).unwrap();
+        spec.sections[0].heading = "Going to School".into();
+        spec.sections
+            .push(crate::coach::spec::section("Going", false));
+        let Interpretation::Patch(patch) = interpret(&spec, "Rename Going to School to Education")
+        else {
+            panic!()
+        };
+        let (next, _) = patch.apply(&spec).unwrap();
+        assert_eq!(next.sections[0].heading, "Education");
     }
 }

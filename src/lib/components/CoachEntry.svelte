@@ -30,15 +30,14 @@
     aria-describedby={blocked ? descriptionId : undefined}
     onclick={(event) => { if (!blocked) onOpen(event.currentTarget); }}
   >{label}</button>
-  {#if blocked}<span class="sr-only" id={descriptionId}>{message}</span>{/if}
+  {#if blocked}<span id={descriptionId}>{message}</span>{/if}
 </span>
 {#if showRetry && availability?.retry}
   <button disabled={retrying} onclick={retry}>{availability.retry === 'license' ? 'Enter License…' : 'Try Again'}</button>
 {/if}
-{#if retryError}<span role="alert">Couldn’t try again. Please try in a moment.</span>{/if}
+{#if retryError && showRetry && availability?.retry}<span role="alert">Couldn’t try again. Please try in a moment.</span>{/if}
 
 <style>
   .entry { display: inline-block; }
   button[aria-disabled='true'] { opacity: 0.52; cursor: default; }
-  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>

@@ -51,8 +51,9 @@
     onEnterLicense = () => {},
     onResultNote = () => {},
     coachInterrupted = false,
+    onStartFailed = () => {},
     onDismissCoachInterruption = () => {},
-  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void } = $props();
+  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -197,8 +198,8 @@
       }
       progress = p;
       status = p.state;
-      const fetch = ++resultFetch;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
+        const fetch = ++resultFetch;
         // Keep the id while awaitingModel, so a reload still finds the session.
         if (finished.includes(p.state)) remember(null);
         getSession(p.sessionId).then((s) => {
@@ -252,6 +253,7 @@
 
   async function start() {
     if (!speechReady) {
+      onStartFailed();
       const message = "The speech model isn't downloaded yet.";
       error = message;
       if (trayStart) {
@@ -288,6 +290,7 @@
       capture = await recordingState().catch(() => null);
       trayStart = false;
     } catch (e) {
+      onStartFailed();
       if (attempt && sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) {
         sessionStorage.removeItem(IN_FLIGHT_START_KEY);
         sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);

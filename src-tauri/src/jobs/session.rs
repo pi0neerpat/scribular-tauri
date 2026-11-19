@@ -350,8 +350,6 @@ impl Recorder {
         if current.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        inner.jobs.cancel_practice();
-        inner.events.recording_starting();
         let settings = inner.store.recording_settings()?;
         let mic = Source::prepare(|sink| inner.mic.open(sink))?;
         let session = inner.store.create_session(&NewSession {
@@ -370,6 +368,8 @@ impl Recorder {
                     return Err(error);
                 }
             };
+        inner.jobs.cancel_practice();
+        inner.events.recording_starting();
         lock(&inner.transcript_waiting).clear();
         lock(&inner.transcript_started).clear();
         inner.events.recording_changed(true, settings.multi_speaker);

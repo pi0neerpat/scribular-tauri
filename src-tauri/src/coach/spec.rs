@@ -101,7 +101,7 @@ pub fn validate(spec: &StyleSpec) -> Result<(), &'static str> {
             || s.guidance != SECTION_GUIDANCE
         {
             return Err(
-                "Use unique section headings of 1 to 60 letters, numbers, and simple punctuation.",
+                "Use unique section headings starting with a letter, 1 to 60 characters long, with only letters, numbers, spaces, or - / & ( ).",
             );
         }
     }
@@ -154,4 +154,61 @@ pub fn compile(spec: &StyleSpec) -> Result<String, &'static str> {
         return Err("This style is too long. Remove a section and try again.");
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid() -> StyleSpec {
+        StyleSpec {
+            sections: vec![section("Plan", true)],
+            sentence_min: 1,
+            sentence_max: 1,
+            quote_max: 0,
+            quote_required: false,
+            pronouns: Pronouns::Neutral,
+            voice: Voice::ThirdPerson,
+            emphasis: Vec::new(),
+            compiler_version: COMPILER_VERSION,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_values_outside_each_saved_style_boundary() {
+        let mut spec = valid();
+        for version in [0, 2] {
+            spec.compiler_version = version;
+            assert!(validate(&spec).is_err());
+        }
+        spec.compiler_version = COMPILER_VERSION;
+
+        spec.sentence_min = 0;
+        assert!(validate(&spec).is_err());
+        spec.sentence_min = 10;
+        spec.sentence_max = 10;
+        assert!(validate(&spec).is_ok());
+        spec.sentence_max = 11;
+        assert!(validate(&spec).is_err());
+        spec.sentence_min = 1;
+        spec.sentence_max = 1;
+
+        spec.quote_max = 6;
+        assert!(validate(&spec).is_ok());
+        spec.quote_max = 7;
+        assert!(validate(&spec).is_err());
+        spec.quote_max = 0;
+
+        spec.sections[0] = section(&"A".repeat(61), true);
+        assert!(validate(&spec).is_err());
+        spec.sections[0] = section(&"A".repeat(60), true);
+        assert!(validate(&spec).is_ok());
+        spec.sections[0] = section("Plan", true);
+        spec.sections.push(section("plan", false));
+        assert!(validate(&spec).is_err());
+        spec.sections.truncate(1);
+
+        spec.emphasis = vec![Emphasis::NextSteps, Emphasis::NextSteps];
+        assert!(validate(&spec).is_err());
+    }
 }

@@ -504,6 +504,7 @@ pub fn refresh_availability(app: &AppHandle, last: &mut Option<(CoachAvailabilit
             crate::shell::menu::set_coach_state(
                 &app,
                 !open && availability.reason.is_none(),
+                open,
                 availability.message,
             )
         });

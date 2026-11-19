@@ -214,7 +214,7 @@
     {/if}
     <button disabled={!allows($accessState)} onclick={(event) => guard(() => edit(DRAFT), event.currentTarget)}>New style</button>
     {#if openId === DRAFT}
-      <NoteStyleEditor bind:name bind:text bind:showInStyleMenu readonly={!allows($accessState)} {dirty} {saving} onSave={save} />
+      <NoteStyleEditor bind:name bind:text bind:showInStyleMenu showVisibility readonly={!allows($accessState)} {dirty} {saving} onSave={save} />
     {/if}
     {#each groups as [heading, prompts] (heading)}
       {#if prompts.length}
@@ -227,7 +227,7 @@
                 <div>
                   <span>{p.name}</span>
                   {#if p.styleSpec}<small>Made with the coach</small>{/if}
-                  <button aria-label={p.isDefault ? p.name : `Edit ${p.name}`} aria-expanded={openId === p.id} onclick={(event) => guard(() => edit(openId === p.id ? null : p.id), event.currentTarget)}>
+                  <button aria-label={`${p.isDefault || !allows($accessState) ? 'View' : 'Edit'} ${p.name}`} aria-expanded={openId === p.id} onclick={(event) => guard(() => edit(openId === p.id ? null : p.id), event.currentTarget)}>
                     {p.isDefault || !allows($accessState) ? 'View' : 'Edit'}
                   </button>
                   {#if coach && p.styleSpec && !p.isDefault}

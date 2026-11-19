@@ -108,7 +108,11 @@ impl Uncertain {
                 format!("I’ll use {}.", headings.join(", "))
             }
             Self::Length => {
-                let n = number(&text);
+                let mut values = numbers(&text);
+                let n = values.next();
+                if values.next().is_some() {
+                    return Err("Give one length from 1 to 10 sentences, not a range.");
+                }
                 let max = match text.as_str() {
                     "use that length" | "exact" | "exactly" => spec.sentence_min,
                     "allow a little room" | "flexible" => (spec.sentence_min + 1).min(10),
@@ -217,11 +221,27 @@ pub fn quote_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
     let mut opening = None;
     text.char_indices()
         .filter_map(move |(index, c)| match (opening, c) {
-            (None, '"' | '“') => {
+            (_, '\'')
+                if text[..index]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_alphanumeric)
+                    && text[index + c.len_utf8()..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric) =>
+            {
+                None
+            }
+            (None, '"' | '“' | '\'' | '‘') => {
                 opening = Some((index, c));
                 None
             }
             (Some((start, '"')), '"') | (Some((start, '“')), '”') => {
+                opening = None;
+                Some((start, index + c.len_utf8()))
+            }
+            (Some((start, '\'' | '‘')), '\'' | '’') => {
                 opening = None;
                 Some((start, index + c.len_utf8()))
             }
@@ -509,5 +529,23 @@ mod tests {
             .map(|n| section(&format!("Section {n}"), true))
             .collect();
         assert!(compile(&spec).is_err());
+    }
+
+    #[test]
+    fn quote_ranges_include_single_quoted_dialogue_without_opening_on_contractions() {
+        assert_eq!(
+            quotes("Client said 'hello there' and don't know.").collect::<Vec<_>>(),
+            ["hello there"]
+        );
+        assert_eq!(
+            quotes("Client said ‘hello there’.").collect::<Vec<_>>(),
+            ["hello there"]
+        );
+    }
+
+    #[test]
+    fn length_answer_rejects_a_range_instead_of_echoing_only_its_first_number() {
+        let (mut spec, _) = extract(SAMPLES[0].text).unwrap();
+        assert!(Uncertain::Length.answer(&mut spec, "2-4").is_err());
     }
 }

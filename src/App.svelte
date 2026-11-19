@@ -122,7 +122,7 @@
     let mounted = true;
     const availability = subscribeCoachAvailability((state) => {
       if (mounted) coachAvailability = state;
-    });
+    }).catch((e) => { if (mounted) error = String(e); return () => {}; });
     const cancelled = onCoachCancelled(({ draftId, reason }) => {
       if (mounted) coachCancelled(draftId, reason === 'recording');
     });
@@ -320,6 +320,7 @@
         {speechReady}
         {coachInterrupted}
         onDismissCoachInterruption={() => (coachInterrupted = false)}
+        onStartFailed={() => (pendingCoachInterruption = false)}
         active={view === 'record'}
         onEnterLicense={openLicense}
         onResultNote={(hasNote) => (recordHasNote = hasNote)}

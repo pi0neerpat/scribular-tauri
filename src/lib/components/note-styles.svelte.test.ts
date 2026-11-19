@@ -42,7 +42,7 @@ let target: HTMLElement;
 let app: ReturnType<typeof NoteStyles>;
 
 const button = (label: string) =>
-  [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === `Edit ${label}`)!;
+  [...target.querySelectorAll('button')].find((b) => b.textContent?.trim() === label || ['Edit', 'View'].some((action) => b.getAttribute('aria-label') === `${action} ${label}`))!;
 const input = () => target.querySelector<HTMLInputElement>('li input')!;
 const dialog = () => target.querySelector('[role="dialog"]');
 
@@ -75,6 +75,7 @@ it('shares coach availability and only offers retry for recoverable failures', (
   availability.set({ reason: 'unsupported', retry: null, message: "Summaries aren't available on this Mac.", sessionMessage: null });
   flushSync();
   expect(button('New Style from Example Note…').getAttribute('aria-disabled')).toBe('true');
+  expect(target.textContent).toContain("Summaries aren't available on this Mac.");
   expect(button('New Style from Example Note…').parentElement?.title).toBe("Summaries aren't available on this Mac.");
   expect(button('Try Again')).toBeUndefined();
   availability.set({ reason: 'loadFailed', retry: 'tryAgain', message: "Summaries couldn't load.", sessionMessage: null });
@@ -98,6 +99,14 @@ it('opens another style without a dialog when nothing changed', () => {
   flushSync();
   expect(dialog()).toBeNull();
   expect(input().value).toBe('Beta');
+});
+
+it('shows visibility in the new style draft and keeps one control for saved styles', () => {
+  expect(target.querySelectorAll('[role=switch][aria-label="Show in style menu"]')).toHaveLength(0);
+  button('New style').click();
+  flushSync();
+  expect(target.querySelectorAll('[role=switch][aria-label="Show in style menu"]')).toHaveLength(1);
+  expect(target.querySelector('[aria-label="Edit Alpha"]')).toBeTruthy();
 });
 
 it('cancel keeps the draft open', () => {

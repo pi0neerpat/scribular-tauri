@@ -160,11 +160,11 @@
     if (!confirmStop) stepTitle?.focus();
     if (disposed) return;
     const pending = coachBuild(example, draft.id);
-    example = '';
     try {
       const built = await pending;
       if (disposed) return;
       draft = built;
+      example = '';
       say(describe(built));
       ask(built.question);
       work = null;

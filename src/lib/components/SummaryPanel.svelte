@@ -99,7 +99,7 @@
     subscribe();
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
-    const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
+    const unlisten = management || (session.summary && coach) ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
     return () => {
       disposed = true;
       summaryAttempt++;
