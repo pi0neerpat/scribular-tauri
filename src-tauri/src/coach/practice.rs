@@ -77,6 +77,37 @@ pub fn corrections(base: &str, failed: &[Check]) -> String {
 }
 
 pub fn check(spec: &StyleSpec, source: &PracticeSource<'_>, text: String) -> PracticeNote {
+    let lines: Vec<_> = text.lines().collect();
+    let text = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| {
+            let Some((heading, rest)) = split_heading(line.trim()) else {
+                return true;
+            };
+            if !rest.trim().is_empty()
+                || !spec
+                    .sections
+                    .iter()
+                    .any(|s| !s.required && s.heading.eq_ignore_ascii_case(heading))
+            {
+                return true;
+            }
+            lines[i + 1..]
+                .iter()
+                .find(|next| !next.trim().is_empty())
+                .is_some_and(|next| {
+                    split_heading(next.trim()).is_none_or(|(next_heading, _)| {
+                        !spec
+                            .sections
+                            .iter()
+                            .any(|s| s.heading.eq_ignore_ascii_case(next_heading))
+                    })
+                })
+        })
+        .map(|(_, line)| *line)
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut bodies = vec![Vec::<String>::new(); spec.sections.len()];
     let mut active: Option<usize> = None;
     let mut preamble = false;
@@ -244,6 +275,24 @@ fn contains_fragment(text: &str, fragment: &str) -> bool {
 mod tests {
     use super::*;
     use crate::coach::extract::{extract, SAMPLES};
+
+    #[test]
+    fn empty_optional_heading_is_removed_without_hiding_a_body() {
+        let (mut spec, _) = extract(SAMPLES[1].text).unwrap();
+        spec.sentence_min = 1;
+        spec.sentence_max = 1;
+        let note = "Data:\nThe client took a break.\nAssessment:\nThe client felt settled.\nPlan:";
+        let checked = check(&spec, &PRACTICE_SOURCE, note.into());
+        assert_eq!(
+            checked.text,
+            "Data:\nThe client took a break.\nAssessment:\nThe client felt settled."
+        );
+        assert!(checked.failed.is_empty(), "{:?}", checked.failed);
+        let with_body = format!("{note}\nThe client agreed to try another walk.");
+        assert!(check(&spec, &PRACTICE_SOURCE, with_body)
+            .text
+            .ends_with("The client agreed to try another walk."));
+    }
 
     #[test]
     fn checks_respect_relabelled_speakers_and_literal_quotes() {
