@@ -112,7 +112,10 @@ impl AudioCapCli {
             if is_permission_denied(&stderr) {
                 return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
             }
-            // shortcut: silent sidecar failures lack a permission signal; add a probe when AudioCapCLI supports one.
+            // AudioCapCLI exits silently when macOS denies System Audio permission.
+            if stderr.trim().is_empty() {
+                return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+            }
             return Err(AudioError::Device(
                 "Couldn't list app audio sources. Refresh the app list or restart Scribular."
                     .into(),
@@ -439,6 +442,12 @@ mod tests {
             Err(AudioError::PermissionDenied(Privacy::SystemAudio))
         ));
 
+        let cli = fixture.cli("#!/bin/sh\nexit 1\n");
+        assert!(matches!(
+            cli.list_apps(),
+            Err(AudioError::PermissionDenied(Privacy::SystemAudio))
+        ));
+
         for (stderr, action) in [
             (
                 "Error reading process list: Private Browser",
@@ -449,7 +458,6 @@ mod tests {
                 "Usage: Private Browser permission denied",
                 "Reinstall Scribular",
             ),
-            ("", "restart Scribular"),
             (
                 "Unexpected failure from Private Browser",
                 "restart Scribular",
