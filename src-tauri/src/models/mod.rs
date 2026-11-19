@@ -189,6 +189,7 @@ impl ModelManager {
         if let Some(app) = self.availability_event.get() {
             use tauri::Emitter;
             let _ = app.emit(SUMMARY_AVAILABILITY_EVENT, state);
+            crate::coach::signal(app);
         }
     }
 

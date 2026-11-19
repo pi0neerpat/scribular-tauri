@@ -8,6 +8,13 @@ import type { ActivationResult } from './types/ActivationResult';
 import type { AppSettings } from './types/AppSettings';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
+import type { CoachAvailability } from './types/CoachAvailability';
+import type { CoachCancelled } from './types/CoachCancelled';
+import type { CoachDraft } from './types/CoachDraft';
+import type { CoachProgress } from './types/CoachProgress';
+import type { CoachReply } from './types/CoachReply';
+import type { CoachResult } from './types/CoachResult';
+import type { CoachSample } from './types/CoachSample';
 import type { ClearSessionsResult } from './types/ClearSessionsResult';
 import type { Heartbeat } from './types/Heartbeat';
 import type { InputMode } from './types/InputMode';
@@ -47,6 +54,9 @@ export function getOnboardingState(): Promise<OnboardingState> {
 export function completeOnboarding(): Promise<void> {
   return invoke<void>('complete_onboarding');
 }
+
+export const getFirstNoteTipSession = () => invoke<string | null>('get_first_note_tip_session');
+export const dismissFirstNoteTip = () => invoke<void>('dismiss_first_note_tip');
 
 export function restoreSampleSessions(): Promise<string> {
   return invoke<string>('restore_sample_sessions');
@@ -180,29 +190,66 @@ export function getPromptList(): Promise<PromptList> {
   return invoke<PromptList>('get_prompt_list');
 }
 
-export function createPrompt(name: string, text: string): Promise<PromptList> {
-  return invoke<PromptList>('create_prompt', { name, text });
+export function createPrompt(name: string, text: string, showInStyleMenu?: boolean): Promise<PromptList> {
+  return invoke<PromptList>('create_prompt', { name, text, showInStyleMenu });
 }
 
 export function duplicatePrompt(id: string): Promise<PromptList> {
   return invoke<PromptList>('duplicate_prompt', { id });
 }
 
-export function updatePrompt(id: string, name: string, text: string): Promise<PromptList> {
-  return invoke<PromptList>('update_prompt', { id, name, text });
+export function updatePrompt(id: string, name: string, text: string, showInStyleMenu?: boolean, detachCoach?: boolean): Promise<PromptList> {
+  return invoke<PromptList>('update_prompt', { id, name, text, showInStyleMenu, detachCoach });
 }
 
 export function deletePrompt(id: string): Promise<PromptList> {
   return invoke<PromptList>('delete_prompt', { id });
 }
 
-export function setPromptStarred(id: string, starred: boolean): Promise<PromptList> {
-  return invoke<PromptList>('set_prompt_starred', { id, starred });
+export function setPromptVisibility(id: string, showInStyleMenu: boolean): Promise<PromptList> {
+  return invoke<PromptList>('set_prompt_visibility', { id, showInStyleMenu });
 }
 
-/** Makes `id` the style new sessions use; stars it if needed. */
+/** Makes `id` the style new sessions use. */
 export function setActivePrompt(id: string): Promise<PromptList> {
   return invoke<PromptList>('set_active_prompt', { id });
+}
+
+export const coachSamples = () => invoke<CoachSample[]>('coach_samples');
+export const coachOpen = (styleId: string | null) => invoke<CoachDraft>('coach_open', { styleId });
+export const coachBuild = (exampleText: string, draftId?: string) => invoke<CoachDraft>('coach_build', { exampleText, draftId });
+export const coachAnswer = (draftId: string, answer: string | null) => invoke<CoachReply>('coach_answer', { draftId, answer });
+export const coachPractice = (draftId: string) => invoke<string>('coach_practice', { draftId });
+export const coachInterpret = (draftId: string, request: string) => invoke<CoachReply>('coach_interpret', { draftId, request });
+export const coachChoose = (draftId: string, proposalId: string, useThis: boolean) => invoke<CoachDraft>('coach_choose', { draftId, proposalId, useThis });
+export const coachSave = (draftId: string, name: string, useNext: boolean) => invoke<PromptList>('coach_save', { draftId, name, useNext });
+export const coachCancel = (draftId: string) => invoke<void>('coach_cancel', { draftId });
+export const getCoachAvailability = () => invoke<CoachAvailability>('get_coach_availability');
+
+export function onCoachProgress(handler: (progress: CoachProgress) => void): Promise<UnlistenFn> {
+  return listen<CoachProgress>('coach-progress', (event) => handler(event.payload));
+}
+export function onCoachResult(handler: (result: CoachResult) => void): Promise<UnlistenFn> {
+  return listen<CoachResult>('coach-result', (event) => handler(event.payload));
+}
+export function onCoachCancelled(handler: (cancelled: CoachCancelled) => void): Promise<UnlistenFn> {
+  return listen<CoachCancelled>('coach-cancelled', (event) => handler(event.payload));
+}
+
+export async function subscribeCoachAvailability(handler: (state: CoachAvailability) => void): Promise<UnlistenFn> {
+  let eventSeen = false;
+  const unlisten = await listen<CoachAvailability>('coach-availability', (event) => {
+    eventSeen = true;
+    handler(event.payload);
+  });
+  try {
+    const state = await getCoachAvailability();
+    if (!eventSeen) handler(state);
+    return unlisten;
+  } catch (error) {
+    unlisten();
+    throw error;
+  }
 }
 
 export function listSummaryModels(): Promise<SummaryModel[]> {

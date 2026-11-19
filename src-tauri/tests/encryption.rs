@@ -145,9 +145,10 @@ fn plaintext_fixture(dir: &TempDir) -> String {
         KEY.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ))
     .unwrap();
-    // Undo the v4 through v7 additions to make a genuine v3 plaintext database.
+    // Undo the v4 through v8 additions to make a genuine v3 plaintext database.
     conn.execute_batch(
-        "ALTER TABLE sessions DROP COLUMN is_sample;
+        "ALTER TABLE prompts DROP COLUMN style_spec;
+         ALTER TABLE sessions DROP COLUMN is_sample;
          DROP INDEX sessions_audio_kept;
          ALTER TABLE sessions DROP COLUMN audio_kept;
          ALTER TABLE sessions DROP COLUMN diarization_state;
@@ -259,7 +260,7 @@ fn as9_migrates_a_plaintext_database_once() {
     assert_eq!(keys.sets.load(Ordering::Relaxed), 1);
     let s = store.get_session(&id).unwrap().unwrap();
     assert!(s.transcript.contains(CANARY));
-    assert_eq!(store.schema_version().unwrap(), 7, "v3 → latest");
+    assert_eq!(store.schema_version().unwrap(), 8, "v3 → latest");
     assert_eq!(store.segments(&id, AudioSource::Mic).unwrap().len(), 1);
     let items = store.list_sessions().unwrap();
     assert_eq!(items.len(), 2);

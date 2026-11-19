@@ -31,13 +31,18 @@
   import { isWorking } from './record-status';
   import LicenseGate from './LicenseGate.svelte';
   import { accessState, allows } from '../license';
+  import { getCoachContext } from '../coach-context';
+
+  const coach = getCoachContext();
 
   let {
     speechReady = false,
     active = true,
     onEnterLicense = () => {},
     onResultNote = () => {},
-  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void } = $props();
+    coachInterrupted = false,
+    onDismissCoachInterruption = () => {},
+  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void } = $props();
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -96,7 +101,9 @@
   $effect(() => {
     if (!active) return;
     let current = true;
-    getPromptList().then((l) => { if (current) styles = l; }).catch(() => {});
+    const currentStyles = coach?.styles();
+    if (currentStyles) styles = currentStyles;
+    else getPromptList().then((l) => { if (current) styles = l; }).catch(() => {});
     listSummaryModels()
       .then((ms) => { if (current) modelNames = Object.fromEntries(ms.map((m) => [m.spec.id, m.spec.displayName])); })
       .catch(() => {});
@@ -106,6 +113,7 @@
   async function chooseStyle(id: string) {
     try {
       styles = await setActivePrompt(id);
+      coach?.updateStyles(styles);
     } catch (e) {
       error = String(e);
       try { styles = await getPromptList(); } catch {}
@@ -151,7 +159,20 @@
     const startFromTray = () => { if (trayStart || busy) return; trayStart = true; void start(); };
     window.addEventListener('tray-start-recording', startFromTray);
     const unlisten = onSessionProgress((p) => {
-      if (p.sessionId !== sessionId) return;
+      if (p.sessionId !== sessionId) {
+        if (p.state !== 'recording' || busy) return;
+        sessionId = p.sessionId;
+        remember(sessionId);
+        startedAt = Date.now();
+        result = null;
+        const fetch = ++resultFetch;
+        void getSession(p.sessionId).then((session) => {
+          if (session && fetch === resultFetch && p.sessionId === sessionId) {
+            labeled = session.inputMode === 'micAndSystem';
+            startedAt = session.createdAt;
+          }
+        }).catch(() => {});
+      }
       progress = p;
       status = p.state;
       const fetch = ++resultFetch;
@@ -309,6 +330,11 @@
 
 <section>
   <h2>Record</h2>
+  {#if coachInterrupted}
+    <p role="status">The note style coach closed because a recording started. You can start it again from Note Styles after your recording.
+      <button onclick={onDismissCoachInterruption}>Dismiss</button>
+    </p>
+  {/if}
   <div inert={askSpeakerCount}>
   {#if recording}
     <p>
@@ -360,7 +386,7 @@
 
   {#if result}
     {@const session = result}
-    <SummaryPanel bind:this={summaryPanel} {session} {active} byline={[
+    <SummaryPanel bind:this={summaryPanel} {session} {active} prompts={styles} byline={[
       styles?.prompts.find((p) => p.id === session.promptId)?.name,
       session.modelId && (modelNames[session.modelId] ?? session.modelId),
     ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />

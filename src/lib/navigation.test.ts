@@ -10,6 +10,12 @@ it('locks navigation only while a model downloads or verifies', () => {
   expect(navigationLockedBy([model('ready')])).toBe(false);
   expect(navigationLockedBy([model('missing')])).toBe(false);
   expect(navigationLockedBy([model('failed')])).toBe(false);
-  expect(navigationDisabled(false)).toBe(false);
-  expect(navigationDisabled(true)).toBe(true);
+  expect(navigationDisabled(false, 'history', 'record')).toBe(false);
+  expect(navigationDisabled(true, 'history', 'record')).toBe(true);
+});
+
+it('keeps Note Styles reachable while models download and lets the editor return to Record', () => {
+  expect(navigationDisabled(true, 'styles', 'record')).toBe(false);
+  expect(navigationDisabled(true, 'record', 'styles')).toBe(false);
+  expect(navigationDisabled(true, 'history', 'styles')).toBe(true);
 });

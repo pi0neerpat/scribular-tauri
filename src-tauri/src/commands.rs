@@ -52,6 +52,10 @@ pub const EVENTS: &[&str] = &[
     TRAY_STOP_FAILED_EVENT,
     QUIT_REQUESTED_EVENT,
     WINDOW_CLOSE_REQUESTED_EVENT,
+    crate::coach::AVAILABILITY_EVENT,
+    crate::coach::PROGRESS_EVENT,
+    crate::coach::RESULT_EVENT,
+    crate::coach::CANCELLED_EVENT,
 ];
 
 /// The new [`AccessState`] after activation, removal, re-validation or a day
@@ -117,6 +121,13 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     ClearSessionsResult::export_all(cfg)?;
     SessionPatch::export_all(cfg)?;
     Prompt::export_all(cfg)?;
+    crate::coach::CoachAvailability::export_all(cfg)?;
+    crate::coach::CoachDraft::export_all(cfg)?;
+    crate::coach::CoachReply::export_all(cfg)?;
+    crate::coach::CoachSample::export_all(cfg)?;
+    crate::coach::CoachProgress::export_all(cfg)?;
+    crate::coach::CoachResult::export_all(cfg)?;
+    crate::coach::CoachCancelled::export_all(cfg)?;
     PromptList::export_all(cfg)?;
     SummaryModel::export_all(cfg)?;
     ModelSpec::export_all(cfg)?;
@@ -210,6 +221,18 @@ pub fn get_onboarding_state(store: State<Arc<Store>>) -> Result<OnboardingState,
 #[tauri::command]
 pub fn complete_onboarding(store: State<Arc<Store>>) -> Result<(), String> {
     store.complete_onboarding().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_first_note_tip_session(store: State<Arc<Store>>) -> Result<Option<String>, String> {
+    store.first_note_tip_session().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn dismiss_first_note_tip(store: State<Arc<Store>>) -> Result<(), String> {
+    store
+        .set_setting("first_note_tip_dismissed", "1")
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -581,7 +604,7 @@ pub struct PromptList {
     pub created_id: Option<String>,
 }
 
-fn prompt_list(store: &Store, created_id: Option<String>) -> Result<PromptList, String> {
+pub(crate) fn prompt_list(store: &Store, created_id: Option<String>) -> Result<PromptList, String> {
     Ok(PromptList {
         prompts: store.list_prompts().map_err(|e| e.to_string())?,
         active_id: store.get_active_prompt_id().map_err(|e| e.to_string())?,
@@ -600,10 +623,11 @@ pub fn create_prompt(
     licensing: State<Arc<Licensing>>,
     name: String,
     text: String,
+    show_in_style_menu: Option<bool>,
 ) -> Result<PromptList, String> {
     licensing.require_access()?;
     let p = store
-        .create_prompt(&name, &text)
+        .create_prompt_with_visibility(&name, &text, show_in_style_menu.unwrap_or(true))
         .map_err(|e| e.to_string())?;
     prompt_list(&store, Some(p.id))
 }
@@ -626,10 +650,18 @@ pub fn update_prompt(
     id: String,
     name: String,
     text: String,
+    show_in_style_menu: Option<bool>,
+    detach_coach: Option<bool>,
 ) -> Result<PromptList, String> {
     licensing.require_access()?;
     store
-        .update_prompt(&id, &name, &text)
+        .edit_prompt(
+            &id,
+            &name,
+            &text,
+            show_in_style_menu,
+            detach_coach.unwrap_or(false),
+        )
         .map_err(|e| e.to_string())?;
     prompt_list(&store, None)
 }
@@ -641,15 +673,15 @@ pub fn delete_prompt(store: State<Arc<Store>>, id: String) -> Result<PromptList,
 }
 
 #[tauri::command]
-pub fn set_prompt_starred(
+pub fn set_prompt_visibility(
     store: State<Arc<Store>>,
     licensing: State<Arc<Licensing>>,
     id: String,
-    starred: bool,
+    show_in_style_menu: bool,
 ) -> Result<PromptList, String> {
     licensing.require_access()?;
     store
-        .set_prompt_starred(&id, starred)
+        .set_prompt_visibility(&id, show_in_style_menu)
         .map_err(|e| e.to_string())?;
     prompt_list(&store, None)
 }
@@ -977,8 +1009,16 @@ pub fn set_recording_source(
 pub fn set_recording_settings(
     store: State<Arc<Store>>,
     models: State<Arc<ModelManager>>,
-    settings: RecordingSettings,
+    licensing: State<Arc<Licensing>>,
+    mut settings: RecordingSettings,
 ) -> Result<(), String> {
+    if settings.prompt_id.is_some() {
+        if settings.prompt_id == store.get_active_prompt_id().map_err(|e| e.to_string())? {
+            settings.prompt_id = None;
+        } else {
+            licensing.require_access()?;
+        }
+    }
     if settings.multi_speaker && models.readiness.get(SPEAKER_CAMPPLUS) != ModelState::Ready {
         return Err("download the speaker model before enabling multi-speaker".into());
     }
@@ -1451,6 +1491,7 @@ pub fn deactivate_license(app: AppHandle, licensing: State<Arc<Licensing>>) {
 
 pub fn emit_access(app: &AppHandle, licensing: &Licensing) {
     let _ = app.emit(LICENSE_CHANGED_EVENT, licensing.state());
+    crate::coach::signal(app);
 }
 
 /// Opens an http(s) or mailto link in the default handler (spec 04 R11, the
@@ -1492,7 +1533,16 @@ fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -
 }
 
 impl JobEvents for TauriJobEvents {
+    fn recording_starting(&self) {
+        crate::coach::discard(&self.0, crate::coach::CoachCancelReason::Recording);
+    }
+
+    fn summary_queue_changed(&self) {
+        crate::coach::signal(&self.0);
+    }
+
     fn recording_changed(&self, recording: bool, multi_speaker: bool) {
+        crate::coach::signal(&self.0);
         let app = self.0.clone();
         let _ = self.0.run_on_main_thread(move || {
             crate::shell::tray::refresh(&app, recording, multi_speaker);
@@ -1656,10 +1706,11 @@ mod tests {
                 "create_prompt",
                 "duplicate_prompt",
                 "update_prompt",
-                "set_prompt_starred",
+                "set_prompt_visibility",
                 "set_active_prompt",
                 "regenerate_summary",
                 "recover_session",
+                "set_recording_settings",
                 "update_speaker_map",
                 "start_recording",
                 "transcribe_file",

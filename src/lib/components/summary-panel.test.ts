@@ -22,7 +22,7 @@ const session: Session = {
   speakerMap: null, diarizationState: 'none', summary: 'saved summary', durationMs: 1000, timings: null,
   hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
 };
-const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, starred: true }], activeId: 'prompt-1', createdId: null };
+const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, showInStyleMenu: true, styleSpec: null }], activeId: 'prompt-1', createdId: null };
 
 afterEach(() => accessState.set(null));
 

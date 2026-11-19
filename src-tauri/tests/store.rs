@@ -659,7 +659,8 @@ fn seeds_the_electron_default_prompts() {
     assert_eq!(prompts.len(), 7);
     assert_eq!(prompts.len(), expected.len());
     for (p, e) in prompts.iter().zip(expected) {
-        assert_eq!(serde_json::to_value(p).unwrap(), *e);
+        let seeded: scribular_lib::store::Prompt = serde_json::from_value(e.clone()).unwrap();
+        assert_eq!(p, &seeded);
     }
     assert!(prompts.iter().all(|p| p.is_default));
 

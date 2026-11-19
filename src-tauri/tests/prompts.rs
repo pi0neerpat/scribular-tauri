@@ -43,12 +43,12 @@ fn active(s: &Store) -> String {
 }
 
 #[test]
-fn as1_create_adds_a_starred_custom_style_last() {
+fn as1_create_adds_a_visible_custom_style_last() {
     let db = TempDb::new();
     let s = db.open();
     let p = s.create_prompt("Mine", "text").unwrap();
     assert!(!p.is_default);
-    assert!(p.starred);
+    assert!(p.show_in_style_menu);
     let all = s.list_prompts().unwrap();
     assert_eq!(all.len(), 8);
     assert_eq!(all.last().unwrap(), &p);
@@ -86,27 +86,29 @@ fn as3_blank_text_is_refused_and_a_blank_name_is_untitled() {
 }
 
 #[test]
-fn as4_the_last_favourite_cannot_be_unstarred() {
+fn hiding_the_last_visible_style_is_allowed() {
     let db = TempDb::new();
     let s = db.open();
-    assert!(matches!(
-        s.set_prompt_starred(DORA, false),
-        Err(StoreError::LastFavourite)
-    ));
-    assert!(s.get_prompt(DORA).unwrap().unwrap().starred);
+    for p in s.list_prompts().unwrap() {
+        s.set_prompt_visibility(&p.id, false).unwrap();
+    }
+    assert!(s
+        .list_prompts()
+        .unwrap()
+        .iter()
+        .all(|p| !p.show_in_style_menu));
     assert_eq!(active(&s), DORA);
 }
 
 #[test]
-fn as5_unstarring_the_active_style_moves_active_to_a_favourite() {
+fn hiding_the_active_style_keeps_it_active() {
     let db = TempDb::new();
     let s = db.open();
     let x = s.create_prompt("X", "text").unwrap();
     s.set_active_prompt(&x.id).unwrap();
-    s.set_prompt_starred(&x.id, false).unwrap();
-    // DORA is the remaining (first) favourite.
-    assert_eq!(active(&s), DORA);
-    assert!(s.get_prompt(DORA).unwrap().unwrap().starred);
+    s.set_prompt_visibility(&x.id, false).unwrap();
+    assert_eq!(active(&s), x.id);
+    assert!(!s.get_prompt(&x.id).unwrap().unwrap().show_in_style_menu);
 }
 
 #[test]
@@ -115,7 +117,7 @@ fn as6_deleting_the_active_style_repairs_active_and_keeps_sessions() {
     let s = db.open();
     let x = s.create_prompt("X", "text").unwrap();
     s.set_active_prompt(&x.id).unwrap();
-    s.set_prompt_starred(DORA, false).unwrap();
+    s.set_prompt_visibility(DORA, false).unwrap();
     let session = s
         .create_session(&NewSession {
             title: "t".into(),
@@ -129,9 +131,11 @@ fn as6_deleting_the_active_style_repairs_active_and_keeps_sessions() {
 
     let prompts = s.list_prompts().unwrap();
     let active_id = active(&s);
-    // No favourite was left, so the first style becomes active and starred.
+    // The first existing style becomes active without changing visibility.
     assert_eq!(active_id, DORA);
-    assert!(prompts.iter().any(|p| p.id == active_id && p.starred));
+    assert!(prompts
+        .iter()
+        .any(|p| p.id == active_id && !p.show_in_style_menu));
     assert_eq!(
         s.get_session(&session.id).unwrap().unwrap().prompt_id,
         Some(x.id)
@@ -139,7 +143,7 @@ fn as6_deleting_the_active_style_repairs_active_and_keeps_sessions() {
 }
 
 #[test]
-fn deleting_active_prefers_custom_favourites_over_builtin_favourites() {
+fn deleting_active_prefers_visible_custom_styles() {
     let db = TempDb::new();
     let s = db.open();
     let active_style = s.create_prompt("Active", "text").unwrap();
@@ -149,16 +153,21 @@ fn deleting_active_prefers_custom_favourites_over_builtin_favourites() {
     s.delete_prompt(&active_style.id).unwrap();
 
     assert_eq!(active(&s), remaining_custom.id);
-    assert!(s.get_prompt(&remaining_custom.id).unwrap().unwrap().starred);
+    assert!(
+        s.get_prompt(&remaining_custom.id)
+            .unwrap()
+            .unwrap()
+            .show_in_style_menu
+    );
 }
 
 #[test]
-fn set_active_stars_the_style() {
+fn setting_active_does_not_change_visibility() {
     let db = TempDb::new();
     let s = db.open();
     s.set_active_prompt(NARRATIVE).unwrap();
     assert_eq!(active(&s), NARRATIVE);
-    assert!(s.get_prompt(NARRATIVE).unwrap().unwrap().starred);
+    assert!(!s.get_prompt(NARRATIVE).unwrap().unwrap().show_in_style_menu);
 }
 
 #[test]
@@ -169,16 +178,16 @@ fn duplicate_copies_a_built_in_as_a_custom_style() {
     let copy = s.duplicate_prompt(NARRATIVE).unwrap();
     assert_eq!(copy.name, format!("{} (Copy)", src.name));
     assert_eq!(copy.text, src.text);
-    assert!(!copy.is_default && copy.starred);
+    assert!(!copy.is_default && copy.show_in_style_menu);
     s.update_prompt(&copy.id, "Edited", "mine").unwrap();
 }
 
 #[test]
-fn as7_sync_keeps_stars_and_custom_rows_and_is_idempotent() {
+fn as7_sync_keeps_visibility_and_custom_rows_and_is_idempotent() {
     let db = TempDb::new();
     let s = db.open();
     let custom = s.create_prompt("Mine", "text").unwrap();
-    s.set_prompt_starred(NARRATIVE, true).unwrap();
+    s.set_prompt_visibility(NARRATIVE, true).unwrap();
     s.set_active_prompt(&custom.id).unwrap();
     let before = s.list_prompts().unwrap();
 

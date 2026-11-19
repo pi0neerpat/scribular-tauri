@@ -340,6 +340,13 @@ fn sweep(c: &mut Connection, now_ms: i64) -> Result<usize> {
     Ok(deleted)
 }
 
+fn first_completed_note(c: &Connection) -> Result<Option<String>> {
+    Ok(c.query_row(
+        "SELECT id FROM sessions WHERE is_sample = 0 AND status = 'done' AND summary <> '' ORDER BY rowid LIMIT 1",
+        [], |row| row.get(0),
+    ).optional()?)
+}
+
 fn session_not_found(id: &str) -> StoreError {
     StoreError::NotFound(format!("session {id}"))
 }
@@ -573,6 +580,18 @@ impl Store {
         Ok(())
     }
 
+    pub fn first_note_tip_session(&self) -> Result<Option<String>> {
+        self.with(|c| {
+            if super::settings::select(c, "first_note_tip_dismissed")?.is_some() {
+                return Ok(None);
+            }
+            if let Some(id) = super::settings::select(c, "first_note_tip_session")? {
+                return Ok(Some(id));
+            }
+            first_completed_note(c)
+        })
+    }
+
     /// Stores a finished summary with its provenance and timings and moves
     /// the session to `Done`, all in one statement, so a reader never sees
     /// `Done` without the summary that goes with it.
@@ -595,6 +614,15 @@ impl Store {
                 )
                 .optional()?
                 .unwrap_or(false);
+            // Keep the tip attached to the first real note even if other sessions finish out of order.
+            let track_first_note = super::settings::select(&tx, "first_note_tip_session")?
+                .is_none()
+                && super::settings::select(&tx, "first_note_tip_dismissed")?.is_none();
+            let first_tip_session = if track_first_note {
+                first_completed_note(&tx)?
+            } else {
+                None
+            };
             let changed = tx.execute(
                 "UPDATE sessions SET
                      previous_summary = CASE WHEN summary <> '' THEN summary ELSE NULL END,
@@ -614,6 +642,11 @@ impl Store {
             )?;
             if changed == 0 {
                 return Err(session_not_found(id));
+            }
+            if track_first_note {
+                if let Some(first) = first_tip_session.or(first_completed_note(&tx)?) {
+                    super::settings::insert(&tx, "first_note_tip_session", &first)?;
+                }
             }
             if recovering {
                 retain_or_delete_audio(&tx, id)?;

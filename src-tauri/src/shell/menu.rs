@@ -57,6 +57,9 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
             }
         }
     }
+    if crate::coach::is_open(app) && !matches!(id, "shell-close" | "shell-quit") {
+        return;
+    }
     if id == "shell-settings" || id == "shell-shortcuts" {
         let pane = if id == "shell-shortcuts" {
             "Keyboard Shortcuts"
@@ -121,6 +124,25 @@ pub fn set_state(
         }
     }
     Ok(())
+}
+
+pub fn set_coach_state(app: &AppHandle, enabled: bool, reason: Option<&str>) {
+    let Some(menu) = app.menu() else { return };
+    for (id, title) in [
+        ("shell-example-style", "New Style from Example Note…"),
+        ("shell-coach", "Make a Note Style from an Example…"),
+    ] {
+        for top in menu.items().unwrap_or_default() {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = sub.get(id) {
+                    let text =
+                        reason.map_or_else(|| title.into(), |reason| format!("{title} — {reason}"));
+                    let _ = item.set_text(text);
+                    let _ = item.set_enabled(enabled);
+                }
+            }
+        }
+    }
 }
 
 fn item(

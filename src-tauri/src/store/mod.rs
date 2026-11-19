@@ -17,7 +17,7 @@ use rusqlite::Connection;
 
 use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Plan};
 
-pub use prompts::Prompt;
+pub use prompts::{Prompt, MAX_PROMPT_CHARS};
 pub use sessions::{
     now_ms, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, Session,
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
@@ -48,8 +48,8 @@ pub enum StoreError {
     BuiltInPrompt,
     EmptyPrompt,
     PromptTooLong,
-    /// Unstarring would leave no favourite style (spec 03 R5).
-    LastFavourite,
+    DetachCoachStyle,
+    CoachStyle(&'static str),
     InvalidRecordingSource,
 }
 
@@ -69,13 +69,16 @@ impl fmt::Display for StoreError {
             Self::BuiltInPrompt => {
                 f.write_str("Built-in styles can't be changed. Duplicate it to edit.")
             }
-            Self::EmptyPrompt => f.write_str("The style's prompt can't be empty."),
+            Self::EmptyPrompt => f.write_str("Note Style Text can't be empty."),
             Self::PromptTooLong => write!(
                 f,
-                "The style's prompt is longer than {} characters.",
+                "Note Style Text is longer than {} characters.",
                 prompts::MAX_PROMPT_CHARS
             ),
-            Self::LastFavourite => f.write_str("At least one style must remain starred."),
+            Self::DetachCoachStyle => {
+                f.write_str("Confirm the text change to make this a hand-edited style.")
+            }
+            Self::CoachStyle(message) => f.write_str(message),
             Self::InvalidRecordingSource => {
                 f.write_str("Choose In the room or On a call with a valid app name.")
             }

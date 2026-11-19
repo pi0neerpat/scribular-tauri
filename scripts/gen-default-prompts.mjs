@@ -28,7 +28,7 @@ const prompts = defaults.prompts.map(({ id, name, description, text, isDefault, 
   description,
   text,
   isDefault,
-  starred,
+  showInStyleMenu: starred,
 }));
 if (prompts.length !== 7) throw new Error(`expected 7 prompts, found ${prompts.length}`);
 if (!prompts.some((p) => p.id === defaults.activePromptId)) {

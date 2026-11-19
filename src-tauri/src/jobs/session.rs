@@ -203,6 +203,14 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    pub(crate) fn while_not_recording<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let recording = lock(&self.inner.recording);
+        if recording.is_some() {
+            return None;
+        }
+        Some(operation())
+    }
+
     pub fn is_recording(&self) -> bool {
         lock(&self.inner.recording).is_some()
     }
@@ -342,6 +350,8 @@ impl Recorder {
         if current.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
+        inner.jobs.cancel_practice();
+        inner.events.recording_starting();
         let settings = inner.store.recording_settings()?;
         let mic = Source::prepare(|sink| inner.mic.open(sink))?;
         let session = inner.store.create_session(&NewSession {

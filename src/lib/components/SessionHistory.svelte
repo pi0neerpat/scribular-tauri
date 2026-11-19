@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
   import { cancelJob, clearAllSessions, countSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
-  import type { AppView } from '../navigation';
+  import { navigationDisabled, type AppView } from '../navigation';
   import type { Session } from '../types/Session';
   import type { SessionListItem } from '../types/SessionListItem';
   import type { SessionProgress } from '../types/SessionProgress';
@@ -173,8 +173,8 @@
       {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
       {#if clearResult}<p role="status">{clearResult}</p>{/if}
       <nav aria-label="Main navigation">
-        <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationLocked}>New Recording</button>
-        <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined} disabled={navigationLocked}>Note Styles</button>
+        <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationDisabled(navigationLocked, 'record', view)}>New Recording</button>
+        <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined}>Note Styles</button>
       </nav>
       <div class="sessions">
         {#each groups as group (group.label)}
