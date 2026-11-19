@@ -151,7 +151,7 @@ if let url = ProcessInfo.processInfo.environment["SCRIBULAR_LLM_URL"], !url.isEm
 
 Run: `swift build --package-path tools/uitest` → builds. `swift test --package-path tools/uitest` → passes.
 
-- [ ] **Step 2: README section** — host command `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4`; why `--host` (default loopback is unreachable from the VM; Softnet already allows `192.168.64.1/32`; not `0.0.0.0`, which exposes the unauthenticated server to the LAN); VM check `curl http://192.168.64.1:5801/health`; build `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY=... npm run tauri -- build --bundles app --features remote-llm`; run `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`; note: same GGUF on host as the app manifest, or results won't match on-device.
+- [ ] **Step 2: README section** — host command `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4 -c 32768`; why `-c 32768` (8192 × 4: llama-server splits `-c` across `-np` slots, so each slot keeps an 8192-token context); why `--host` (default loopback is unreachable from the VM; Softnet already allows `192.168.64.1/32`; not `0.0.0.0`, which exposes the unauthenticated server to the LAN); VM check `curl http://192.168.64.1:5801/health`; build `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY=... npm run tauri -- build --bundles app --features remote-llm`; run `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`; note: same GGUF on host as the app manifest, or results won't match on-device.
 
 - [ ] **Step 3: Real run on the VM**
 
