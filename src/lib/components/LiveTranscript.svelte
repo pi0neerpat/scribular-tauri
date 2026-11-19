@@ -9,15 +9,23 @@
   let segments = $state<SourceSegments>({ mic: [], system: [] });
   let text = $derived(liveTranscript(segments, labeled));
   let manuallyVisible = $state<boolean | null>(null);
+  // Active time when text first showed; transcription arrives in batches, so keep it up 20s before auto-hiding.
+  let shownAtMs = $state<number | null>(null);
   let collapsed = $derived(manuallyVisible === null
-    ? activeElapsedMs >= 60_000 || (wordCount(liveTranscript({ mic: segments.mic, system: [] }, false), false) >= 5
-      && (!labeled || wordCount(liveTranscript({ mic: [], system: segments.system }, false), false) >= 5))
+    ? shownAtMs !== null && activeElapsedMs - shownAtMs >= 20_000
+      && (activeElapsedMs >= 60_000 || (wordCount(liveTranscript({ mic: segments.mic, system: [] }, false), false) >= 20
+        && (!labeled || wordCount(liveTranscript({ mic: [], system: segments.system }, false), false) >= 20)))
     : !manuallyVisible);
+
+  $effect(() => {
+    if (text && shownAtMs === null) shownAtMs = activeElapsedMs;
+  });
 
   $effect(() => {
     const id = sessionId;
     segments = { mic: [], system: [] };
     manuallyVisible = null;
+    shownAtMs = null;
     const unlisten = onSessionSegments((s) => {
       if (s.sessionId === id) segments[s.source].push(...s.segments);
     });
