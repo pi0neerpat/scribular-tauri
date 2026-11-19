@@ -105,31 +105,37 @@ impl AudioCapCli {
             ))
         })?;
         let stderr = String::from_utf8_lossy(&stderr);
-        // `--list-sources` doesn't report a denial itself, so ask macOS on failure.
-        if is_permission_denied(&stderr) || (!status.success() && system_audio_denied()) {
-            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
-        }
         if !status.success() {
-            return Err(AudioError::Device(source_list_failure(&stderr).into()));
+            if let Some(message) = source_list_failure(&stderr) {
+                return Err(AudioError::Device(message.into()));
+            }
+            if is_permission_denied(&stderr) {
+                return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+            }
+            // shortcut: silent sidecar failures lack a permission signal; add a probe when AudioCapCLI supports one.
+            return Err(AudioError::Device(
+                "Couldn't list app audio sources. Refresh the app list or restart Scribular."
+                    .into(),
+            ));
         }
         Ok(parse_sources(&String::from_utf8_lossy(&stdout)))
     }
 }
 
-fn source_list_failure(stderr: &str) -> &'static str {
+fn source_list_failure(stderr: &str) -> Option<&'static str> {
     for line in stderr.lines().map(str::trim) {
         if line.starts_with("Error reading process list")
             || line.starts_with("Error reading data")
             || line.starts_with("Error reading array")
             || line.starts_with("Failed to read format")
         {
-            return "Couldn't read macOS audio sources. Check your sound output and refresh the app list.";
+            return Some("Couldn't read macOS audio sources. Check your sound output and refresh the app list.");
         }
         if line.starts_with("Usage:") || line.starts_with("dyld[") {
-            return "The installed AudioCapCLI couldn't list sources. Reinstall Scribular and try again.";
+            return Some("The installed AudioCapCLI couldn't list sources. Reinstall Scribular and try again.");
         }
     }
-    "Couldn't list app audio sources. Refresh the app list or restart Scribular."
+    None
 }
 
 fn check_cancel(cancel: &AtomicBool) -> std::io::Result<()> {
@@ -257,43 +263,6 @@ impl Drop for CliCapture {
             let _ = thread.join();
         }
     }
-}
-
-/// Whether macOS reports System Audio Recording denied for this app, using the
-/// same private `TCCAccessPreflight` AudioCapCLI calls (0 granted, 1 denied, 2 unknown).
-#[cfg(target_os = "macos")]
-fn system_audio_denied() -> bool {
-    use objc2_foundation::NSString;
-    use std::ffi::{c_char, c_int, c_void};
-    extern "C" {
-        fn dlopen(path: *const c_char, mode: c_int) -> *mut c_void;
-        fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-    }
-    const RTLD_LAZY: c_int = 1;
-    // SAFETY: TCCAccessPreflight(CFStringRef service, CFDictionaryRef options) -> int;
-    // NSString is toll-free bridged to CFString. A missing symbol counts as not denied.
-    unsafe {
-        let lib = dlopen(
-            c"/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC".as_ptr(),
-            RTLD_LAZY,
-        );
-        if lib.is_null() {
-            return false;
-        }
-        let sym = dlsym(lib, c"TCCAccessPreflight".as_ptr());
-        if sym.is_null() {
-            return false;
-        }
-        let preflight: extern "C" fn(*const c_void, *const c_void) -> c_int =
-            std::mem::transmute(sym);
-        let service = NSString::from_str("kTCCServiceAudioCapture");
-        preflight((&*service as *const NSString).cast(), std::ptr::null()) == 1
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn system_audio_denied() -> bool {
-    false
 }
 
 fn is_permission_denied(stderr: &str) -> bool {
@@ -477,6 +446,11 @@ mod tests {
             ),
             ("Usage: Private Browser", "Reinstall Scribular"),
             (
+                "Usage: Private Browser permission denied",
+                "Reinstall Scribular",
+            ),
+            ("", "restart Scribular"),
+            (
                 "Unexpected failure from Private Browser",
                 "restart Scribular",
             ),
@@ -538,7 +512,5 @@ mod tests {
     fn detects_permission_denied() {
         assert!(is_permission_denied("Audio recording permission denied.\n"));
         assert!(!is_permission_denied("no such source"));
-        // Smoke-checks the TCC lookup links and runs; the answer depends on this Mac.
-        let _ = system_audio_denied();
     }
 }
