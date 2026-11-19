@@ -10,7 +10,7 @@
 
   let steps = $state<Step[]>([
     { id: 'welcome', title: 'Welcome', copy: "Let's take a quick tour. Your permissions and speech model are getting ready below." },
-    { id: 'audio', title: 'Choose an audio source in Settings', copy: 'Settings ▸ Recording lets you use your microphone, application audio, or both.' },
+    { id: 'audio', title: 'Choose an audio source in Settings', copy: 'In Settings ▸ Recording, choose Microphone or Microphone and app audio.' },
     { id: 'sessions', title: 'View Sessions', copy: 'After you finish a recording, the transcript and summary appear here.', anchor: 'sessions' },
     { id: 'notes', title: 'Customize Your Notes', copy: 'Open Note Styles from the sidebar.', anchor: 'styles' },
   ]);

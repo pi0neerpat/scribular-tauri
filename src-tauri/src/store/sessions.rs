@@ -961,6 +961,27 @@ impl Store {
         })
     }
 
+    /// Extends the partial tail flushed on pause or app detachment.
+    pub(crate) fn extend_audio_chunk(
+        &self,
+        id: &str,
+        source: AudioSource,
+        seq: u32,
+        pcm: &[i16],
+    ) -> Result<()> {
+        let bytes: Vec<u8> = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
+        self.with(|c| {
+            let changed = c.execute(
+                "UPDATE audio_chunks SET pcm = ?4 WHERE session_id = ?1 AND source = ?2 AND seq = ?3",
+                params![id, source.as_str(), seq, bytes],
+            )?;
+            if changed == 0 {
+                return Err(StoreError::NotFound("recorded audio chunk".into()));
+            }
+            Ok(())
+        })
+    }
+
     /// All of one source's stored audio, in chunk order.
     pub fn audio_samples(&self, id: &str, source: AudioSource) -> Result<Vec<i16>> {
         self.with(|c| samples(c, id, source))
@@ -1053,8 +1074,19 @@ impl AudioRangeReader<'_> {
         start_ms: i64,
         end_ms: i64,
     ) -> Result<Vec<i16>> {
-        let start = start_ms.max(0).saturating_mul(16) as u64;
-        let end = end_ms.max(0).saturating_mul(16) as u64;
+        self.sample_range(
+            source,
+            start_ms.max(0).saturating_mul(16) as u64,
+            end_ms.max(0).saturating_mul(16) as u64,
+        )
+    }
+
+    pub(crate) fn sample_range(
+        &mut self,
+        source: AudioSource,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<i16>> {
         if end <= start {
             return Ok(Vec::new());
         }

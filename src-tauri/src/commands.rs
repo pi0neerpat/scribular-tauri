@@ -15,8 +15,8 @@ use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
 use crate::jobs::{
-    JobEvents, JobQueue, Recorder, SessionProgress, SessionSegments, SummaryDelta,
-    TranscriptWaiting,
+    JobEvents, JobQueue, RecordError, Recorder, RecordingState, SessionLevel, SessionProgress,
+    SessionSegments, SummaryDelta, TranscriptWaiting,
 };
 use crate::license::{AccessState, ActivationResult, Licensing};
 use crate::models::{
@@ -26,7 +26,7 @@ use crate::models::{
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
     now_ms, AppSettings, DiarizationState, InputMode, KeptAudio, Prompt, RecordingSettings,
-    Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
+    RecordingSource, Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -44,6 +44,8 @@ pub const EVENTS: &[&str] = &[
     SUMMARY_DELTA_EVENT,
     SESSION_SEGMENTS_EVENT,
     SESSION_TRANSCRIPT_WAITING_EVENT,
+    SESSION_LEVELS_EVENT,
+    RECORDING_STATE_EVENT,
     LICENSE_CHANGED_EVENT,
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
@@ -80,6 +82,8 @@ pub const SUMMARY_DELTA_EVENT: &str = "session://summary-delta";
 pub const SESSION_SEGMENTS_EVENT: &str = "session://segments";
 
 pub const SESSION_TRANSCRIPT_WAITING_EVENT: &str = "session://transcript-waiting";
+pub const SESSION_LEVELS_EVENT: &str = "session://levels";
+pub const RECORDING_STATE_EVENT: &str = "session://recording-state";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -122,9 +126,13 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     SummaryDelta::export_all(cfg)?;
     SessionSegments::export_all(cfg)?;
     TranscriptWaiting::export_all(cfg)?;
+    RecordingState::export_all(cfg)?;
+    SessionLevel::export_all(cfg)?;
+    RecordingControlError::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
     AudioApp::export_all(cfg)?;
     RecordingSettings::export_all(cfg)?;
+    RecordingSource::export_all(cfg)?;
     Privacy::export_all(cfg)?;
     PlaybackError::export_all(cfg)?;
     LockReason::export_all(cfg)?;
@@ -951,6 +959,21 @@ pub fn get_recording_settings(store: State<Arc<Store>>) -> Result<RecordingSetti
 }
 
 #[tauri::command]
+pub fn get_recording_source(store: State<Arc<Store>>) -> Result<RecordingSource, String> {
+    store.recording_source().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_recording_source(
+    store: State<Arc<Store>>,
+    source: RecordingSource,
+) -> Result<(), String> {
+    store
+        .set_recording_source(&source)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn set_recording_settings(
     store: State<Arc<Store>>,
     models: State<Arc<ModelManager>>,
@@ -1285,6 +1308,55 @@ pub fn current_recording(recorder: State<Arc<Recorder>>) -> Option<String> {
 }
 
 #[tauri::command]
+pub fn recording_state(recorder: State<Arc<Recorder>>) -> Option<RecordingState> {
+    recorder.recording_state()
+}
+
+#[derive(Debug, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RecordingControlError {
+    NotRecording,
+    Failed { message: String },
+}
+
+impl From<RecordError> for RecordingControlError {
+    fn from(error: RecordError) -> Self {
+        match error {
+            RecordError::NotRecording => Self::NotRecording,
+            _ => Self::Failed {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn pause_recording(
+    recorder: State<'_, Arc<Recorder>>,
+) -> Result<(), RecordingControlError> {
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || recorder.pause())
+        .await
+        .map_err(|_| RecordingControlError::Failed {
+            message: "Couldn't pause recording.".into(),
+        })??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_recording(
+    recorder: State<'_, Arc<Recorder>>,
+) -> Result<(), RecordingControlError> {
+    let recorder = Arc::clone(&recorder);
+    tauri::async_runtime::spawn_blocking(move || recorder.resume())
+        .await
+        .map_err(|_| RecordingControlError::Failed {
+            message: "Couldn't resume recording.".into(),
+        })??;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String> {
     store.app_settings().map_err(|e| e.to_string())
 }
@@ -1478,6 +1550,14 @@ impl JobEvents for TauriJobEvents {
 
     fn transcript_waiting(&self, waiting: TranscriptWaiting) {
         let _ = self.0.emit(SESSION_TRANSCRIPT_WAITING_EVENT, waiting);
+    }
+
+    fn recording_state(&self, state: Option<RecordingState>) {
+        let _ = self.0.emit(RECORDING_STATE_EVENT, state);
+    }
+
+    fn level(&self, level: SessionLevel) {
+        let _ = self.0.emit(SESSION_LEVELS_EVENT, level);
     }
 }
 

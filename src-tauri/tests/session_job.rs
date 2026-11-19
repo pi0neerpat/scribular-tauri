@@ -20,8 +20,8 @@ use scribular_lib::engines::fake::{
     FakeTranscriberLoader,
 };
 use scribular_lib::jobs::{
-    JobEvents, JobQueue, RecordError, Recorder, SessionProgress, SessionSegments, SummaryDelta,
-    TranscriptWaiting,
+    HearingState, JobEvents, JobQueue, RecordError, Recorder, RecordingState, RecordingStatus,
+    SessionLevel, SessionProgress, SessionSegments, SummaryDelta, TranscriptWaiting,
 };
 use scribular_lib::llm::LlmError;
 use scribular_lib::store::key::MemoryKeyStore;
@@ -76,6 +76,8 @@ struct Events {
     store: Arc<Store>,
     recording_changes: Mutex<Vec<(bool, bool)>>,
     progress: Mutex<Vec<SessionProgress>>,
+    recording_states: Mutex<Vec<Option<RecordingState>>>,
+    levels: Mutex<Vec<SessionLevel>>,
     segments: Mutex<Vec<SessionSegments>>,
     waiting: Mutex<Vec<TranscriptWaiting>>,
     stale_rows: Mutex<Vec<String>>,
@@ -127,6 +129,14 @@ impl JobEvents for Events {
             .lock()
             .unwrap()
             .push((recording, multi_speaker));
+    }
+
+    fn recording_state(&self, state: Option<RecordingState>) {
+        self.recording_states.lock().unwrap().push(state);
+    }
+
+    fn level(&self, level: SessionLevel) {
+        self.levels.lock().unwrap().push(level);
     }
 
     fn progress(&self, p: SessionProgress) {
@@ -223,6 +233,8 @@ impl Harness {
             store: store.clone(),
             recording_changes: Mutex::default(),
             progress: Mutex::default(),
+            recording_states: Mutex::default(),
+            levels: Mutex::default(),
             segments: Mutex::default(),
             waiting: Mutex::default(),
             stale_rows: Mutex::default(),
@@ -270,8 +282,12 @@ impl Harness {
     }
 
     fn start(&self, mode: InputMode) -> String {
-        let app = (mode != InputMode::Mic).then_some(APP);
-        self.recorder.start(mode, app, "Session").unwrap().id
+        let app = (mode == InputMode::MicAndSystem).then_some(APP);
+        let id = self.recorder.start(mode, app, "Session").unwrap().id;
+        if app.is_some() {
+            wait_until("app audio opens", || self.system.is_open());
+        }
+        id
     }
 
     /// Feeds `seconds` of a 440 Hz tone to every open source.
@@ -550,11 +566,12 @@ fn quit_confirmation_only_for_recording_and_running_summary() {
 }
 
 #[test]
-fn quitting_mid_recording_leaves_an_interrupted_session_with_its_audio() {
+fn quitting_while_paused_leaves_the_same_interrupted_session_with_its_audio() {
     let h = Harness::new();
     let id = h.start(InputMode::MicAndSystem);
     h.feed(7);
     h.wait_chunks(&id, 2);
+    h.recorder.pause().unwrap();
     let Harness {
         db,
         store,
@@ -671,7 +688,6 @@ fn cancelling_reaches_a_window_still_transcribing_from_the_recording() {
 fn each_mode_records_its_sources() {
     for (mode, expected) in [
         (InputMode::Mic, &[AudioSource::Mic][..]),
-        (InputMode::System, &[AudioSource::System][..]),
         (
             InputMode::MicAndSystem,
             &[AudioSource::Mic, AudioSource::System][..],
@@ -689,7 +705,7 @@ fn each_mode_records_its_sources() {
             expected.contains(&AudioSource::System),
             "{mode:?}"
         );
-        h.feed(1);
+        h.feed(2);
         h.recorder.stop().unwrap();
         assert!(!h.mic.is_open() && !h.system.is_open(), "{mode:?}");
         h.events.wait_for(&id, SessionStatus::Done);
@@ -723,30 +739,491 @@ fn a_failed_summary_keeps_the_transcript_and_deletes_the_audio() {
 }
 
 #[test]
-fn a_lost_source_fails_the_recording_and_keeps_its_audio() {
+fn microphone_loss_interrupts_and_the_same_session_recovers() {
     let h = Harness::new();
     let id = h.start(InputMode::MicAndSystem);
     h.feed(6);
     h.wait_chunks(&id, 2);
-    h.system.lose();
+    h.mic.lose();
     h.events.wait_for(&id, SessionStatus::Failed);
 
     assert_eq!(
         *h.events.recording_changes.lock().unwrap(),
         [(true, false), (false, false)]
     );
-    let s = h.get(&id);
-    assert_eq!(
-        s.error.as_deref(),
-        Some("recording stopped: the app's audio ended")
-    );
+    assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+    assert!(h
+        .events
+        .messages(&id)
+        .last()
+        .unwrap()
+        .contains("microphone was lost"));
     assert_eq!(h.recorder.current(), None);
-    assert!(!h.mic.is_open(), "the other source is stopped too");
-    // Both sources' 5 s chunks plus their flushed 1 s tails.
-    assert_eq!(h.chunks(&id), 4);
-    assert!(h.stt.calls().is_empty(), "nothing is transcribed");
+    assert!(!h.system.is_open());
+    assert_eq!(
+        h.chunks(&id),
+        4,
+        "both full chunks and flushed tails survive"
+    );
     assert!(matches!(h.recorder.stop(), Err(RecordError::NotRecording)));
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(!h.get(&id).summary.is_empty());
     h.assert_rows_matched_events();
+}
+
+#[test]
+fn app_audio_attaches_late_and_reattaches_on_the_mic_timeline() {
+    let h = Harness::new();
+    h.store.set_setting("keep_audio", "1").unwrap();
+    h.system.available.store(false, Ordering::Relaxed);
+    let id = h
+        .recorder
+        .start(InputMode::MicAndSystem, Some(APP), "Session")
+        .unwrap()
+        .id;
+    assert!(h.mic.is_open());
+    h.feed(6);
+    h.wait_chunks(&id, 1);
+    wait_until("the unattached call meter is silent", || {
+        h.events.levels.lock().unwrap().iter().any(|e| {
+            e.source == AudioSource::System && e.hearing == HearingState::Silent && e.level == 0.0
+        })
+    });
+
+    h.system.available.store(true, Ordering::Relaxed);
+    wait_until("first app attachment", || h.system.is_open());
+    h.feed(3);
+    wait_until("app meter hears audio", || {
+        h.events.levels.lock().unwrap().iter().any(|e| {
+            e.source == AudioSource::System && e.hearing == HearingState::Hearing && e.level > 0.0
+        })
+    });
+    h.system.available.store(false, Ordering::Relaxed);
+    h.system.lose();
+    let samples = |source| h.store.audio_samples(&id, source).unwrap();
+    wait_until("app tail committed", || {
+        samples(AudioSource::System).len() == 9 * 16_000
+    });
+    assert!(h.mic.is_open());
+    h.feed(6);
+    h.system.available.store(true, Ordering::Relaxed);
+    wait_until("app reattachment", || h.system.is_open());
+    h.feed(3);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+
+    let mic = samples(AudioSource::Mic);
+    let app = samples(AudioSource::System);
+    assert_eq!(mic.len(), 18 * 16_000);
+    assert_eq!(app.len(), mic.len());
+    let silent = |s: &[i16]| s.iter().all(|&sample| sample == 0);
+    assert!(!silent(&mic[..6 * 16_000]));
+    assert!(!silent(&mic[9 * 16_000..15 * 16_000]));
+    assert!(silent(&app[..6 * 16_000]));
+    assert!(!silent(&app[6 * 16_000..9 * 16_000]));
+    assert!(silent(&app[9 * 16_000..15 * 16_000]));
+    assert!(!silent(&app[15 * 16_000..]));
+    assert_eq!(h.get(&id).duration_ms, Some(18_000));
+    let starts: Vec<_> = h
+        .store
+        .segments(&id, AudioSource::System)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.start_ms)
+        .collect();
+    assert_eq!(starts, [6_000, 7_000, 15_000, 16_000]);
+    assert_eq!(h.store.session_count().unwrap(), 1);
+    assert_eq!(h.system.opened.load(Ordering::Relaxed), 2);
+    assert!(h
+        .events
+        .levels
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|e| { e.session_id == id && (0.0..=1.0).contains(&e.level) }));
+}
+
+#[test]
+fn a_failed_live_window_is_replayed_before_reattached_app_audio() {
+    let h = Harness::new();
+    h.store.set_setting("keep_audio", "1").unwrap();
+    let id = h.start(InputMode::MicAndSystem);
+    let silence = vec![0.0; SECOND];
+    let signal = vec![0.5; SECOND];
+    let feed_call = |seconds| {
+        for _ in 0..seconds {
+            assert!(h.mic.feed(&silence));
+            assert!(h.system.feed(&signal));
+        }
+    };
+    let live_starts = || {
+        h.events
+            .segments
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.source == AudioSource::System)
+            .flat_map(|event| event.segments.iter().map(|segment| segment.start_ms))
+            .collect::<Vec<_>>()
+    };
+    feed_call(16);
+    wait_until("initial app window publishes", || live_starts().len() == 2);
+    h.stt.failures_remaining.store(1, Ordering::Relaxed);
+    feed_call(16);
+    wait_until("next app window fails", || {
+        h.stt.failures_remaining.load(Ordering::Relaxed) == 0
+    });
+    feed_call(16);
+    h.system.available.store(false, Ordering::Relaxed);
+    h.system.lose();
+    wait_until("failed app span is saved", || {
+        h.store
+            .audio_samples(&id, AudioSource::System)
+            .unwrap()
+            .len()
+            == 48 * 16_000
+    });
+
+    h.recorder.pause().unwrap();
+    assert!(!h.mic.feed(&silence));
+    h.recorder.resume().unwrap();
+    for _ in 0..2 {
+        assert!(h.mic.feed(&silence));
+    }
+    h.system.available.store(true, Ordering::Relaxed);
+    wait_until("app audio reattaches", || h.system.is_open());
+    feed_call(17);
+    wait_until("reattached app publishes before Stop", || {
+        live_starts().contains(&50_000)
+    });
+    let expected = [
+        0, 1000, 10_000, 11_000, 25_000, 26_000, 40_000, 41_000, 50_000, 51_000,
+    ];
+    assert_eq!(live_starts(), expected);
+
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(67_000));
+    let saved: Vec<_> = h
+        .store
+        .segments(&id, AudioSource::System)
+        .unwrap()
+        .into_iter()
+        .map(|segment| segment.start_ms)
+        .collect();
+    assert_eq!(saved, [expected.as_slice(), &[60_000, 61_000]].concat());
+}
+
+#[test]
+fn stop_retries_after_a_failed_reattach_and_keeps_audio_if_errors_persist() {
+    for still_failing in [false, true] {
+        let h = Harness::new();
+        let id = h.start(InputMode::Mic);
+        h.stt.failures_remaining.store(20, Ordering::Relaxed);
+        h.feed(16);
+        wait_until("the live window fails", || {
+            h.stt.failures_remaining.load(Ordering::Relaxed) == 19
+        });
+        h.recorder.pause().unwrap();
+        h.recorder.resume().unwrap();
+        h.feed(3);
+        wait_until("the replay fails after reattach", || {
+            h.stt.failures_remaining.load(Ordering::Relaxed) == 18
+        });
+        if !still_failing {
+            h.stt.failures_remaining.store(0, Ordering::Relaxed);
+        }
+
+        assert_eq!(h.recorder.stop().unwrap(), id);
+        if still_failing {
+            h.events.wait_for(&id, SessionStatus::Failed);
+            assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+            assert_eq!(
+                h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+                19 * 16_000
+            );
+            h.stt.failures_remaining.store(0, Ordering::Relaxed);
+            h.recorder.recover(&id).unwrap();
+        }
+        h.events.wait_for(&id, SessionStatus::Done);
+        assert_eq!(h.get(&id).duration_ms, Some(19_000));
+        assert_eq!(h.chunks(&id), 0);
+        if !still_failing {
+            let starts: Vec<_> = h
+                .store
+                .segments(&id, AudioSource::Mic)
+                .unwrap()
+                .into_iter()
+                .map(|segment| segment.start_ms)
+                .collect();
+            assert_eq!(starts, [0, 1000, 10_000, 11_000, 16_000, 17_000]);
+        }
+    }
+}
+
+#[test]
+fn pause_freezes_capture_and_live_transcription_and_stop_accepts_paused_state() {
+    let h = Harness::new();
+    assert!(matches!(h.recorder.pause(), Err(RecordError::NotRecording)));
+    assert!(matches!(
+        h.recorder.resume(),
+        Err(RecordError::NotRecording)
+    ));
+    h.store.set_setting("keep_audio", "1").unwrap();
+    let id = h.start(InputMode::Mic);
+    h.recorder.resume().unwrap();
+    h.stt.hold.store(true, Ordering::SeqCst);
+    h.feed(16);
+    wait_until("Whisper starts a live window", || h.stt.calls().len() == 1);
+    h.recorder.pause().unwrap();
+    h.recorder.pause().unwrap();
+    let paused = h.recorder.recording_state().unwrap();
+    assert_eq!(paused.status, RecordingStatus::Paused);
+    assert_eq!(paused.session_id, id);
+    assert_eq!(paused.target_app, None);
+    assert!(!h.mic.feed(&[0.5; SECOND]));
+    h.stt.hold.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(h.recorder.recording_state(), Some(paused.clone()));
+    assert_eq!(h.stt.calls().len(), 1);
+    assert!(h.events.segments.lock().unwrap().is_empty());
+    assert_eq!(
+        h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+        16 * 16_000
+    );
+    assert!(h
+        .events
+        .levels
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|e| e.source == AudioSource::Mic));
+
+    h.recorder.resume().unwrap();
+    h.recorder.resume().unwrap();
+    wait_until("the interrupted window is retried", || {
+        h.stt.calls().len() >= 2
+    });
+    h.feed(3);
+    h.recorder.pause().unwrap();
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(19_000));
+    assert_eq!(
+        h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+        19 * 16_000
+    );
+    let starts: Vec<_> = h
+        .store
+        .segments(&id, AudioSource::Mic)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.start_ms)
+        .collect();
+    assert!(starts.contains(&16_000));
+    assert_eq!(h.recorder.recording_state(), None);
+    assert_eq!(h.mic.opened.load(Ordering::Relaxed), 2);
+    let states: Vec<_> = h
+        .events
+        .recording_states
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|s| s.as_ref().map(|s| s.status))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            Some(RecordingStatus::Running),
+            Some(RecordingStatus::Paused),
+            Some(RecordingStatus::Running),
+            Some(RecordingStatus::Paused),
+            None,
+        ]
+    );
+}
+
+#[test]
+fn resumed_mic_segments_follow_the_pre_pause_tail_while_recording() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.pause().unwrap();
+    assert!(h.events.segments.lock().unwrap().is_empty());
+
+    h.recorder.resume().unwrap();
+    h.feed(16);
+    wait_until("both spans publish before Stop", || {
+        h.events.segments.lock().unwrap().len() >= 2
+    });
+    let starts: Vec<_> = h
+        .events
+        .segments
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| event.session_id == id && event.source == AudioSource::Mic)
+        .flat_map(|event| event.segments.iter().map(|segment| segment.start_ms))
+        .collect();
+    assert_eq!(starts, [0, 1000, 3000, 4000]);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(19_000));
+}
+
+#[test]
+fn pause_suspends_app_attempts_and_failed_app_resume_keeps_mic_running() {
+    let h = Harness::new();
+    let id = h.start(InputMode::MicAndSystem);
+    h.feed(2);
+    h.recorder.pause().unwrap();
+    assert!(!h.mic.is_open() && !h.system.is_open());
+    let paused = h.recorder.recording_state().unwrap();
+    assert_eq!(paused.target_app.as_deref(), Some(APP));
+    assert_eq!(paused.session_id, id);
+    h.system.deny.store(true, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_millis(150));
+    assert_eq!(h.system.opened.load(Ordering::Relaxed), 1);
+    assert_eq!(h.recorder.recording_state(), Some(paused));
+    h.recorder.resume().unwrap();
+    h.feed(3);
+    assert!(h.mic.is_open() && !h.system.is_open());
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(5_000));
+    assert_eq!(h.store.session_count().unwrap(), 1);
+}
+
+#[test]
+fn a_failed_mic_resume_keeps_paused_audio_recoverable() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.feed(3);
+    h.recorder.pause().unwrap();
+    h.mic.deny.store(true, Ordering::Relaxed);
+    assert!(matches!(h.recorder.resume(), Err(RecordError::Audio(_))));
+    assert_eq!(h.recorder.recording_state(), None);
+    assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+    assert_eq!(
+        h.store.audio_samples(&id, AudioSource::Mic).unwrap().len(),
+        3 * 16_000
+    );
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+}
+
+#[test]
+fn mic_starts_without_waiting_for_an_in_flight_app_attach() {
+    use scribular_lib::audio::{self, AudioApp, AudioError, Capture, Sink, SystemAudio};
+
+    #[derive(Default)]
+    struct PendingApp {
+        attempts: AtomicU32,
+        cancelled: AtomicU32,
+    }
+
+    impl SystemAudio for PendingApp {
+        fn list_apps(&self) -> audio::Result<Vec<AudioApp>> {
+            Ok(Vec::new())
+        }
+
+        fn open(&self, _: &str, _: Sink, cancel: &AtomicBool) -> audio::Result<Box<dyn Capture>> {
+            self.attempts.fetch_add(1, Ordering::Relaxed);
+            let deadline = Instant::now() + WAIT;
+            while !cancel.load(Ordering::Relaxed) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if cancel.load(Ordering::Relaxed) {
+                self.cancelled.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(AudioError::Device(
+                "fake attachment did not complete".into(),
+            ))
+        }
+    }
+
+    let h = Harness::new();
+    let app = Arc::new(PendingApp::default());
+    let recorder = Recorder::new(
+        h.store.clone(),
+        h.queue.clone(),
+        Arc::new(FakeTranscriberLoader(h.stt.clone())),
+        h.events.clone(),
+        Arc::new(FakeMicrophone(h.mic.clone())),
+        app.clone(),
+    );
+    let id = recorder
+        .start(InputMode::MicAndSystem, Some(APP), "Session")
+        .unwrap()
+        .id;
+    wait_until("the pending attach starts", || {
+        app.attempts.load(Ordering::Relaxed) == 1
+    });
+    assert!(h.mic.is_open());
+    h.feed(2);
+    recorder.pause().unwrap();
+    assert_eq!(app.cancelled.load(Ordering::Relaxed), 1);
+    assert!(!h.mic.is_open());
+    recorder.resume().unwrap();
+    wait_until("resume retries attachment", || {
+        app.attempts.load(Ordering::Relaxed) == 2
+    });
+    h.feed(2);
+    assert_eq!(recorder.stop().unwrap(), id);
+    assert_eq!(app.cancelled.load(Ordering::Relaxed), 2);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert_eq!(h.get(&id).duration_ms, Some(4_000));
+}
+
+#[test]
+fn capture_faults_log_metadata_and_keep_committed_audio() {
+    use scribular_lib::diag::log;
+    use scribular_lib::store::key::apply_key;
+
+    let h = Harness::new();
+    let log_dir = h.db.0.with_extension("logs");
+    log::init(&log_dir).unwrap();
+    let app = "PRIVATE-CALL-TARGET";
+    let id = h
+        .recorder
+        .start(InputMode::MicAndSystem, Some(app), "PRIVATE-SESSION-TITLE")
+        .unwrap()
+        .id;
+    h.feed(5);
+    h.wait_chunks(&id, 1);
+    let read_log = || std::fs::read_to_string(log_dir.join("scribular.log")).unwrap();
+    wait_until("app attach failure reported", || {
+        read_log().contains("app_source_unavailable")
+    });
+
+    let connection = rusqlite::Connection::open(&h.db.0).unwrap();
+    apply_key(&connection, &[7; 32]).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_chunk BEFORE INSERT ON audio_chunks
+         WHEN NEW.seq = 1 BEGIN SELECT RAISE(FAIL, 'PRIVATE-STORE-DETAIL'); END;",
+        )
+        .unwrap();
+    h.feed(2);
+    assert!(matches!(h.recorder.pause(), Err(RecordError::Interrupted)));
+    assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+    assert_eq!(h.chunks(&id), 1);
+    assert_eq!(h.recorder.recording_state(), None);
+    assert!(read_log().contains("database_error"));
+    let diagnostics = read_log();
+    for private in [
+        app,
+        "PRIVATE-SESSION-TITLE",
+        "PRIVATE-STORE-DETAIL",
+        TRANSCRIPT,
+    ] {
+        assert!(!diagnostics.contains(private));
+    }
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(!h.get(&id).summary.is_empty());
+    std::fs::remove_dir_all(log_dir).unwrap();
 }
 
 #[test]
@@ -780,15 +1257,25 @@ fn a_refused_source_leaves_no_session() {
 }
 
 #[test]
-fn a_refused_system_capture_names_system_audio() {
+fn refused_app_audio_leaves_capture_and_summary_available() {
     let h = Harness::new();
     h.system.deny.store(true, Ordering::Relaxed);
-    let err = h
+    let id = h
         .recorder
-        .start(InputMode::System, Some(APP), "Session")
-        .unwrap_err();
-    assert_eq!(err.to_string(), "system audio recording permission denied");
-    assert!(h.store.list_sessions().unwrap().is_empty());
+        .start(InputMode::MicAndSystem, Some(APP), "Session")
+        .unwrap()
+        .id;
+    assert!(h.mic.is_open());
+    h.feed(3);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(h.get(&id).transcript.contains(TRANSCRIPT));
+    assert!(!h.get(&id).summary.is_empty());
+    assert!(h
+        .store
+        .segments(&id, AudioSource::System)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -808,13 +1295,19 @@ fn a_zero_sample_rate_is_refused() {
 }
 
 #[test]
-fn system_audio_needs_an_app_and_one_recording_at_a_time() {
+fn a_call_needs_an_app_and_system_only_is_rejected() {
     let h = Harness::new();
     assert!(matches!(
-        h.recorder.start(InputMode::System, None, "Session"),
+        h.recorder.start(InputMode::System, Some(APP), "Session"),
+        Err(RecordError::UnsupportedMode)
+    ));
+    assert!(matches!(
+        h.recorder
+            .start(InputMode::MicAndSystem, Some(" "), "Session"),
         Err(RecordError::NoTargetApp)
     ));
     assert!(matches!(h.recorder.stop(), Err(RecordError::NotRecording)));
+    assert!(h.store.list_sessions().unwrap().is_empty());
     h.start(InputMode::Mic);
     assert!(matches!(
         h.recorder.start(InputMode::Mic, None, "Again"),

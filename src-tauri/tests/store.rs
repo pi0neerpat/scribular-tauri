@@ -8,9 +8,9 @@ use std::{
 
 use scribular_lib::store::key::MemoryKeyStore;
 use scribular_lib::store::{
-    AppSettings, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession,
-    RecordingSettings, SessionPatch, SessionStatus, Store, Timings, ACTIVE_PROMPT_ID,
-    AUDIO_RETENTION_MS,
+    AppSettings, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, RecordLocation,
+    RecordingSettings, RecordingSource, SessionPatch, SessionStatus, Store, StoreError, Timings,
+    ACTIVE_PROMPT_ID, AUDIO_RETENTION_MS,
 };
 use scribular_lib::text::Segment;
 
@@ -693,6 +693,84 @@ fn settings_upsert() {
 }
 
 #[test]
+fn record_source_defaults_round_trips_and_keeps_legacy_sessions_readable() {
+    let db = TempDb::new();
+    let store = db.open();
+    assert_eq!(
+        store.recording_source().unwrap(),
+        RecordingSource::default()
+    );
+    let legacy = store
+        .create_session(&NewSession {
+            title: "Legacy".into(),
+            input_mode: InputMode::System,
+            prompt_id: None,
+            model_id: None,
+        })
+        .unwrap();
+    store.set_setting("input_mode", "system").unwrap();
+    store.set_setting("target_app", "Zoom").unwrap();
+    assert_eq!(
+        store.recording_settings().unwrap().input_mode,
+        InputMode::Mic
+    );
+    let source = RecordingSource {
+        location: RecordLocation::OnCall,
+        target_app: Some("Zoom".into()),
+    };
+    store.set_recording_source(&source).unwrap();
+    drop(store);
+
+    let store = db.open();
+    assert_eq!(store.recording_source().unwrap(), source);
+    assert_eq!(
+        store.recording_settings().unwrap().input_mode,
+        InputMode::MicAndSystem
+    );
+    assert_eq!(
+        store.get_session(&legacy.id).unwrap().unwrap().input_mode,
+        InputMode::System
+    );
+    assert_eq!(
+        store.get_setting("record_location").unwrap().as_deref(),
+        Some("onCall")
+    );
+    assert_eq!(
+        store.get_setting("record_target_app").unwrap().as_deref(),
+        Some("Zoom")
+    );
+    for target_app in [None, Some(" ".into()), Some("Zoom\0".into())] {
+        assert!(matches!(
+            store.set_recording_source(&RecordingSource {
+                location: RecordLocation::OnCall,
+                target_app,
+            }),
+            Err(StoreError::InvalidRecordingSource)
+        ));
+    }
+    assert_eq!(store.recording_source().unwrap(), source);
+    store
+        .set_recording_source(&RecordingSource::default())
+        .unwrap();
+    assert_eq!(
+        store.recording_source().unwrap(),
+        RecordingSource::default()
+    );
+    // Earlier builds could persist call mode before an app was chosen.
+    store.set_setting("record_location", "onCall").unwrap();
+    drop(store);
+    let store = db.open();
+    assert_eq!(
+        store.recording_source().unwrap(),
+        RecordingSource::default()
+    );
+    assert_eq!(
+        store.recording_settings().unwrap().input_mode,
+        InputMode::Mic
+    );
+}
+
+#[test]
 fn recording_settings_round_trip_and_clear() {
     let db = TempDb::new();
     let store = db.open();
@@ -704,7 +782,7 @@ fn recording_settings_round_trip_and_clear() {
     assert!(!seeded.multi_speaker);
 
     let chosen = RecordingSettings {
-        input_mode: InputMode::System,
+        input_mode: InputMode::MicAndSystem,
         target_app: Some("Zoom".into()),
         prompt_id: Some("default-therapy-dora".into()),
         keep_audio: true,
@@ -715,8 +793,18 @@ fn recording_settings_round_trip_and_clear() {
     let store = db.open();
     assert_eq!(store.recording_settings().unwrap(), chosen);
 
+    assert!(matches!(
+        store.set_recording_settings(&RecordingSettings {
+            target_app: None,
+            keep_audio: false,
+            ..chosen.clone()
+        }),
+        Err(StoreError::InvalidRecordingSource)
+    ));
+    assert_eq!(store.recording_settings().unwrap(), chosen);
+
     let cleared = RecordingSettings {
-        input_mode: InputMode::MicAndSystem,
+        input_mode: InputMode::Mic,
         target_app: None,
         prompt_id: None,
         keep_audio: false,
@@ -766,7 +854,7 @@ fn recording_settings_are_read_whole_while_saving() {
         multi_speaker: false,
     };
     let b = RecordingSettings {
-        input_mode: InputMode::System,
+        input_mode: InputMode::MicAndSystem,
         target_app: Some("Zoom".into()),
         prompt_id: Some("default-eft".into()),
         keep_audio: true,

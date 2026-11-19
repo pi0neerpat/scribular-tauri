@@ -21,6 +21,8 @@ pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
+const RECORD_LOCATION: &str = "record_location";
+const RECORD_TARGET_APP: &str = "record_target_app";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
 pub(super) const KEEP_AUDIO: &str = "keep_audio";
 
@@ -47,12 +49,89 @@ impl Default for AppSettings {
 #[serde(rename_all = "camelCase")]
 pub struct RecordingSettings {
     pub input_mode: InputMode,
-    /// The app whose audio `System` and `MicAndSystem` capture.
+    /// The app whose audio `MicAndSystem` captures.
     pub target_app: Option<String>,
     pub prompt_id: Option<String>,
     /// Keep the audio (encrypted, 7 days) after the transcript is saved.
     pub keep_audio: bool,
     pub multi_speaker: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RecordLocation {
+    #[default]
+    InRoom,
+    OnCall,
+}
+
+impl RecordLocation {
+    pub fn input_mode(self) -> InputMode {
+        match self {
+            Self::InRoom => InputMode::Mic,
+            Self::OnCall => InputMode::MicAndSystem,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingSource {
+    pub location: RecordLocation,
+    pub target_app: Option<String>,
+}
+
+pub(crate) fn valid_target_app(app: &str) -> bool {
+    !app.trim().is_empty() && !app.contains('\0')
+}
+
+fn recording_source(c: &Connection) -> Result<RecordingSource> {
+    let location = select(c, RECORD_LOCATION)?;
+    let on_call = match location.as_deref() {
+        Some(location) => location == "onCall",
+        None => select(c, INPUT_MODE)?.as_deref() == Some(InputMode::MicAndSystem.as_str()),
+    };
+    let target_app = select(
+        c,
+        if location.is_some() {
+            RECORD_TARGET_APP
+        } else {
+            TARGET_APP
+        },
+    )?
+    .filter(|app| valid_target_app(app));
+    Ok(RecordingSource {
+        location: if on_call && target_app.is_some() {
+            RecordLocation::OnCall
+        } else {
+            RecordLocation::InRoom
+        },
+        target_app,
+    })
+}
+
+fn save_source(c: &Connection, source: &RecordingSource) -> Result<()> {
+    let app = source.target_app.as_deref();
+    if app.map_or(source.location == RecordLocation::OnCall, |app| {
+        !valid_target_app(app)
+    }) {
+        return Err(super::StoreError::InvalidRecordingSource);
+    }
+    insert(
+        c,
+        RECORD_LOCATION,
+        match source.location {
+            RecordLocation::InRoom => "inRoom",
+            RecordLocation::OnCall => "onCall",
+        },
+    )?;
+    match app {
+        Some(app) => insert(c, RECORD_TARGET_APP, app)?,
+        None => {
+            c.execute("DELETE FROM settings WHERE key = ?1", [RECORD_TARGET_APP])?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn insert(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -73,6 +152,19 @@ pub(super) fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 impl Store {
+    pub fn recording_source(&self) -> Result<RecordingSource> {
+        self.with(|c| recording_source(c))
+    }
+
+    pub fn set_recording_source(&self, source: &RecordingSource) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            save_source(&tx, source)?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn app_settings(&self) -> Result<AppSettings> {
         self.with(|c| {
             Ok(AppSettings {
@@ -148,11 +240,10 @@ impl Store {
     /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {
+            let source = recording_source(c)?;
             Ok(RecordingSettings {
-                input_mode: select(c, INPUT_MODE)?
-                    .and_then(|m| InputMode::parse(&m))
-                    .unwrap_or(InputMode::Mic),
-                target_app: select(c, TARGET_APP)?,
+                input_mode: source.location.input_mode(),
+                target_app: source.target_app,
                 prompt_id: select(c, ACTIVE_PROMPT_ID)?,
                 keep_audio: select(c, KEEP_AUDIO)?.as_deref() == Some("1"),
                 multi_speaker: select(c, MULTI_SPEAKER)?.as_deref() == Some("1"),
@@ -160,25 +251,29 @@ impl Store {
         })
     }
 
-    /// Saves them all at once; an absent app clears it, an absent prompt
+    /// Saves them all at once; an absent app clears it in mic mode, an absent prompt
     /// keeps the active one. Unknown ids are rejected and unstarred styles
     /// are starred, matching `set_active_prompt`.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
-            insert(&tx, INPUT_MODE, settings.input_mode.as_str())?;
+            save_source(
+                &tx,
+                &RecordingSource {
+                    location: match settings.input_mode {
+                        InputMode::Mic => RecordLocation::InRoom,
+                        InputMode::MicAndSystem => RecordLocation::OnCall,
+                        InputMode::System => return Err(super::StoreError::InvalidRecordingSource),
+                    },
+                    target_app: settings.target_app.clone(),
+                },
+            )?;
             insert(&tx, KEEP_AUDIO, if settings.keep_audio { "1" } else { "0" })?;
             insert(
                 &tx,
                 MULTI_SPEAKER,
                 if settings.multi_speaker { "1" } else { "0" },
             )?;
-            match &settings.target_app {
-                Some(app) => insert(&tx, TARGET_APP, app)?,
-                None => {
-                    tx.execute("DELETE FROM settings WHERE key = ?1", [TARGET_APP])?;
-                }
-            }
             // One validated writer for the active style (spec 03 R7); an
             // absent id keeps it, since some style is always active (R6).
             if let Some(id) = &settings.prompt_id {

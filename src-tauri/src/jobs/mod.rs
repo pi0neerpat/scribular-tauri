@@ -17,6 +17,40 @@ pub use queue::{JobError, JobQueue};
 pub use retention::{spawn_retention, SWEEP_EVERY};
 pub use session::{RecordError, Recorder};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum RecordingStatus {
+    Running,
+    Paused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingState {
+    pub session_id: String,
+    pub status: RecordingStatus,
+    pub active_elapsed_ms: u32,
+    pub target_app: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum HearingState {
+    Silent,
+    Hearing,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionLevel {
+    pub session_id: String,
+    pub source: AudioSource,
+    pub level: f32,
+    pub hearing: HearingState,
+    pub active_elapsed_ms: u32,
+}
+
 /// Payload of `session://progress`. The session's status row already says
 /// `state` by the time this is emitted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -61,6 +95,8 @@ pub struct TranscriptWaiting {
 pub trait JobEvents: Send + Sync {
     /// Called under the recording lock to keep tray updates in transition order.
     fn recording_changed(&self, _recording: bool, _multi_speaker: bool) {}
+    fn recording_state(&self, _: Option<RecordingState>) {}
+    fn level(&self, _: SessionLevel) {}
     fn progress(&self, progress: SessionProgress);
     fn summary_delta(&self, delta: SummaryDelta);
     fn segments(&self, segments: SessionSegments);

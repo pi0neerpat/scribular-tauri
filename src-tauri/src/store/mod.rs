@@ -23,9 +23,11 @@ pub use sessions::{
     SessionListItem, SessionPatch, SessionStatus, Timings, AUDIO_RETENTION_DAYS,
     AUDIO_RETENTION_MS, INTERRUPTED,
 };
+pub(crate) use settings::valid_target_app;
 pub use settings::{
-    AppSettings, RecordingSettings, ACTIVE_PROMPT_ID, ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL,
-    SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION, SUMMARY_MODEL_ID,
+    AppSettings, RecordLocation, RecordingSettings, RecordingSource, ACTIVE_PROMPT_ID,
+    ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL, SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION,
+    SUMMARY_MODEL_ID,
 };
 
 #[derive(Debug)]
@@ -48,6 +50,7 @@ pub enum StoreError {
     PromptTooLong,
     /// Unstarring would leave no favourite style (spec 03 R5).
     LastFavourite,
+    InvalidRecordingSource,
 }
 
 impl fmt::Display for StoreError {
@@ -73,6 +76,9 @@ impl fmt::Display for StoreError {
                 prompts::MAX_PROMPT_CHARS
             ),
             Self::LastFavourite => f.write_str("At least one style must remain starred."),
+            Self::InvalidRecordingSource => {
+                f.write_str("Choose In the room or On a call with a valid app name.")
+            }
         }
     }
 }

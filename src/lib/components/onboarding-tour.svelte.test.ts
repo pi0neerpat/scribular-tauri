@@ -42,6 +42,18 @@ describe('onboarding tour', () => {
     expect(target.textContent).toContain('1 of 3');
   });
 
+  it('describes the two supported recording sources in the audio step', () => {
+    const target = document.createElement('div');
+    document.body.append(target);
+    instance = mount(OnboardingTour, { target, props: { onComplete: vi.fn() } });
+    flushSync();
+
+    target.querySelector<HTMLButtonElement>('button:not(.close)')!.click();
+    flushSync();
+
+    expect(target.textContent).toContain('In Settings ▸ Recording, choose Microphone or Microphone and app audio.');
+  });
+
   it.each([
     [true, 'Everything stays on your device.'],
     [false, 'After you finish a recording, the transcript and summary appear here.'],

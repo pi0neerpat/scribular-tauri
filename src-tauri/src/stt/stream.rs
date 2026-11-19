@@ -87,6 +87,7 @@ impl Dedup {
 /// One source's windows: audio in, queued windows out.
 #[derive(Debug, Default)]
 pub struct Stream {
+    offset: usize,
     /// Audio from `base` on; older samples no window needs are dropped.
     audio: Vec<f32>,
     base: usize,
@@ -97,14 +98,29 @@ pub struct Stream {
 }
 
 impl Stream {
+    pub fn at(offset: usize) -> Self {
+        Self {
+            offset,
+            ..Self::default()
+        }
+    }
+
     fn received(&self) -> usize {
         self.base + self.audio.len()
+    }
+
+    pub(crate) fn received_end(&self) -> usize {
+        self.offset + self.received()
+    }
+
+    pub(crate) fn retry(&mut self, window: Window) {
+        self.queue.push_front(window);
     }
 
     fn cut(&mut self, start: usize, end: usize, last: bool) {
         let samples = self.audio[start - self.base..end - self.base].to_vec();
         self.queue.push_back(Window {
-            start,
+            start: self.offset + start,
             samples,
             last,
         });
@@ -156,8 +172,8 @@ impl Stream {
             return Ok(Vec::new());
         }
         let mut segments = stt.transcribe(&window.samples, cancel)?;
+        let end = ms(window.samples.len());
         if !window.last {
-            let end = ms(window.samples.len());
             let overlap = end - ms(OVERLAP);
             while segments
                 .last()
@@ -166,6 +182,12 @@ impl Stream {
                 segments.pop();
             }
         }
+        // A capture span's tail can end at a pause or a source loss.
+        segments.retain_mut(|s| {
+            s.start_ms = s.start_ms.max(0);
+            s.end_ms = s.end_ms.min(end);
+            s.start_ms < s.end_ms
+        });
         Ok(self.dedup.keep(window.offset_ms(), segments))
     }
 }

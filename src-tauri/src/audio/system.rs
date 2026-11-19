@@ -33,7 +33,7 @@ pub struct AudioApp {
 pub trait SystemAudio: Send + Sync {
     fn list_apps(&self) -> Result<Vec<AudioApp>>;
     /// Captures `app`, which must appear in `list_apps`.
-    fn open(&self, app: &str, sink: Sink) -> Result<Box<dyn Capture>>;
+    fn open(&self, app: &str, sink: Sink, cancel: &AtomicBool) -> Result<Box<dyn Capture>>;
 }
 
 pub struct AudioCapCli {
@@ -55,30 +55,97 @@ impl AudioCapCli {
             path: dir.join("AudioCapCLI"),
         })
     }
+
+    fn sources(&self, cancel: &AtomicBool) -> Result<Vec<AudioApp>> {
+        check_cancel(cancel)?;
+        let mut child = Command::new(&self.path)
+            .arg("--list-sources")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| {
+                AudioError::Device(
+                    "Couldn't launch AudioCapCLI. Reinstall Scribular and try again.".into(),
+                )
+            })?;
+        let mut stdout = child.stdout.take().expect("stdout is piped");
+        let mut stderr = child.stderr.take().expect("stderr is piped");
+        let (status, stdout, stderr) = thread::scope(|scope| {
+            let output = scope.spawn(move || {
+                let mut text = Vec::new();
+                stdout.read_to_end(&mut text).map(|_| text)
+            });
+            let errors = scope.spawn(move || {
+                let mut text = Vec::new();
+                stderr.read_to_end(&mut text).map(|_| text)
+            });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let status = (|| loop {
+                check_cancel(cancel)?;
+                if let Some(status) = child.try_wait()? {
+                    break Ok(status);
+                }
+                if Instant::now() >= deadline {
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Listing app audio sources timed out. Refresh the app list to try again.",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(20));
+            })();
+            if status.is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Ok::<_, std::io::Error>((
+                status?,
+                output.join().expect("source stdout reader")?,
+                errors.join().expect("source stderr reader")?,
+            ))
+        })?;
+        let stderr = String::from_utf8_lossy(&stderr);
+        if is_permission_denied(&stderr) {
+            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
+        }
+        if !status.success() {
+            return Err(AudioError::Device(source_list_failure(&stderr).into()));
+        }
+        Ok(parse_sources(&String::from_utf8_lossy(&stdout)))
+    }
+}
+
+fn source_list_failure(stderr: &str) -> &'static str {
+    for line in stderr.lines().map(str::trim) {
+        if line.starts_with("Error reading process list")
+            || line.starts_with("Error reading data")
+            || line.starts_with("Error reading array")
+            || line.starts_with("Failed to read format")
+        {
+            return "Couldn't read macOS audio sources. Check your sound output and refresh the app list.";
+        }
+        if line.starts_with("Usage:") || line.starts_with("dyld[") {
+            return "The installed AudioCapCLI couldn't list sources. Reinstall Scribular and try again.";
+        }
+    }
+    "Couldn't list app audio sources. Refresh the app list or restart Scribular."
+}
+
+fn check_cancel(cancel: &AtomicBool) -> std::io::Result<()> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err(std::io::ErrorKind::Interrupted.into());
+    }
+    Ok(())
 }
 
 impl SystemAudio for AudioCapCli {
     fn list_apps(&self) -> Result<Vec<AudioApp>> {
-        let out = Command::new(&self.path)
-            .arg("--list-sources")
-            .stdin(Stdio::null())
-            .output()?;
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if is_permission_denied(&stderr) {
-            return Err(AudioError::PermissionDenied(Privacy::SystemAudio));
-        }
-        if !out.status.success() {
-            return Err(AudioError::Device(format!(
-                "AudioCapCLI --list-sources failed: {}",
-                stderr.trim()
-            )));
-        }
-        Ok(parse_sources(&String::from_utf8_lossy(&out.stdout)))
+        self.sources(&AtomicBool::new(false))
     }
 
-    fn open(&self, app: &str, mut sink: Sink) -> Result<Box<dyn Capture>> {
+    fn open(&self, app: &str, mut sink: Sink, cancel: &AtomicBool) -> Result<Box<dyn Capture>> {
         let found = self
-            .list_apps()?
+            .sources(cancel)?
             .into_iter()
             .find(|a| a.name == app)
             .ok_or_else(|| AudioError::AppNotFound(app.to_owned()))?;
@@ -86,6 +153,7 @@ impl SystemAudio for AudioCapCli {
             sample_rate: found.sample_rate,
             channels: found.channels,
         };
+        check_cancel(cancel)?;
         let child = Command::new(&self.path)
             .args(["--source", app])
             // Match Electron's spawn default: AudioCapCLI delivers no PCM
@@ -138,17 +206,19 @@ impl SystemAudio for AudioCapCli {
 
         let deadline = Instant::now() + STARTUP_GRACE;
         while Instant::now() < deadline && !flowing.load(Ordering::Relaxed) {
+            check_cancel(cancel)?;
             if capture.child.try_wait()?.is_some() {
                 drop(capture);
                 let errors = errors.lock().unwrap_or_else(|e| e.into_inner());
                 return Err(if is_permission_denied(&errors) {
                     AudioError::PermissionDenied(Privacy::SystemAudio)
                 } else {
-                    AudioError::Device(format!("AudioCapCLI exited: {}", errors.trim()))
+                    AudioError::Device("app audio capture ended during startup".into())
                 });
             }
             thread::sleep(Duration::from_millis(20));
         }
+        check_cancel(cancel)?;
         Ok(Box::new(capture))
     }
 }
@@ -234,6 +304,36 @@ fn parse_sources(stdout: &str) -> Vec<AudioApp> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    struct FakeHelper(PathBuf);
+
+    #[cfg(unix)]
+    impl FakeHelper {
+        fn new(test: &str) -> Self {
+            Self(
+                std::env::temp_dir()
+                    .join(format!("scribular-audio-{test}-{}.sh", std::process::id())),
+            )
+        }
+
+        fn cli(&self, script: &str) -> AudioCapCli {
+            use std::{fs, os::unix::fs::PermissionsExt};
+
+            fs::write(&self.0, script).unwrap();
+            fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700)).unwrap();
+            AudioCapCli {
+                path: self.0.clone(),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for FakeHelper {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
     #[test]
     fn parses_source_lines() {
         let out = "Zoom|48000 Hz, 2 ch|iVBORw0K\nSafari|44100.0 Hz, 1 ch|\n\nMusic\n";
@@ -279,20 +379,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn keeps_sidecar_stdin_open_while_delivering_pcm() {
-        use std::{fs, os::unix::fs::PermissionsExt};
-
-        struct Fixture(PathBuf);
-        impl Drop for Fixture {
-            fn drop(&mut self) {
-                let _ = fs::remove_file(&self.0);
-            }
-        }
-        let fixture = Fixture(
-            std::env::temp_dir().join(format!("scribular-audio-stdin-{}.sh", std::process::id())),
-        );
-        fs::write(
-            &fixture.0,
-            b"#!/bin/sh\n\
+        let fixture = FakeHelper::new("stdin");
+        let cli = fixture.cli(
+            "#!/bin/sh\n\
               if [ \"$1\" = --list-sources ]; then\n\
                 printf 'Fixture|16000 Hz, 1 ch|\\n'\n\
                 exit 0\n\
@@ -300,14 +389,9 @@ mod tests {
               [ -p /dev/stdin ] || { echo 'stdin must stay piped' >&2; exit 1; }\n\
               printf '\\000\\000\\000\\077\\000\\000\\000\\277'\n\
               exec sleep 30\n",
-        )
-        .unwrap();
-        fs::set_permissions(&fixture.0, fs::Permissions::from_mode(0o700)).unwrap();
-        let cli = AudioCapCli {
-            path: fixture.0.clone(),
-        };
+        );
         let (sink, mut consumer) = super::super::ring::ring(64);
-        let capture = cli.open("Fixture", sink).unwrap();
+        let capture = cli.open("Fixture", sink, &AtomicBool::new(false)).unwrap();
         assert_eq!(
             capture.format(),
             Format {
@@ -324,6 +408,48 @@ mod tests {
         assert_eq!(samples, [0.5, -0.5]);
         drop(capture);
         assert!(consumer.drain(&mut Vec::new()).closed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_list_distinguishes_empty_permission_and_safe_failures() {
+        let fixture = FakeHelper::new("list");
+        let cli = AudioCapCli {
+            path: fixture.0.clone(),
+        };
+        assert!(cli
+            .list_apps()
+            .unwrap_err()
+            .to_string()
+            .contains("Reinstall Scribular"));
+
+        let cli = fixture.cli("#!/bin/sh\nexit 0\n");
+        assert!(cli.list_apps().unwrap().is_empty());
+
+        let cli = fixture.cli("#!/bin/sh\necho 'Audio recording permission denied.' >&2\nexit 1\n");
+        assert!(matches!(
+            cli.list_apps(),
+            Err(AudioError::PermissionDenied(Privacy::SystemAudio))
+        ));
+
+        for (stderr, action) in [
+            (
+                "Error reading process list: Private Browser",
+                "Check your sound output",
+            ),
+            ("Usage: Private Browser", "Reinstall Scribular"),
+            (
+                "Unexpected failure from Private Browser",
+                "restart Scribular",
+            ),
+        ] {
+            let cli = fixture.cli(&format!("#!/bin/sh\necho '{stderr}' >&2\nexit 1\n"));
+            let error = cli.list_apps().unwrap_err();
+            assert!(matches!(error, AudioError::Device(_)));
+            let message = error.to_string();
+            assert!(message.contains(action), "{message}");
+            assert!(!message.contains("Private Browser"), "{message}");
+        }
     }
 
     /// Opt-in native check: needs audio-capture permission and an output device.
@@ -350,7 +476,7 @@ mod tests {
             path: root.join("binaries/AudioCapCLI-aarch64-apple-darwin"),
         };
         let (sink, mut consumer) = super::super::ring::ring(1 << 20);
-        let capture = cli.open("afplay", sink).unwrap();
+        let capture = cli.open("afplay", sink, &AtomicBool::new(false)).unwrap();
         let mut samples = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {

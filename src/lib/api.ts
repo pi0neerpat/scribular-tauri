@@ -19,6 +19,9 @@ import type { Privacy } from './types/Privacy';
 import type { Prompt } from './types/Prompt';
 import type { PromptList } from './types/PromptList';
 import type { RecordingSettings } from './types/RecordingSettings';
+import type { RecordingSource } from './types/RecordingSource';
+import type { RecordingState } from './types/RecordingState';
+import type { SessionLevel } from './types/SessionLevel';
 import type { Session } from './types/Session';
 import type { SessionListItem } from './types/SessionListItem';
 import type { SessionPatch } from './types/SessionPatch';
@@ -316,6 +319,14 @@ export function setRecordingSettings(settings: RecordingSettings): Promise<void>
   return invoke<void>('set_recording_settings', { settings });
 }
 
+export function getRecordingSource(): Promise<RecordingSource> {
+  return invoke<RecordingSource>('get_recording_source');
+}
+
+export function setRecordingSource(source: RecordingSource): Promise<void> {
+  return invoke<void>('set_recording_source', { source });
+}
+
 /** Apps playing audio right now, for the system-audio picker. */
 export function listAudioApps(): Promise<AudioApp[]> {
   return invoke<AudioApp[]>('list_audio_apps');
@@ -354,6 +365,26 @@ export function openPrivacySettings(pane: Privacy): Promise<void> {
 /** The id of the session being recorded, if any. */
 export function currentRecording(): Promise<string | null> {
   return invoke<string | null>('current_recording');
+}
+
+export function recordingState(): Promise<RecordingState | null> {
+  return invoke<RecordingState | null>('recording_state');
+}
+
+export function pauseRecording(): Promise<void> {
+  return invoke<void>('pause_recording');
+}
+
+export function resumeRecording(): Promise<void> {
+  return invoke<void>('resume_recording');
+}
+
+export function onRecordingState(handler: (state: RecordingState | null) => void): Promise<UnlistenFn> {
+  return listen<RecordingState | null>('session://recording-state', (event) => handler(event.payload));
+}
+
+export function onSessionLevels(handler: (level: SessionLevel) => void): Promise<UnlistenFn> {
+  return listen<SessionLevel>('session://levels', (event) => handler(event.payload));
 }
 
 export function onSessionProgress(

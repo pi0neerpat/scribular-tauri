@@ -52,7 +52,6 @@
 
   const modes: [InputMode, string][] = [
     ['mic', 'Microphone'],
-    ['system', 'App audio'],
     ['micAndSystem', 'Microphone and app audio'],
   ];
 
@@ -190,7 +189,7 @@
     if (!settings) return;
     try {
       // This settings save leaves the active style unchanged.
-      await setRecordingSettings({ ...settings, promptId: null });
+      await setRecordingSettings({ ...settings, inputMode: settings.targetApp ? settings.inputMode : 'mic', promptId: null });
       error = null;
     } catch (e) {
       error = String(e);

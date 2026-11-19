@@ -5,7 +5,7 @@
 
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 
 struct Shared {
@@ -13,6 +13,7 @@ struct Shared {
     head: AtomicUsize,
     tail: AtomicUsize,
     dropped: AtomicUsize,
+    received: AtomicUsize,
     closed: AtomicBool,
 }
 
@@ -20,12 +21,22 @@ struct Shared {
 pub struct Producer {
     shared: Arc<Shared>,
     tail: usize,
+    align_to: Option<(SampleClock, Arc<OnceLock<(usize, usize)>>)>,
 }
 
 /// The writer side.
 pub struct Consumer {
     shared: Arc<Shared>,
     head: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct SampleClock(Arc<Shared>);
+
+impl SampleClock {
+    pub(crate) fn received(&self) -> usize {
+        self.0.received.load(Ordering::Acquire)
+    }
 }
 
 /// What one [`Consumer::drain`] found besides samples.
@@ -44,18 +55,32 @@ pub fn ring(capacity: usize) -> (Producer, Consumer) {
         head: AtomicUsize::new(0),
         tail: AtomicUsize::new(0),
         dropped: AtomicUsize::new(0),
+        received: AtomicUsize::new(0),
         closed: AtomicBool::new(false),
     });
     (
         Producer {
             shared: Arc::clone(&shared),
             tail: 0,
+            align_to: None,
         },
         Consumer { shared, head: 0 },
     )
 }
 
 impl Producer {
+    pub(crate) fn align_to(&mut self, clock: SampleClock, first: Arc<OnceLock<(usize, usize)>>) {
+        self.align_to = Some((clock, first));
+    }
+
+    fn mark_first_block(&mut self, len: usize) {
+        if len > 0 {
+            if let Some((clock, first)) = self.align_to.take() {
+                let _ = first.set((clock.received(), len));
+            }
+        }
+    }
+
     /// The most samples one block can ever hold.
     pub fn capacity(&self) -> usize {
         self.shared.buf.len()
@@ -65,6 +90,10 @@ impl Producer {
     /// as dropped if it cannot fit. A block larger than capacity can never fit.
     pub fn push(&mut self, samples: &[f32]) {
         if !self.try_push(samples) {
+            self.mark_first_block(samples.len());
+            self.shared
+                .received
+                .fetch_add(samples.len(), Ordering::Release);
             self.shared
                 .dropped
                 .fetch_add(samples.len(), Ordering::Release);
@@ -83,11 +112,15 @@ impl Producer {
         if samples.len() > capacity - self.tail.wrapping_sub(head) {
             return false;
         }
+        self.mark_first_block(samples.len());
         for (i, sample) in samples.iter().enumerate() {
             self.shared.buf[self.tail.wrapping_add(i) & (capacity - 1)]
                 .store(sample.to_bits(), Ordering::Relaxed);
         }
         self.tail = self.tail.wrapping_add(samples.len());
+        self.shared
+            .received
+            .fetch_add(samples.len(), Ordering::Release);
         self.shared.tail.store(self.tail, Ordering::Release);
         true
     }
@@ -100,6 +133,10 @@ impl Drop for Producer {
 }
 
 impl Consumer {
+    pub(crate) fn clock(&self) -> SampleClock {
+        SampleClock(Arc::clone(&self.shared))
+    }
+
     /// Appends all currently buffered samples to `out`.
     pub fn drain(&mut self, out: &mut Vec<f32>) -> Drain {
         // Acquire closed first so a final drain also observes every preceding
