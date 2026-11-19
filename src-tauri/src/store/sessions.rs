@@ -340,6 +340,13 @@ fn sweep(c: &mut Connection, now_ms: i64) -> Result<usize> {
     Ok(deleted)
 }
 
+fn first_completed_note(c: &Connection) -> Result<Option<String>> {
+    Ok(c.query_row(
+        "SELECT id FROM sessions WHERE is_sample = 0 AND status = 'done' AND summary <> '' ORDER BY rowid LIMIT 1",
+        [], |row| row.get(0),
+    ).optional()?)
+}
+
 fn session_not_found(id: &str) -> StoreError {
     StoreError::NotFound(format!("session {id}"))
 }
@@ -573,6 +580,18 @@ impl Store {
         Ok(())
     }
 
+    pub fn first_note_tip_session(&self) -> Result<Option<String>> {
+        self.with(|c| {
+            if super::settings::select(c, "first_note_tip_dismissed")?.is_some() {
+                return Ok(None);
+            }
+            if let Some(id) = super::settings::select(c, "first_note_tip_session")? {
+                return Ok(Some(id));
+            }
+            first_completed_note(c)
+        })
+    }
+
     /// Stores a finished summary with its provenance and timings and moves
     /// the session to `Done`, all in one statement, so a reader never sees
     /// `Done` without the summary that goes with it.
@@ -595,6 +614,9 @@ impl Store {
                 )
                 .optional()?
                 .unwrap_or(false);
+            // Keep the tip attached to the first real note even if other sessions finish out of order.
+            let track_first_note =
+                super::settings::select(&tx, "first_note_tip_dismissed")?.is_none();
             let changed = tx.execute(
                 "UPDATE sessions SET
                      previous_summary = CASE WHEN summary <> '' THEN summary ELSE NULL END,
@@ -614,6 +636,11 @@ impl Store {
             )?;
             if changed == 0 {
                 return Err(session_not_found(id));
+            }
+            if track_first_note {
+                if let Some(first) = first_completed_note(&tx)? {
+                    super::settings::insert(&tx, "first_note_tip_session", &first)?;
+                }
             }
             if recovering {
                 retain_or_delete_audio(&tx, id)?;
@@ -892,7 +919,24 @@ impl Store {
     /// Deletes the session; segments and audio go with it via `ON DELETE
     /// CASCADE`. Returns whether a session existed.
     pub fn delete_session(&self, id: &str) -> Result<bool> {
-        self.with(|c| Ok(c.execute("DELETE FROM sessions WHERE id = ?1", [id])? > 0))
+        self.with(|c| {
+            let tx = c.transaction()?;
+            let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", [id])? > 0;
+            if deleted
+                && super::settings::select(&tx, "first_note_tip_session")?.as_deref() == Some(id)
+            {
+                if let Some(first) = first_completed_note(&tx)? {
+                    super::settings::insert(&tx, "first_note_tip_session", &first)?;
+                } else {
+                    tx.execute(
+                        "DELETE FROM settings WHERE key = ?1",
+                        ["first_note_tip_session"],
+                    )?;
+                }
+            }
+            tx.commit()?;
+            Ok(deleted)
+        })
     }
 
     pub fn vacuum(&self) -> Result<()> {

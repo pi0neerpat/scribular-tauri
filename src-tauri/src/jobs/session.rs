@@ -203,6 +203,14 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    pub(crate) fn while_not_recording<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let recording = lock(&self.inner.recording);
+        if recording.is_some() {
+            return None;
+        }
+        Some(operation())
+    }
+
     pub fn is_recording(&self) -> bool {
         lock(&self.inner.recording).is_some()
     }
@@ -360,6 +368,8 @@ impl Recorder {
                     return Err(error);
                 }
             };
+        inner.jobs.cancel_practice();
+        inner.events.recording_starting();
         lock(&inner.transcript_waiting).clear();
         lock(&inner.transcript_started).clear();
         inner.events.recording_changed(true, settings.multi_speaker);

@@ -5,6 +5,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::coach::{compile, StyleSpec};
+
 use super::{
     settings::{self, ACTIVE_PROMPT_ID},
     Result, Store, StoreError,
@@ -25,7 +27,9 @@ pub struct Prompt {
     pub description: String,
     pub text: String,
     pub is_default: bool,
-    pub starred: bool,
+    pub show_in_style_menu: bool,
+    #[serde(default)]
+    pub style_spec: Option<StyleSpec>,
 }
 
 #[derive(Deserialize)]
@@ -39,16 +43,23 @@ pub(super) fn defaults() -> Result<Defaults> {
     Ok(serde_json::from_str(DEFAULT_PROMPTS_JSON)?)
 }
 
-pub(super) fn insert(conn: &Connection, p: &Prompt) -> Result<()> {
+pub(super) fn insert_initial(conn: &Connection, p: &Prompt) -> Result<()> {
     conn.execute(
         "INSERT INTO prompts (id, name, description, text, is_default, starred)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![p.id, p.name, p.description, p.text, p.is_default, p.starred],
+        params![
+            p.id,
+            p.name,
+            p.description,
+            p.text,
+            p.is_default,
+            p.show_in_style_menu
+        ],
     )?;
     Ok(())
 }
 
-const COLUMNS: &str = "id, name, description, text, is_default, starred";
+const COLUMNS: &str = "id, name, description, text, is_default, starred, style_spec";
 
 fn from_row(row: &Row) -> rusqlite::Result<Prompt> {
     Ok(Prompt {
@@ -57,7 +68,19 @@ fn from_row(row: &Row) -> rusqlite::Result<Prompt> {
         description: row.get(2)?,
         text: row.get(3)?,
         is_default: row.get(4)?,
-        starred: row.get(5)?,
+        show_in_style_menu: row.get(5)?,
+        style_spec: row
+            .get::<_, Option<String>>(6)?
+            .map(|json| {
+                serde_json::from_str(&json).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        6,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    )
+                })
+            })
+            .transpose()?,
     })
 }
 
@@ -86,9 +109,18 @@ impl Store {
         self.get_setting(ACTIVE_PROMPT_ID)
     }
 
-    /// A custom, starred style (R3). The editor only calls this on first
+    /// A custom style (R3). The editor only calls this on first
     /// Save, so `text` is checked like an update.
     pub fn create_prompt(&self, name: &str, text: &str) -> Result<Prompt> {
+        self.create_prompt_with_visibility(name, text, true)
+    }
+
+    pub fn create_prompt_with_visibility(
+        &self,
+        name: &str,
+        text: &str,
+        show_in_style_menu: bool,
+    ) -> Result<Prompt> {
         let text = checked_text(text)?;
         self.with(|c| {
             let p = Prompt {
@@ -97,14 +129,15 @@ impl Store {
                 description: String::new(),
                 text: text.into(),
                 is_default: false,
-                starred: true,
+                show_in_style_menu,
+                style_spec: None,
             };
-            insert(c, &p)?;
+            insert_initial(c, &p)?;
             Ok(p)
         })
     }
 
-    /// Copies any style as a custom, starred `"<name> (Copy)"`.
+    /// Copies any style as a custom `"<name> (Copy)"`.
     pub fn duplicate_prompt(&self, id: &str) -> Result<Prompt> {
         let src = self.get_prompt(id)?.ok_or_else(|| not_found(id))?;
         self.with(|c| {
@@ -112,23 +145,92 @@ impl Store {
                 id: new_id(c)?,
                 name: format!("{} (Copy)", src.name),
                 is_default: false,
-                starred: true,
+                show_in_style_menu: true,
+                style_spec: None,
                 ..src
             };
-            insert(c, &p)?;
+            insert_initial(c, &p)?;
             Ok(p)
         })
     }
 
     pub fn update_prompt(&self, id: &str, name: &str, text: &str) -> Result<()> {
+        self.edit_prompt(id, name, text, None, false)
+    }
+
+    pub fn edit_prompt(
+        &self,
+        id: &str,
+        name: &str,
+        text: &str,
+        show_in_style_menu: Option<bool>,
+        detach_coach: bool,
+    ) -> Result<()> {
         let text = checked_text(text)?;
         self.with(|c| {
             custom(c, id)?;
-            c.execute(
-                "UPDATE prompts SET name = ?2, text = ?3 WHERE id = ?1",
-                params![id, clean_name(name), text],
+            let changed = c.execute(
+                "UPDATE prompts SET name = ?2, text = ?3, starred = coalesce(?4, starred),
+                     style_spec = CASE WHEN text = ?3 THEN style_spec ELSE NULL END
+                 WHERE id = ?1 AND (style_spec IS NULL OR text = ?3 OR ?5)",
+                params![id, clean_name(name), text, show_in_style_menu, detach_coach],
             )?;
+            if changed == 0 {
+                return Err(StoreError::DetachCoachStyle);
+            }
             Ok(())
+        })
+    }
+
+    pub(crate) fn save_coach_style(
+        &self,
+        original: Option<&Prompt>,
+        name: &str,
+        spec: &StyleSpec,
+        use_next: bool,
+    ) -> Result<String> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
+            return Err(StoreError::CoachStyle(
+                "Enter a style name of 1 to 100 characters.",
+            ));
+        }
+        let text = compile(spec).map_err(StoreError::CoachStyle)?;
+        let json = serde_json::to_string(spec)?;
+        self.with(|c| {
+            let tx = c.transaction()?;
+            let id = if let Some(original) = original {
+                let previous = original.style_spec.as_ref().ok_or(
+                    StoreError::CoachStyle("This style is no longer available to adjust."),
+                )?;
+                let current = tx.query_row(
+                    &format!("SELECT {COLUMNS} FROM prompts WHERE id = ?1"),
+                    [&original.id],
+                    from_row,
+                ).optional()?;
+                if current.is_none_or(|p| p.is_default || p.name != original.name
+                        || p.style_spec.as_ref() != Some(previous) || p.text != original.text) {
+                    return Err(StoreError::CoachStyle("This style changed. Reopen it before adjusting."));
+                }
+                tx.execute(
+                    "UPDATE prompts SET name = ?2, text = ?3, style_spec = ?4 WHERE id = ?1",
+                    params![original.id, name, text, json],
+                )?;
+                original.id.clone()
+            } else {
+                let id = new_id(&tx)?;
+                tx.execute(
+                    "INSERT INTO prompts (id, name, description, text, is_default, starred, style_spec)
+                     VALUES (?1, ?2, '', ?3, 0, 1, ?4)",
+                    params![id, name, text, json],
+                )?;
+                id
+            };
+            if use_next {
+                set_active(&tx, &id)?;
+            }
+            tx.commit()?;
+            Ok(id)
         })
     }
 
@@ -144,28 +246,20 @@ impl Store {
         })
     }
 
-    /// At least one style stays starred (R5); unstarring the active style
-    /// moves active to the first remaining favourite (R6).
-    pub fn set_prompt_starred(&self, id: &str, starred: bool) -> Result<()> {
+    pub fn set_prompt_visibility(&self, id: &str, show_in_style_menu: bool) -> Result<()> {
         self.with(|c| {
-            let tx = c.transaction()?;
-            let changed = tx.execute(
+            let changed = c.execute(
                 "UPDATE prompts SET starred = ?2 WHERE id = ?1",
-                params![id, starred],
+                params![id, show_in_style_menu],
             )?;
             if changed == 0 {
                 return Err(not_found(id));
             }
-            if starred_count(&tx)? == 0 {
-                return Err(StoreError::LastFavourite);
-            }
-            repair_active(&tx)?;
-            tx.commit()?;
             Ok(())
         })
     }
 
-    /// Makes `id` the style new recordings use, starring it if needed (R7).
+    /// Makes an existing style active for new recordings.
     pub fn set_active_prompt(&self, id: &str) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
@@ -176,7 +270,7 @@ impl Store {
     }
 
     /// R9: brings the built-in rows in line with the embedded JSON. Missing
-    /// ids are inserted unstarred; existing ones keep `starred`. Custom rows
+    /// ids are inserted hidden; existing ones keep their visibility. Custom rows
     /// are never touched.
     pub fn sync_builtins(&self) -> Result<()> {
         let defaults = defaults()?;
@@ -243,33 +337,21 @@ fn custom(c: &Connection, id: &str) -> Result<()> {
     }
 }
 
-fn starred_count(c: &Connection) -> Result<i64> {
-    Ok(
-        c.query_row("SELECT count(*) FROM prompts WHERE starred", [], |r| {
-            r.get(0)
-        })?,
-    )
-}
-
 pub(super) fn set_active(c: &Connection, id: &str) -> Result<()> {
-    if c.execute("UPDATE prompts SET starred = 1 WHERE id = ?1", [id])? == 0 {
-        return Err(not_found(id));
-    }
+    c.query_row("SELECT 1 FROM prompts WHERE id = ?1", [id], |_| Ok(()))
+        .optional()?
+        .ok_or_else(|| not_found(id))?;
     settings::insert(c, ACTIVE_PROMPT_ID, id)
 }
 
-/// R6: the active id names an existing, starred style. Otherwise it moves to
-/// the first favourite in list order, or, with none left, the first style,
-/// which is starred.
 fn repair_active(c: &Connection) -> Result<()> {
-    let active_ok = settings::select(c, ACTIVE_PROMPT_ID)?.is_some_and(|id| {
-        c.query_row(
-            "SELECT 1 FROM prompts WHERE id = ?1 AND starred",
-            [&id],
-            |_| Ok(()),
-        )
-        .is_ok()
-    });
+    let active_ok = match settings::select(c, ACTIVE_PROMPT_ID)? {
+        Some(id) => c
+            .query_row("SELECT 1 FROM prompts WHERE id = ?1", [&id], |_| Ok(()))
+            .optional()?
+            .is_some(),
+        None => false,
+    };
     if active_ok {
         return Ok(());
     }
@@ -291,14 +373,109 @@ mod tests {
     use super::*;
     use crate::store::key::MemoryKeyStore;
 
-    /// AS7: edited built-in text is restored with its star kept, and a
-    /// built-in id missing from the DB is inserted unstarred.
+    #[test]
+    fn coach_save_and_detach_are_atomic_and_leave_saved_notes_alone() {
+        let path =
+            std::env::temp_dir().join(format!("scribular-coach-style-{}.db", std::process::id()));
+        let keys = MemoryKeyStore::with_key([8; 32]);
+        let store = Store::open(&path, &keys).unwrap();
+        let existing_active = store.get_active_prompt_id().unwrap().unwrap();
+        let session = store
+            .create_session(&crate::store::NewSession {
+                title: "Existing note".into(),
+                input_mode: crate::store::InputMode::Mic,
+                prompt_id: Some(existing_active.clone()),
+                model_id: None,
+            })
+            .unwrap();
+        store
+            .finish_summary(
+                &session.id,
+                "Existing summary.",
+                &existing_active,
+                "test",
+                &Default::default(),
+            )
+            .unwrap();
+        let mut spec = crate::coach::test_style();
+        let id = store
+            .save_coach_style(None, "Made here", &spec, false)
+            .unwrap();
+        assert_eq!(
+            store.get_active_prompt_id().unwrap(),
+            Some(existing_active.clone())
+        );
+        let created = store.get_prompt(&id).unwrap().unwrap();
+        assert!(created.show_in_style_menu);
+        assert_eq!(created.style_spec.as_ref(), Some(&spec));
+
+        store
+            .edit_prompt(&id, "Renamed", &created.text, Some(false), false)
+            .unwrap();
+        let edited = store.get_prompt(&id).unwrap().unwrap();
+        assert_eq!(edited.style_spec, created.style_spec);
+        assert!(!edited.show_in_style_menu);
+        assert!(matches!(
+            store.edit_prompt(&id, "Renamed", "detached", Some(true), false),
+            Err(StoreError::DetachCoachStyle)
+        ));
+        assert_eq!(store.get_prompt(&id).unwrap(), Some(edited.clone()));
+
+        spec.compiler_version += 1;
+        assert!(store
+            .save_coach_style(Some(&edited), "Invalid", &spec, true)
+            .is_err());
+        assert_eq!(store.get_active_prompt_id().unwrap(), Some(existing_active));
+        assert_eq!(store.get_prompt(&id).unwrap(), Some(edited.clone()));
+        spec.compiler_version -= 1;
+        spec.sentence_max = 3;
+        assert_eq!(
+            store
+                .save_coach_style(Some(&edited), "Adjusted", &spec, true)
+                .unwrap(),
+            id
+        );
+        assert_eq!(
+            store.get_active_prompt_id().unwrap().as_deref(),
+            Some(id.as_str())
+        );
+        let adjusted = store.get_prompt(&id).unwrap().unwrap();
+        assert_eq!(adjusted.style_spec.as_ref(), Some(&spec));
+        assert!(!adjusted.show_in_style_menu);
+        assert_ne!(adjusted.text, created.text);
+        assert!(store
+            .save_coach_style(Some(&edited), "Stale", &spec, true)
+            .is_err());
+        assert_eq!(
+            store.get_session(&session.id).unwrap().unwrap().summary,
+            "Existing summary."
+        );
+
+        store
+            .edit_prompt(&id, "Adjusted", "detached", None, true)
+            .unwrap();
+        drop(store);
+        let reopened = Store::open(&path, &keys).unwrap();
+        assert!(reopened
+            .get_prompt(&id)
+            .unwrap()
+            .unwrap()
+            .style_spec
+            .is_none());
+        drop(reopened);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
+
+    /// AS7: edited built-in text is restored with its visibility kept, and a
+    /// built-in id missing from the DB is inserted hidden.
     #[test]
     fn sync_restores_built_in_text_and_inserts_missing_ids() {
         let path = std::env::temp_dir().join(format!("scribular-sync-{}.db", std::process::id()));
         let s = Store::open(&path, &MemoryKeyStore::with_key([7; 32])).unwrap();
         let shipped = defaults().unwrap().prompts;
-        s.set_prompt_starred(&shipped[1].id, true).unwrap();
+        s.set_prompt_visibility(&shipped[1].id, true).unwrap();
         s.with(|c| {
             c.execute(
                 "UPDATE prompts SET text = 'tampered' WHERE id = ?1",
@@ -313,10 +490,10 @@ mod tests {
 
         let restored = s.get_prompt(&shipped[1].id).unwrap().unwrap();
         assert_eq!(restored.text, shipped[1].text);
-        assert!(restored.starred);
+        assert!(restored.show_in_style_menu);
         let reinserted = s.get_prompt(&shipped[2].id).unwrap().unwrap();
         assert_eq!(reinserted.text, shipped[2].text);
-        assert!(!reinserted.starred && reinserted.is_default);
+        assert!(!reinserted.show_in_style_menu && reinserted.is_default);
         drop(s);
         for suffix in ["", "-wal", "-shm"] {
             let mut p = path.clone().into_os_string();

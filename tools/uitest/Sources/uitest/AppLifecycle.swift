@@ -58,6 +58,9 @@ final class AppLifecycle {
                 if let url = ProcessInfo.processInfo.environment["SCRIBULAR_LLM_URL"], !url.isEmpty {
                     configuration.environment = ["SCRIBULAR_LLM_URL": url]
                 }
+                if let skip = ProcessInfo.processInfo.environment["SCRIBULAR_SKIP_LICENSE"], !skip.isEmpty {
+                    configuration.environment["SCRIBULAR_SKIP_LICENSE"] = skip
+                }
                 NSWorkspace.shared.openApplication(at: appPath, configuration: configuration) { application, error in
                     result.set(app: application, error: error)
                     completed.signal()

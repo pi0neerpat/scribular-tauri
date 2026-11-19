@@ -16,6 +16,7 @@ const MIGRATIONS: &[Migration] = &[
     v5_diarization,
     v6_sample_sessions,
     v7_summary_undo,
+    v8_style_spec,
 ];
 
 fn v6_sample_sessions(tx: &Transaction) -> Result<()> {
@@ -60,6 +61,11 @@ fn v7_summary_undo(tx: &Transaction) -> Result<()> {
          ALTER TABLE sessions ADD COLUMN previous_prompt_id TEXT;
          ALTER TABLE sessions ADD COLUMN previous_model_id TEXT;",
     )?;
+    Ok(())
+}
+
+fn v8_style_spec(tx: &Transaction) -> Result<()> {
+    tx.execute_batch("ALTER TABLE prompts ADD COLUMN style_spec TEXT;")?;
     Ok(())
 }
 
@@ -131,7 +137,7 @@ fn v1_initial(tx: &Transaction) -> Result<()> {
     )?;
     let defaults = prompts::defaults()?;
     for p in &defaults.prompts {
-        prompts::insert(tx, p)?;
+        prompts::insert_initial(tx, p)?;
     }
     settings::insert(tx, settings::ACTIVE_PROMPT_ID, &defaults.active_prompt_id)?;
     Ok(())
@@ -141,6 +147,33 @@ fn v1_initial(tx: &Transaction) -> Result<()> {
 mod tests {
     use super::v6_sample_sessions;
     use rusqlite::Connection;
+
+    #[test]
+    fn v8_preserves_existing_style_visibility_and_leaves_metadata_null() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        for (version, migration) in (1u32..).zip(&super::MIGRATIONS[..7]) {
+            let tx = conn.transaction().unwrap();
+            migration(&tx).unwrap();
+            tx.pragma_update(None, "user_version", version).unwrap();
+            tx.commit().unwrap();
+        }
+        conn.execute(
+            "INSERT INTO prompts VALUES ('legacy', 'Existing', '', 'style text', 0, 1)",
+            [],
+        )
+        .unwrap();
+        super::migrate(&mut conn).unwrap();
+        let (text, shown, json): (String, bool, Option<String>) = conn
+            .query_row(
+                "SELECT text, starred, style_spec FROM prompts WHERE id = 'legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(text, "style text");
+        assert!(shown);
+        assert!(json.is_none());
+    }
 
     #[test]
     fn v6_marks_existing_sessions_as_non_samples_without_changing_them() {

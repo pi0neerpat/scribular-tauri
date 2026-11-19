@@ -1,7 +1,81 @@
+use std::{collections::HashMap, sync::Mutex};
+
 use tauri::{
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem as P, Submenu},
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+
+#[derive(Default)]
+struct CoachMenuState(Mutex<Option<HashMap<String, bool>>>);
+
+fn set_enabled(
+    app: &AppHandle,
+    item: &tauri::menu::MenuItem<tauri::Wry>,
+    enabled: bool,
+) -> tauri::Result<()> {
+    let states = app.state::<CoachMenuState>();
+    let mut states = states.0.lock().unwrap_or_else(|poison| poison.into_inner());
+    if let Some(baseline) = states.as_mut() {
+        baseline.insert(item.id().as_ref().to_owned(), enabled);
+        item.set_enabled(false)?;
+    } else {
+        item.set_enabled(enabled)?;
+    }
+    Ok(())
+}
+
+fn overlay_coach_menu(app: &AppHandle, open: bool) {
+    let Some(menu) = app.menu() else { return };
+    let states = app.state::<CoachMenuState>();
+    let mut states = states.0.lock().unwrap_or_else(|poison| poison.into_inner());
+    if open {
+        if states.is_none() {
+            let mut baseline = HashMap::new();
+            for top in menu.items().unwrap_or_default() {
+                if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                    for entry in sub.items().unwrap_or_default() {
+                        if let tauri::menu::MenuItemKind::MenuItem(item) = entry {
+                            let id = item.id().as_ref().to_owned();
+                            if id.starts_with("shell-")
+                                && !matches!(id.as_str(), "shell-close" | "shell-quit")
+                            {
+                                if let Ok(enabled) = item.is_enabled() {
+                                    baseline.insert(id, enabled);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            *states = Some(baseline);
+        }
+        for top in menu.items().unwrap_or_default() {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                for entry in sub.items().unwrap_or_default() {
+                    if let tauri::menu::MenuItemKind::MenuItem(item) = entry {
+                        if item.id().as_ref().starts_with("shell-")
+                            && !matches!(item.id().as_ref(), "shell-close" | "shell-quit")
+                        {
+                            let _ = item.set_enabled(false);
+                        }
+                    }
+                }
+            }
+        }
+    } else if let Some(baseline) = states.take() {
+        for top in menu.items().unwrap_or_default() {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                for entry in sub.items().unwrap_or_default() {
+                    if let tauri::menu::MenuItemKind::MenuItem(item) = entry {
+                        if let Some(enabled) = baseline.get(item.id().as_ref()) {
+                            let _ = item.set_enabled(*enabled);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub fn open_settings(app: &AppHandle, pane: &str) -> Result<(), String> {
     let pane = match pane {
@@ -56,6 +130,9 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
                 }
             }
         }
+    }
+    if crate::coach::is_open(app) && !matches!(id, "shell-close" | "shell-quit") {
+        return;
     }
     if id == "shell-settings" || id == "shell-shortcuts" {
         let pane = if id == "shell-shortcuts" {
@@ -115,12 +192,32 @@ pub fn set_state(
         for top in menu.items().map_err(|e| e.to_string())? {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {
                 if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = sub.get(id) {
-                    item.set_enabled(enabled).map_err(|e| e.to_string())?;
+                    set_enabled(app, &item, enabled).map_err(|e| e.to_string())?;
                 }
             }
         }
     }
     Ok(())
+}
+
+pub fn set_coach_state(app: &AppHandle, enabled: bool, open: bool, reason: Option<&str>) {
+    overlay_coach_menu(app, open);
+    let Some(menu) = app.menu() else { return };
+    for (id, title) in [
+        ("shell-example-style", "New Style from Example Note…"),
+        ("shell-coach", "Make a Note Style from an Example…"),
+    ] {
+        for top in menu.items().unwrap_or_default() {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = sub.get(id) {
+                    let text =
+                        reason.map_or_else(|| title.into(), |reason| format!("{title} — {reason}"));
+                    let _ = item.set_text(text);
+                    let _ = set_enabled(app, &item, enabled);
+                }
+            }
+        }
+    }
 }
 
 fn item(
@@ -135,6 +232,7 @@ fn item(
 }
 
 pub fn build(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
+    app.manage(CoachMenuState::default());
     let menu = Menu::new(app)?;
     let scribular = Submenu::new(app, "Scribular", true)?;
     scribular.append(&P::about(app, Some("About Scribular"), None)?)?;

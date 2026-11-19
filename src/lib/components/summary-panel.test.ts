@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { fromStore, writable } from 'svelte/store';
+import { COACH_CONTEXT, type CoachContext } from '../coach-context';
 import type { Session } from '../types/Session';
 
 const api = vi.hoisted(() => ({
@@ -22,7 +24,7 @@ const session: Session = {
   speakerMap: null, diarizationState: 'none', summary: 'saved summary', durationMs: 1000, timings: null,
   hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
 };
-const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, starred: true }], activeId: 'prompt-1', createdId: null };
+const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, showInStyleMenu: true, styleSpec: null }], activeId: 'prompt-1', createdId: null };
 
 afterEach(() => accessState.set(null));
 
@@ -56,6 +58,45 @@ it('copies the saved summary, reports success, and keeps streamed regeneration t
   expect(target.textContent).toContain('saved summary');
   expect(target.textContent).toContain('new preview');
   unmount(app);
+});
+
+it('streams regeneration on the record panel after the first summary arrives in place', async () => {
+  api.delta = undefined;
+  api.regenerateSummary.mockClear().mockResolvedValue(undefined);
+  const current = writable<Session>({ ...session, status: 'awaitingModel', summary: '' });
+  const state = fromStore(current);
+  const coach: CoachContext = {
+    availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
+    open: vi.fn(), firstNoteTip: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+  };
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { get session() { return state.current; } }, context: new Map([[COACH_CONTEXT, coach]]) });
+  const named = (label: string) => [...target.querySelectorAll('button')].find((b) => b.textContent === label);
+  try {
+    expect(named('Regenerate')).toBeUndefined();
+    // The completed first summary replaces the pending session without remounting the panel.
+    const delta = (sessionId: string, text: string) => api.delta?.({ sessionId, text });
+    delta(session.id, 'first pass');
+    current.set(session);
+    await vi.waitFor(() => expect(named('Regenerate')?.disabled).toBe(false));
+    expect(target.textContent).not.toContain('New summary preview');
+    named('Regenerate')!.click();
+    await vi.waitFor(() => expect(api.regenerateSummary).toHaveBeenCalledWith(session.id, 'prompt-1'));
+    current.set({ ...session, status: 'summarizing' });
+    delta('other-session', 'unrelated delta');
+    delta(session.id, 'regeneration delta');
+    flushSync();
+    expect(named('Stop')).toBeDefined();
+    expect(target.textContent).toContain('New summary preview');
+    expect(target.textContent).toContain('regeneration delta');
+    expect(target.textContent).not.toContain('unrelated delta');
+    current.set({ ...session, summary: 'regenerated summary' });
+    flushSync();
+    expect(target.textContent).toContain('regenerated summary');
+    expect(target.textContent).not.toContain('New summary preview');
+  } finally {
+    unmount(app);
+  }
 });
 
 it('uses the panel copy action and delete confirmation for menu requests', async () => {

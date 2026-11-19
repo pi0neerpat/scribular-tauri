@@ -1,0 +1,31 @@
+# Automated sample-to-style flow. Use a supported Mac with the summary download available.
+launch
+click "Close tour"
+expect-not "Getting Scribular ready" timeout 300s
+click "Note Styles"
+click "Use a Sample Note" timeout 300s
+click "DAP"
+click "Continue"
+expect "Should each section have 2 sentences"
+click "Skip, use your best guess"
+expect "Should Plan appear only when discussed?"
+click "Only when discussed"
+expect "Matches your style" timeout 60s
+expect "Practice session, not a real client"
+click "Make it shorter"
+expect "Which version would you like to keep?" timeout 60s
+click "Before"
+click "After"
+click "Keep the Old One"
+expect "I’ll keep the earlier version"
+click "Make it shorter" index 2
+expect "Which version would you like to keep?" timeout 60s
+expect "Use This" timeout 60s
+click "Use This"
+expect "Done. I’ll use that change. Anything else?" timeout 30s
+click "Continue"
+expect "Use it for my next sessions"
+click "Save" index 3
+expect "Made with the coach"
+expect "My note style"
+quit

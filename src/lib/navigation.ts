@@ -8,4 +8,6 @@ export function navigationLockedBy(models: ModelProgress[]): boolean {
   return models.some((m) => m.state === 'downloading' || m.state === 'verifying');
 }
 
-export function navigationDisabled(locked: boolean): boolean { return locked; }
+export function navigationDisabled(locked: boolean, target: AppView, current: AppView): boolean {
+  return locked && target !== 'styles' && !(target === 'record' && current === 'styles');
+}

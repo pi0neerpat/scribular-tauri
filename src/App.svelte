@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, setContext, tick } from 'svelte';
   import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, onAppSettingsChanged, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import FirstRun from './lib/components/FirstRun.svelte';
@@ -17,6 +17,12 @@
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
   import { accessState, allows } from './lib/license';
+
+  import { COACH_CONTEXT, type CoachContext, type CoachTarget } from './lib/coach-context';
+  import { dismissFirstNoteTip, getFirstNoteTipSession, onCoachCancelled, subscribeCoachAvailability } from './lib/api';
+  import NoteStyleCoach from './lib/components/NoteStyleCoach.svelte';
+  import type { CoachAvailability } from './lib/types/CoachAvailability';
+  import type { PromptList } from './lib/types/PromptList';
 
   // Asked before anything that needs the store mounts.
   let gate = $state<'loading' | 'open' | { locked: LockReason }>('loading');
@@ -42,8 +48,93 @@
   let recordView = $state<{ copyResultNote: () => Promise<void>; refreshAfterDeletion: () => Promise<void> } | undefined>();
   let recordHasNote = $state(false);
 
+  let coach = $state<CoachTarget | null>(null);
+  let coachAvailability = $state<CoachAvailability | null>(null);
+  let coachInterrupted = $state(false);
+  let pendingCoachInterruption = false;
+  let firstNoteTipId = $state<string | null>(null);
+  let tipDismissed = false;
+  let sharedStyles = $state<PromptList | null>(null);
+  let coachOpener: HTMLElement | null = null;
+  let coachDraftId: string | null = null;
+  let cancelledDraftId: string | null = null;
+  let coachOpened: (() => void) | undefined;
+
+  setContext<CoachContext>(COACH_CONTEXT, {
+    availability: () => coachAvailability,
+    open: openCoach,
+    firstNoteTip: (id) => firstNoteTipId === id,
+    dismissTip: dismissTip,
+    styles: () => sharedStyles,
+    updateStyles: (styles) => (sharedStyles = styles),
+  });
+
+  async function loadFirstNoteTip() {
+    if (tipDismissed || firstNoteTipId) return;
+    try {
+      const id = await getFirstNoteTipSession();
+      if (!tipDismissed) firstNoteTipId = id;
+    } catch {}
+  }
+
+  function dismissTip() {
+    tipDismissed = true;
+    firstNoteTipId = null;
+    void dismissFirstNoteTip().catch(() => { tipDismissed = false; void loadFirstNoteTip(); });
+  }
+
+  function openCoach(target: CoachTarget, opener?: HTMLElement, onOpen?: () => void) {
+    if (coach || gate !== 'open' || !coachAvailability || coachAvailability.reason) return;
+    const open = () => {
+      if (coach || coachAvailability?.reason !== null) return;
+      coachOpener = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      coachDraftId = null;
+      cancelledDraftId = null;
+      coachOpened = onOpen;
+      coach = target;
+    };
+    if (view === 'styles' && noteStyles) noteStyles.requestLeave(open, opener);
+    else open();
+  }
+
+  function closeCoach(restoreFocus = true) {
+    const opener = coachOpener;
+    coach = null;
+    coachOpener = null;
+    coachDraftId = null;
+    coachOpened = undefined;
+    if (restoreFocus) void tick().then(() => { if (opener?.isConnected && !opener.closest('[hidden]')) opener.focus(); });
+  }
+
+  function coachCancelled(id: string, interrupted: boolean) {
+    if (!coach || (coachDraftId && id !== coachDraftId)) return;
+    cancelledDraftId = id;
+    if (coachDraftId === id) closeCoach(!interrupted);
+    if (interrupted) {
+      if (recording) coachInterrupted = true;
+      else pendingCoachInterruption = true;
+      navigation.update((state) => ({ ...state, view: 'record' }));
+    }
+  }
+
+  $effect(() => {
+    if (gate !== 'open') return;
+    let mounted = true;
+    const availability = subscribeCoachAvailability((state) => {
+      if (mounted) coachAvailability = state;
+    }).catch((e) => { if (mounted) error = String(e); return () => {}; });
+    const cancelled = onCoachCancelled(({ draftId, reason }) => {
+      if (mounted) coachCancelled(draftId, reason === 'recording');
+    });
+    return () => {
+      mounted = false;
+      void availability.then((off) => off()).catch(() => {});
+      void cancelled.then((off) => off()).catch(() => {});
+    };
+  });
+
   function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
-    if (navigationDisabled(navigationLocked)) return;
+    if (coach || navigationDisabled(navigationLocked, next, view)) return;
     const action = () => { navigation.update((n) => ({ ...n, view: next })); after?.(); };
     if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
     else action();
@@ -63,16 +154,19 @@
   }
 
   onMount(() => {
-    const showRecord = () => navigate('record');
+    const showRecord = () => { pendingCoachInterruption = false; navigate('record'); };
     window.addEventListener('tray-start-failed', showRecord);
     const find = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      if (!coach && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault(); history?.focusSearch();
       }
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
+      if (coach) return;
       switch (id) {
+        case 'shell-example-style':
+        case 'shell-coach': openCoach({}); break;
         case 'shell-find': history?.focusSearch(); break;
         case 'shell-manage-styles': navigate('styles'); break;
         case 'shell-blank-style': if (!recording && allows($accessState)) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
@@ -104,6 +198,7 @@
     });
     const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
     const closeRequest = onWindowCloseRequested(() => {
+      if (coach) closeCoach(false);
       const hide = () => { void setMainWindowVisible(false).catch((e) => (error = String(e))); };
       if (view === 'styles' && noteStyles) noteStyles.requestLeave(hide);
       else hide();
@@ -122,9 +217,14 @@
       refreshInterrupted().catch(() => {});
       recordingEvents++;
       latestProgress = p;
+      if (p.state === 'done') void loadFirstNoteTip();
       if (p.state === 'recording') {
         recordingSessionId = p.sessionId;
         recording = true;
+        if (pendingCoachInterruption) {
+          pendingCoachInterruption = false;
+          coachInterrupted = true;
+        }
       } else if (p.sessionId === recordingSessionId) recording = false;
     });
     progress.then(() => {
@@ -139,6 +239,7 @@
       .then((reason) => {
         gate = reason ? { locked: reason } : 'open';
         if (!reason) {
+          void loadFirstNoteTip();
           takeEncryptionNotice()
             .then((n) => (notice = n))
             .catch((e) => (error = String(e)));
@@ -217,6 +318,9 @@
     <!-- Keep the recorder mounted so its progress survives navigation. -->
     <div hidden={view !== 'record'}><RecordView bind:this={recordView}
         {speechReady}
+        {coachInterrupted}
+        onDismissCoachInterruption={() => (coachInterrupted = false)}
+        onStartFailed={() => (pendingCoachInterruption = false)}
         active={view === 'record'}
         onEnterLicense={openLicense}
         onResultNote={(hasNote) => (recordHasNote = hasNote)}
@@ -228,6 +332,17 @@
   <p>Heartbeat: {beats}</p>
   {#if error && version}<p role="alert">{error}</p>{/if}
 </main>
+{#if coach}
+  <NoteStyleCoach target={coach} availability={coachAvailability} onClose={() => closeCoach()}
+    onDraft={(id) => {
+      if (!coach || cancelledDraftId === id) { closeCoach(false); return false; }
+      coachDraftId = id;
+      coachOpened?.();
+      return true;
+    }}
+    onSaved={(styles) => { sharedStyles = styles; closeCoach(); }}
+  />
+{/if}
 {:else if error}
   <p role="alert">{error}</p>
 {/if}

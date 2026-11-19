@@ -1,4 +1,6 @@
 pub mod audio;
+pub mod coach;
+
 pub mod commands;
 pub mod diag;
 pub mod diarize;
@@ -142,6 +144,8 @@ pub fn run() {
             commands::set_main_window_visible,
             commands::get_onboarding_state,
             commands::complete_onboarding,
+            commands::get_first_note_tip_session,
+            commands::dismiss_first_note_tip,
             commands::restore_sample_sessions,
             commands::get_diagnostics,
             commands::view_logs,
@@ -167,7 +171,17 @@ pub fn run() {
             commands::duplicate_prompt,
             commands::update_prompt,
             commands::delete_prompt,
-            commands::set_prompt_starred,
+            commands::set_prompt_visibility,
+            coach::commands::get_coach_availability,
+            coach::commands::coach_samples,
+            coach::commands::coach_open,
+            coach::commands::coach_build,
+            coach::commands::coach_answer,
+            coach::commands::coach_practice,
+            coach::commands::coach_interpret,
+            coach::commands::coach_choose,
+            coach::commands::coach_save,
+            coach::commands::coach_cancel,
             commands::set_active_prompt,
             commands::list_summary_models,
             commands::set_summary_model,
@@ -222,6 +236,7 @@ pub fn run() {
                 if window.label() != "main" {
                     return;
                 }
+                coach::discard(window.app_handle(), coach::CoachCancelReason::Closed);
                 if window.app_handle().tray_by_id("main").is_some() {
                     api.prevent_close();
                     let _ = window.emit(commands::WINDOW_CLOSE_REQUESTED_EVENT, ());
@@ -372,6 +387,8 @@ pub fn run() {
                 events.clone(),
             ));
             app.manage(Arc::clone(&jobs));
+            let (coach, coach_changed) = coach::Coach::new();
+            app.manage(Arc::new(coach));
             // Audio capture stays real under `fake-engines`; only the models
             // are faked.
             let recorder = Arc::new(Recorder::new_with_speakers(
@@ -393,6 +410,16 @@ pub fn run() {
                 Some(Arc::clone(&store)),
             );
             app.manage(recorder);
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut state = None;
+                loop {
+                    coach::refresh_availability(&handle, &mut state);
+                    if coach_changed.recv().is_err() {
+                        break;
+                    }
+                }
+            });
             std::thread::spawn(move || models.scan());
 
             let handle = app.handle().clone();

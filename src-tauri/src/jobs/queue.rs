@@ -13,7 +13,11 @@ use std::{
 };
 
 use super::{state::can_transition, summarize, JobEvents, SessionProgress};
-use crate::llm::{Summarizer, SummarizerLoader};
+use crate::coach::{
+    practice::{self, PracticeNote, PracticeSource, MAX_ATTEMPTS, NOTE_TOKENS},
+    StyleSpec,
+};
+use crate::llm::{LlmError, Summarizer, SummarizerLoader};
 use crate::store::{SessionStatus, Store, StoreError};
 
 #[derive(Debug)]
@@ -61,10 +65,64 @@ struct Running {
     cancelled_by_user: bool,
 }
 
+type PracticeResult = Result<PracticeNote, &'static str>;
+
+pub(crate) struct PracticeJob {
+    pub spec: StyleSpec,
+    pub instructions: String,
+    pub source: PracticeSource<'static>,
+    pub cancel: Arc<AtomicBool>,
+    pub progress: Box<dyn Fn(u8) + Send>,
+    pub complete: Box<dyn FnOnce(PracticeResult) + Send>,
+}
+
+struct PracticeRun {
+    job: PracticeJob,
+    attempts: u8,
+    instructions: String,
+    best: Option<PracticeNote>,
+}
+
+impl PracticeRun {
+    fn attempt(&mut self, model: &dyn Summarizer) -> Result<bool, summarize::Stop> {
+        self.attempts += 1;
+        (self.job.progress)(self.attempts);
+        let text = summarize::generate(
+            model,
+            &self.instructions,
+            self.job.source.transcript,
+            NOTE_TOKENS,
+            &self.job.cancel,
+            &mut Default::default(),
+            &mut |_| {},
+        )?;
+        if self.job.cancel.load(Ordering::Relaxed) {
+            return Err(summarize::Stop::Cancelled);
+        }
+        let empty = text.trim().is_empty();
+        let candidate = practice::check(&self.job.spec, &self.job.source, text);
+        let done = candidate.failed.is_empty() || self.attempts == MAX_ATTEMPTS;
+        self.instructions = practice::corrections(&self.job.instructions, &candidate.failed);
+        if !empty
+            && self
+                .best
+                .as_ref()
+                .is_none_or(|best| best.passed < candidate.passed)
+        {
+            self.best = Some(candidate);
+        }
+        Ok(done)
+    }
+}
+
+const PRACTICE_FAILED: &str = "I couldn’t write the practice note. Try again.";
+
 #[derive(Default)]
 struct State {
     pending: VecDeque<Job>,
     running: Option<Running>,
+    practice: Option<PracticeRun>,
+    running_practice: Option<Arc<AtomicBool>>,
     /// Load the model now, ahead of the job a finishing recording queues.
     preload: bool,
     /// A Whisper load reserved the queue from starting a summary.
@@ -193,6 +251,7 @@ impl JobQueue {
             }),
         }
         drop(state);
+        self.shared.events.summary_queue_changed();
         if waiting {
             self.shared.events.progress(SessionProgress {
                 session_id: session_id.into(),
@@ -206,6 +265,38 @@ impl JobQueue {
         Ok(())
     }
 
+    pub(crate) fn enqueue_practice(&self, job: PracticeJob) -> Result<(), &'static str> {
+        let mut state = self.shared.lock();
+        if state.running.is_some() || !state.pending.is_empty() {
+            return Err(crate::coach::CoachBlock::Busy.message());
+        }
+        if state.practice.is_some() || state.running_practice.is_some() {
+            return Err("The previous practice note is still stopping. Try again.");
+        }
+        if state.shutdown || !self.shared.loader.ready() {
+            return Err(PRACTICE_FAILED);
+        }
+        state.practice = Some(PracticeRun {
+            instructions: job.instructions.clone(),
+            job,
+            attempts: 0,
+            best: None,
+        });
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    pub(crate) fn cancel_practice(&self) {
+        let mut state = self.shared.lock();
+        if let Some(run) = state.practice.take() {
+            run.job.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(cancel) = &state.running_practice {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.shared.changed.notify_all();
+    }
+
     /// Whether a summary is running now; queued jobs don't count.
     pub fn summarizing(&self) -> bool {
         self.shared.lock().running.is_some()
@@ -216,12 +307,20 @@ impl JobQueue {
         !state.pending.is_empty() || state.running.is_some()
     }
 
+    pub(crate) fn while_real_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+        let state = self.shared.lock();
+        if state.running.is_some() || !state.pending.is_empty() {
+            return None;
+        }
+        Some(operation())
+    }
+
     /// Serializes model changes with summary admission and start. Returns
     /// `None` while a summary is running. The closure runs under the queue
     /// lock and must not call back into this queue.
     pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let state = self.shared.lock();
-        if state.running.is_some() {
+        if state.running.is_some() || state.running_practice.is_some() {
             return None;
         }
         Some(operation())
@@ -239,7 +338,7 @@ impl JobQueue {
         let mut state = self.shared.lock();
         let summary_waiting =
             state.running.is_some() || (!state.pending.is_empty() && self.shared.loader.ready());
-        let waiting = summary_waiting || state.whisper_loading;
+        let waiting = summary_waiting || state.whisper_loading || state.running_practice.is_some();
         if waiting {
             // Lock order: release the queue before callbacks that may lock recording or emit events.
             drop(state);
@@ -251,7 +350,8 @@ impl JobQueue {
         while !cancel.load(Ordering::Relaxed)
             && (state.running.is_some()
                 || (!state.pending.is_empty() && self.shared.loader.ready())
-                || state.whisper_loading)
+                || state.whisper_loading
+                || state.running_practice.is_some())
         {
             state = self
                 .shared
@@ -292,6 +392,7 @@ impl JobQueue {
             state.pending.remove(i);
             self.cancel_finalizing(session_id);
             drop(state);
+            self.shared.events.summary_queue_changed();
             self.shared.changed.notify_all();
             return true;
         }
@@ -410,6 +511,7 @@ impl JobQueue {
 
 impl Drop for JobQueue {
     fn drop(&mut self) {
+        self.cancel_practice();
         {
             let mut state = self.shared.lock();
             state.shutdown = true;
@@ -435,7 +537,9 @@ fn work(shared: &Shared) {
                 .changed
                 .wait_timeout_while(state, Duration::from_millis(200), |s| {
                     (s.whisper_loading
-                        || ((s.pending.is_empty() || !shared.loader.ready()) && !s.preload))
+                        || (((s.pending.is_empty() && s.practice.is_none())
+                            || !shared.loader.ready())
+                            && !s.preload))
                         && !s.shutdown
                 })
                 .unwrap_or_else(|p| p.into_inner());
@@ -467,10 +571,15 @@ fn work(shared: &Shared) {
                 }
                 continue;
             }
-            if !shared.loader.ready() {
+            if state.whisper_loading || !shared.loader.ready() {
                 continue;
             }
             if state.pending.is_empty() {
+                if let Some(run) = state.practice.take() {
+                    state.running_practice = Some(Arc::clone(&run.job.cancel));
+                    drop(state);
+                    run_practice(shared, run, &mut llm);
+                }
                 continue;
             }
             let job = state.pending.pop_front().expect("pending is non-empty");
@@ -531,6 +640,53 @@ fn work(shared: &Shared) {
         }
         state.running = None;
         drop(state);
+        shared.events.summary_queue_changed();
         shared.changed.notify_all();
     }
 }
+
+fn run_practice(
+    shared: &Shared,
+    mut run: PracticeRun,
+    llm: &mut Option<(String, Arc<dyn Summarizer>)>,
+) {
+    let result = crate::diag::panic::catch_unwind(|| {
+        if run.job.cancel.load(Ordering::Relaxed) {
+            return Err(summarize::Stop::Cancelled);
+        }
+        let id = shared.loader.model_id();
+        if llm.as_ref().is_none_or(|(loaded, _)| *loaded != id) {
+            *llm = None;
+            let model = shared.loader.load(&id).map_err(|e| match e {
+                LlmError::Cancelled => summarize::Stop::Cancelled,
+                _ => summarize::Stop::Failed(PRACTICE_FAILED.into()),
+            })?;
+            *llm = Some((id, model));
+        }
+        run.attempt(llm.as_ref().unwrap().1.as_ref())
+    });
+    let mut state = shared.lock();
+    state.running_practice = None;
+    shared.changed.notify_all();
+    if result.is_err() {
+        *llm = None;
+    }
+    if run.job.cancel.load(Ordering::Relaxed) || state.shutdown {
+        return;
+    }
+    if matches!(result, Ok(Ok(false))) {
+        // Put the retry back behind any real summary that arrived during this attempt.
+        state.practice = Some(run);
+        return;
+    }
+    drop(state);
+    let outcome = match result {
+        Ok(Ok(true)) => run.best.ok_or(PRACTICE_FAILED),
+        _ => Err(PRACTICE_FAILED),
+    };
+    (run.job.complete)(outcome);
+}
+
+#[cfg(test)]
+#[path = "queue_coach_tests.rs"]
+mod coach_tests;

@@ -16,7 +16,7 @@ use crate::text::{chunk_by_tokens, ChunkError, MIN_WORDS};
 use super::state::can_transition;
 
 /// Why a run ended without a summary.
-enum Stop {
+pub(super) enum Stop {
     Cancelled,
     Failed(String),
 }
@@ -223,69 +223,19 @@ fn summarize(
         return Err(Some(Stop::Cancelled));
     }
 
-    let base = &prompt.text;
-    let context = model.context_tokens();
-    let budget = chunk_budget(
-        context,
-        model.prompt_tokens(&chunk_prompt(base, "")).map_err(stop)?,
+    let summary = generate(
+        model.as_ref(),
+        &prompt.text,
+        &session.transcript,
+        usize::MAX,
+        cancel,
+        &mut timings,
+        &mut |event| match event {
+            SummaryEvent::Step(step, count, message) => r.step(step, count, &message),
+            SummaryEvent::Text(text) => r.delta(text),
+        },
     )
-    .ok_or_else(|| Stop::Failed("The summary prompt is too long for the model.".into()))?;
-    let mut count_error = None;
-    let chunks = chunk_by_tokens(&session.transcript, budget, |text| {
-        model.count_tokens(text).unwrap_or_else(|e| {
-            count_error.get_or_insert(e);
-            0
-        })
-    });
-    if let Some(e) = count_error {
-        return Err(Some(e.into()));
-    }
-    let chunks = chunks.map_err(stop)?;
-    let n = chunks.len();
-
-    let summary = if n == 1 {
-        r.step(2, 2, "Generating summary...");
-        let started = Instant::now();
-        let summary = final_pass(r, &*model, chunk_prompt(base, &chunks[0]), cancel)?;
-        timings.chunk_ms.push(ms(started));
-        summary
-    } else {
-        let count = n as u32 + 2;
-        r.step(2, count, &format!("Summarizing chunk 1 of {n}..."));
-        let requests: Vec<Generation> = chunks
-            .iter()
-            .map(|c| Generation {
-                prompt: chunk_prompt(base, c),
-                max_tokens: CHUNK_NOTE_TOKENS,
-            })
-            .collect();
-        let started = Instant::now();
-        let mut chunk_ms = vec![0; n];
-        let mut finished = 0;
-        let notes = model
-            .generate(&requests, cancel, &mut |event| {
-                if let GenEvent::Finished { seq } = event {
-                    chunk_ms[seq] = ms(started);
-                    finished += 1;
-                    if finished < n {
-                        let next = finished + 1;
-                        r.step(
-                            next as u32 + 1,
-                            count,
-                            &format!("Summarizing chunk {next} of {n}..."),
-                        );
-                    }
-                }
-            })
-            .map_err(stop)?;
-        timings.chunk_ms = chunk_ms;
-
-        r.step(count, count, "Combining chunk summaries...");
-        let started = Instant::now();
-        let summary = final_pass(r, &*model, combine_prompt(base, &notes), cancel)?;
-        timings.combine_ms = Some(ms(started));
-        summary
-    };
+    .map_err(stop)?;
 
     let started = Instant::now();
     store
@@ -312,26 +262,122 @@ fn stop(e: impl Into<Stop>) -> Option<Stop> {
     Some(e.into())
 }
 
+pub(super) enum SummaryEvent<'a> {
+    Step(u32, u32, String),
+    Text(&'a str),
+}
+
+pub(super) fn generate(
+    model: &dyn Summarizer,
+    base: &str,
+    transcript: &str,
+    output_limit: usize,
+    cancel: &AtomicBool,
+    timings: &mut Timings,
+    report: &mut dyn FnMut(SummaryEvent<'_>),
+) -> Result<String, Stop> {
+    let context = model.context_tokens();
+    let budget = chunk_budget(context, model.prompt_tokens(&chunk_prompt(base, ""))?)
+        .ok_or_else(|| Stop::Failed("The summary prompt is too long for the model.".into()))?;
+    let mut count_error = None;
+    let chunks = chunk_by_tokens(transcript, budget, |text| {
+        model.count_tokens(text).unwrap_or_else(|e| {
+            count_error.get_or_insert(e);
+            0
+        })
+    });
+    if let Some(e) = count_error {
+        return Err(e.into());
+    }
+    let chunks = chunks?;
+    let n = chunks.len();
+
+    let summary = if n == 1 {
+        report(SummaryEvent::Step(2, 2, "Generating summary...".into()));
+        let started = Instant::now();
+        let summary = final_pass(
+            model,
+            chunk_prompt(base, &chunks[0]),
+            output_limit,
+            cancel,
+            report,
+        )?;
+        timings.chunk_ms.push(ms(started));
+        summary
+    } else {
+        let count = n as u32 + 2;
+        report(SummaryEvent::Step(
+            2,
+            count,
+            format!("Summarizing chunk 1 of {n}..."),
+        ));
+        let requests: Vec<Generation> = chunks
+            .iter()
+            .map(|c| Generation {
+                prompt: chunk_prompt(base, c),
+                max_tokens: CHUNK_NOTE_TOKENS,
+            })
+            .collect();
+        let started = Instant::now();
+        let mut chunk_ms = vec![0; n];
+        let mut finished = 0;
+        let notes = model.generate(&requests, cancel, &mut |event| {
+            if let GenEvent::Finished { seq } = event {
+                chunk_ms[seq] = ms(started);
+                finished += 1;
+                if finished < n {
+                    let next = finished + 1;
+                    report(SummaryEvent::Step(
+                        next as u32 + 1,
+                        count,
+                        format!("Summarizing chunk {next} of {n}..."),
+                    ));
+                }
+            }
+        })?;
+        timings.chunk_ms = chunk_ms;
+
+        report(SummaryEvent::Step(
+            count,
+            count,
+            "Combining chunk summaries...".into(),
+        ));
+        let started = Instant::now();
+        let summary = final_pass(
+            model,
+            combine_prompt(base, &notes),
+            output_limit,
+            cancel,
+            report,
+        )?;
+        timings.combine_ms = Some(ms(started));
+        summary
+    };
+
+    Ok(summary)
+}
+
 /// Decodes the pass whose output is the summary, streaming it as it comes,
 /// with whatever room the context has left.
 fn final_pass(
-    r: &Reporter<'_>,
     model: &dyn Summarizer,
     prompt: String,
+    output_limit: usize,
     cancel: &AtomicBool,
-) -> Result<String, Option<Stop>> {
-    let used = model.prompt_tokens(&prompt).map_err(stop)?;
+    report: &mut dyn FnMut(SummaryEvent<'_>),
+) -> Result<String, Stop> {
+    let used = model.prompt_tokens(&prompt)?;
     let max_tokens = model
         .context_tokens()
         .checked_sub(used)
         .filter(|&m| m > 0)
-        .ok_or_else(|| Stop::Failed("The transcript is too long to summarize.".into()))?;
-    let mut out = model
-        .generate(&[Generation { prompt, max_tokens }], cancel, &mut |event| {
-            if let GenEvent::Token { text, .. } = event {
-                r.delta(text);
-            }
-        })
-        .map_err(stop)?;
-    Ok(out.remove(0))
+        .ok_or_else(|| Stop::Failed("The transcript is too long to summarize.".into()))?
+        .min(output_limit);
+    let mut out = model.generate(&[Generation { prompt, max_tokens }], cancel, &mut |event| {
+        if let GenEvent::Token { text, .. } = event {
+            report(SummaryEvent::Text(text));
+        }
+    })?;
+    out.pop()
+        .ok_or_else(|| Stop::Failed("No summary was generated.".into()))
 }

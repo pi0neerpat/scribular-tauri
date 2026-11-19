@@ -328,6 +328,8 @@ struct Secrets {
 
 pub type Log = Box<dyn Fn(&str) + Send + Sync>;
 
+const DEBUG_SKIP_LOG: &str = "SCRIBULAR_SKIP_LICENSE set: access checks skipped (debug build)";
+
 fn diagnostic_event(event: &str) -> (&'static str, &'static str) {
     if event.starts_with("activation refused locally") {
         ("WARN", "activation_rejected_local")
@@ -349,8 +351,8 @@ fn diagnostic_event(event: &str) -> (&'static str, &'static str) {
         ("ERROR", "license_setting_delete_failed")
     } else if event.starts_with("licence ") && event.ends_with(" removed") {
         ("INFO", "license_removed")
-    } else if event.starts_with("SCRIBULAR_SKIP_LICENSE") {
-        ("INFO", "license_checks_skipped")
+    } else if event == DEBUG_SKIP_LOG {
+        ("INFO", DEBUG_SKIP_LOG)
     } else {
         ("INFO", "licensing_state_updated")
     }
@@ -493,7 +495,7 @@ impl Licensing {
     pub fn with_skip(mut self, skip: bool) -> Self {
         self.skip = skip;
         if skip {
-            (self.log)("SCRIBULAR_SKIP_LICENSE set: access checks skipped (debug build)");
+            (self.log)(DEBUG_SKIP_LOG);
         }
         self
     }

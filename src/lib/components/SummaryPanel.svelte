@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, openSettings, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
@@ -11,6 +11,11 @@
   import SummaryUnavailable from './SummaryUnavailable.svelte';
   import LicenseGate from './LicenseGate.svelte';
   import { accessState, allows } from '../license';
+  import { getCoachContext } from '../coach-context';
+  import CoachEntry from './CoachEntry.svelte';
+
+  const coach = getCoachContext();
+  const availability = $derived(coach?.availability() ?? null);
 
   // `active` is false while the record view is hidden behind Settings.
   let {
@@ -38,6 +43,8 @@
   let confirmDelete = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  const sessionId = $derived(session.id);
+  const savedSummary = $derived(session.summary);
   const working = $derived(['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(session.status));
   const provenance = $derived(byline || [
     session.promptId && prompts
@@ -47,24 +54,28 @@
   ].filter(Boolean).join(' · '));
 
   $effect(() => {
-    prompts = promptList;
+    const styles = coach?.styles() ?? promptList;
+    prompts = styles;
     models = modelList;
-    selectedPrompt = promptList?.prompts.some((p) => p.id === session.promptId)
+    selectedPrompt = styles?.prompts.some((p) => p.id === session.promptId)
       ? session.promptId
-      : promptList?.activeId ?? promptList?.prompts[0]?.id ?? null;
+      : styles?.activeId ?? styles?.prompts.find((p) => p.showInStyleMenu)?.id ?? null;
   });
 
   $effect(() => {
-    const id = session.id;
-    untrack(() => {
-      preview = '';
-      copied = false;
-      error = null;
-      busy = false;
-      confirmDelete = false;
-      clearTimeout(deleteTimer);
-      clearTimeout(copyTimer);
-    });
+    sessionId;
+    preview = '';
+    copied = false;
+    error = null;
+    busy = false;
+    confirmDelete = false;
+    clearTimeout(deleteTimer);
+    clearTimeout(copyTimer);
+  });
+
+  $effect(() => {
+    savedSummary;
+    if (!working) preview = '';
   });
 
   onMount(() => {
@@ -93,7 +104,9 @@
     subscribe();
     if (management && !prompts) getPromptList().then((p) => (prompts = p)).catch(() => {});
     if (management && !models.length) listSummaryModels().then((m) => (models = m)).catch(() => {});
-    const unlisten = management ? onSummaryDelta((d) => { if (d.sessionId === session.id) preview += d.text; }) : null;
+    const unlisten = management || coach ? onSummaryDelta((d) => {
+      if (d.sessionId === sessionId && (management || savedSummary)) preview += d.text;
+    }) : null;
     return () => {
       disposed = true;
       summaryAttempt++;
@@ -173,8 +186,21 @@
   {#if management}
     {#if provenance}<p>{provenance}</p>{/if}
     <button onclick={copy} disabled={!session.summary && !session.transcript}>{copied ? 'Copied' : 'Copy'}</button>
+  {/if}
+  {#if management || (session.summary && coach)}
     {#if prompts}
-      <StylePicker prompts={prompts.prompts} selectedId={selectedPrompt} includeId={session.promptId} onSelect={(id) => (selectedPrompt = id)} />
+      <StylePicker prompts={prompts.prompts} selectedId={selectedPrompt} disabled={!allows($accessState)} onSelect={(id) => (selectedPrompt = id)} coachEntry={coach ? newStyle : undefined} />
+    {/if}
+    {#snippet newStyle()}
+      {#if coach}<CoachEntry {availability} onOpen={(opener) => coach.open({}, opener)} showRetry />{/if}
+    {/snippet}
+    {#if coach && active && session.summary && !session.isSample && coach.firstNoteTip(session.id)}
+      <aside class="tip">
+        <strong>Want notes that look like yours?</strong>
+        <p>Give the coach an example of how you write so it can make a style for your future notes.</p>
+        <CoachEntry {availability} onOpen={(opener) => coach.open({}, opener, coach.dismissTip)} showRetry />
+        <button onclick={coach.dismissTip}>Dismiss tip</button>
+      </aside>
     {/if}
     <button onclick={regenerate} disabled={!allows($accessState) || summaryAvailability !== 'ready' || working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
     {#if session.status === 'summarizing'}<button onclick={stop}>Stop</button>{/if}
@@ -200,4 +226,6 @@
 
 <style>
   pre { white-space: pre-wrap; }
+  .tip { border: 1px solid #8885; border-radius: 6px; padding: 10px; margin-block: 8px; }
+  .tip p { margin-block: 5px; }
 </style>

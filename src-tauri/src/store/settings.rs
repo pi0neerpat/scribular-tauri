@@ -252,8 +252,7 @@ impl Store {
     }
 
     /// Saves them all at once; an absent app clears it in mic mode, an absent prompt
-    /// keeps the active one. Unknown ids are rejected and unstarred styles
-    /// are starred, matching `set_active_prompt`.
+    /// keeps the active one. Unknown ids are rejected.
     pub fn set_recording_settings(&self, settings: &RecordingSettings) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
