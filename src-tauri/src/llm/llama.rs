@@ -76,7 +76,7 @@ fn engine(e: impl std::fmt::Display) -> LlmError {
 }
 
 // shortcut: only the plain user turn used here; expand if summarization adds system or tool messages.
-fn format_gemma4_user_prompt(prompt: &str) -> String {
+pub(crate) fn format_gemma4_user_prompt(prompt: &str) -> String {
     format!("<|turn>user\n{}\n<turn|>\n<|turn>model\n", prompt.trim())
 }
 
