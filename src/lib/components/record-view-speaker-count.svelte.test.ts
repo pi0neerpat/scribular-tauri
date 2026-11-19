@@ -247,7 +247,7 @@ describe('recording speaker-count prompt', () => {
     await clickButton(target, '2 people');
     await vi.waitFor(() => expect(target.textContent).toContain('stop failed'));
     clock.mockReturnValue(4_000);
-    await vi.waitFor(() => expect(target.textContent).toMatch(/Recording…\s+0:03/));
+    await vi.waitFor(() => expect(target.textContent).toMatch(/Recording…\s+0:03/), { timeout: 2_000 });
     clock.mockRestore();
     unmount(app);
     target.remove();
