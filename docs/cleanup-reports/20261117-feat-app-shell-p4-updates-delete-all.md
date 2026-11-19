@@ -8,7 +8,7 @@ Task 20261117-feat-app-shell-p4-updates-delete-all. PR pi0neerpat/scribular-taur
 - Patrick confirmed AS5 and AS12 manually. AS8 passed automated (Rust, Vitest, signed-app uitest on an earlier head; the final package still lists a signed Settings walkthrough as pending).
 - AS14 (signed update installs via each alert choice) was DEFERRED by Patrick: no signed test update or feed exists. It is not verified. Needs a follow-up when a test feed exists.
 - Patrick reported tray "note style buttons" (AS17/AS18). Code on bba843c and main has only Show / Start-Stop with speaker submenu / Quit (src-tauri/src/shell/tray.rs:100-160). Probably an older build was launched. Unresolved: unknown.
-- Cost drivers: 6 fix pushes, one 4-hour human wait before the first product review, and a verify loop (about 7 sessions) caused by macOS permissions on the tmux host.
+- Cost drivers: 6 fix pushes, one 4-hour human wait before the first product review, and a verify loop (6 sessions) caused by macOS permissions on the tmux host.
 - Token totals are mostly unknown (4 of 22 sessions have transcript data); see Tokens.
 
 ## Metrics
@@ -37,7 +37,7 @@ Task 20261117-feat-app-shell-p4-updates-delete-all. PR pi0neerpat/scribular-taur
 - Review 1-3 (Claude sonnet, 2.5, 1.1, 1.7 min, 0.5M, 0.38M, 0.40M tokens): triaged Cubic threads, fixed six at 27deba2. The orchestrator fix in 27deba2 changed the automatic-updates default, so the AS8 evidence became stale. Good catch via operator note.
 - Review 4 (codex, 8 min): re-ran AS8, re-recorded the demo, posted package at 27deba2. High value.
 - 216.7 min human wait, then build 35 min (a986a25: 11 unresolved Cubic threads follow). Verify 10 min, review 19 min. Fine.
-- Verify loop, 5 verify sessions of about 1.5 min each (05:37 to 05:49Z) plus one 14.6 min: zero progress. Pure waste; see Classified items 1.
+- Verify loop, 6 verify sessions of 1.5 to 2.6 min each (05:37:54 to 05:48:50Z, about 11 min), then a 10.7 min wait for the tmux restart: zero progress. The next verify session (05:59Z, 14.6 min) ran normally. Pure waste; see Classified items 1.
 - Final build 5.7 min (bba843c, four Cubic findings incl. lost-source tray regression), verify 6.8 min, review 3.4 min. Efficient.
 
 ### Handoff communication drops
@@ -58,7 +58,7 @@ None used. Single build session at a time; P4 was a single spec slice. No eviden
 ### PR hygiene
 - One package comment (issuecomment 6965488968), edited in place; `package_posted` fired twice with the same comment id (events 94, 306). No duplicate package comments. OK.
 - PR body first line is `Recording: <path>`, followed by Summary. OK. The same Recording line is at the top of the package comment. Local /Users path is on the recording line only, as the skill allows.
-- Cubic left 4 summary comments (normal). Final package listed AS5, AS8, AS12, AS14, AS17, AS18 under Needs Patrick: 5 of 6 items are manual-only per spec; AS8 listed as pending because the final-head signed walkthrough was not rerun after fixes.
+- Cubic left 4 summary comments (normal). Final package listed AS5, AS8, AS12, AS14, AS17, AS18 under Needs Patrick: 4 of 6 items are manual-only per spec (AS5, AS12, AS14, AS18). AS8 and AS17 are automated; AS8 was listed as pending because the final-head signed walkthrough was not rerun after fixes, and AS17 was listed with AS18 for Patrick's tray report.
 - Package says "Recording ... mp4" under runs/ in the repo working tree (not committed), consistent with CLAUDE.md.
 
 ### Demo evidence
@@ -67,7 +67,7 @@ One happy-path demo for bba843c (sidebar Delete All, Cancel, confirm, empty list
 ## Classified items
 | # | Item | Class | Evidence | Note |
 | --- | --- | --- | --- | --- |
-| 1 | Verify->verify loop (6 sessions, about 26 min): uitest doctor "MISSING Accessibility/Screen Recording (allow tmux)" after the orchestrator restarted the cwf-watch tmux server itself | model_error (orchestrator) with an infrastructure component | events.jsonl:183-217; orchestrator transcript ~/.claude/projects/-Users-admin-Projects-Scribular-scribular-tauri/b528d4ad-04e6-40ae-878e-8ab2e3249d7c.jsonl | Root cause is the orchestrator restarting tmux from an agent: macOS TCC grants Accessibility and Screen Recording to the launcher, so a tmux started by the agent lost them. Infrastructure component: TCC grants are per launcher and the verify prompt has no loop guard. Patrick restarted tmux from his Terminal. cwf fixes already landed in clauffice (feat/cwf-multi-reviewer): 1b59380, 905f8b5. |
+| 1 | Verify->verify loop (6 sessions, about 11 min, plus a 10.7 min wait for the tmux restart): uitest doctor "MISSING Accessibility/Screen Recording (allow tmux)" after the orchestrator restarted the cwf-watch tmux server itself | model_error (orchestrator) with an infrastructure component | events.jsonl:183-217; orchestrator transcript ~/.claude/projects/-Users-admin-Projects-Scribular-scribular-tauri/b528d4ad-04e6-40ae-878e-8ab2e3249d7c.jsonl | Root cause is the orchestrator restarting tmux from an agent: macOS TCC grants Accessibility and Screen Recording to the launcher, so a tmux started by the agent lost them. Infrastructure component: TCC grants are per launcher and the verify prompt has no loop guard. Patrick restarted tmux from his Terminal. cwf fixes already landed in clauffice (feat/cwf-multi-reviewer): 1b59380, 905f8b5. |
 | 2 | Review session could not run `cwf package post` | missing_capability | events.jsonl:301-306; handoff note "package metadata directly to task state, outside the session report" | Writes task state outside the Codex/Claude sandbox. Blocked needs_human; orchestrator posted package and ran `cwf resume --to technical_review`. Cost about 1 min plus a human step. |
 | 3 | Cubic reviewer_network_error x12 | infrastructure | events.jsonl (12 events) | Polling retries; no task impact beyond latency. |
 | 4 | Stale AS8 evidence after fix 27deba2 changed default | model_error (review session) | prompt-0004 operator note; events.jsonl:74 | Reviewer did not invalidate verification; operator caught it. |
