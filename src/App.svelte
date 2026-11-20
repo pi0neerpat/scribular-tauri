@@ -154,7 +154,7 @@
   }
 
   function modalOpen() {
-    return !!(quitIntent || tourOpen || [...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"]')].some((dialog) => !dialog.closest('[hidden]')));
+    return !!(quitIntent || [...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"]')].some((dialog) => !dialog.closest('[hidden]')));
   }
 
   onMount(() => {
