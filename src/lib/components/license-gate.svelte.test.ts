@@ -79,7 +79,7 @@ describe('LicenseGate warning', () => {
 describe('RecordView with a licence state', () => {
   it('shows the trial warning and keeps Start enabled', async () => {
     accessState.set({ kind: 'trialWarning', daysLeft: 2 });
-    const t = render(RecordView, { speechReady: true });
+    const t = render(RecordView, { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } });
     await tick();
     expect(t.textContent).toContain('Your free trial ends in 2 days.');
     expect(named(t, 'Start recording')!.disabled).toBe(false);
@@ -87,7 +87,7 @@ describe('RecordView with a licence state', () => {
 
   it('disables Start when denied', async () => {
     accessState.set({ kind: 'licenseLapsed' });
-    const t = render(RecordView, { speechReady: true });
+    const t = render(RecordView, { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } });
     await tick();
     expect(named(t, 'Start recording')!.disabled).toBe(true);
     expect(named(t, 'Buy licence')).toBeDefined();

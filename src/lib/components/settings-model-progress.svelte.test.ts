@@ -55,6 +55,7 @@ afterEach(() => {
 
 it('opens on General and keeps recording and appearance controls in their panes', async () => {
   window.history.replaceState({}, '', '/');
+  getSummaryAvailability.mockResolvedValueOnce('downloading');
   getRecordingSettings.mockResolvedValue(settings);
   modelsStatus.mockResolvedValue([]);
   const target = document.createElement('div');
@@ -63,6 +64,7 @@ it('opens on General and keeps recording and appearance controls in their panes'
   expect(target.textContent).not.toContain('Identify speakers');
   expect(target.textContent).not.toContain('Show background animation');
   expect(target.textContent).not.toContain('Restore sample session');
+  expect(target.textContent).not.toContain("Summaries aren't available on this Mac.");
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
   flushSync();
   expect(target.textContent).toContain('Show background animation');

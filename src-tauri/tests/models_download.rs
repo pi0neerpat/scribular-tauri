@@ -232,7 +232,7 @@ fn interrupted_download_resumes_with_a_range_request() {
         HashMap::from([("m.bin".into(), data.clone())]),
         HashMap::from([("m.bin".into(), cut)]),
     );
-    let spec = spec(&server, "m", ModelKind::Llm, &data);
+    let spec = spec(&server, "m", ModelKind::Speech, &data);
     let dir = TempDir::new();
     let client = reqwest::Client::new();
     let (_, on_progress) = recorder();
@@ -248,7 +248,15 @@ fn interrupted_download_resumes_with_a_range_request() {
     let part = dir.0.join("m.bin.part");
     assert_eq!(std::fs::metadata(&part).unwrap().len(), cut as u64);
 
-    let path = run(ensure(&client, &dir.0, &spec, &on_progress)).unwrap();
+    let manager = ModelManager::new(dir.0.clone(), vec![spec]);
+    run(manager.ensure_one("m", &|progress| {
+        assert_eq!(manager.status(), [progress.clone()]);
+        if progress.state == ModelState::Downloading {
+            assert!(progress.downloaded_bytes >= cut as u64);
+        }
+    }))
+    .unwrap();
+    let path = manager.path("m").unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), data);
     assert!(!part.exists());
     assert_eq!(
@@ -280,6 +288,7 @@ fn checksum_mismatch_deletes_the_file_and_never_marks_ready() {
     assert!(events.iter().all(|p| p.state != ModelState::Ready));
     let last = events.last().unwrap();
     assert_eq!(last.state, ModelState::Failed);
+    assert_eq!(manager.status(), [last.clone()]);
     assert!(
         last.error.as_deref().unwrap().contains("checksum"),
         "{last:?}"

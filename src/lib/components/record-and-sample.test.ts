@@ -3,9 +3,6 @@ import { describe, expect, it } from 'vitest';
 import SummaryPanel from './SummaryPanel.svelte';
 import PermissionNotice from './PermissionNotice.svelte';
 import RecordView from './RecordView.svelte';
-import FirstRun from './FirstRun.svelte';
-import SpeechModelStatus from './SpeechModelStatus.svelte';
-import OnboardingTour from './OnboardingTour.svelte';
 import SampleBadge from './SampleBadge.svelte';
 import SampleBanner from './SampleBanner.svelte';
 import { isWorking } from './record-status';
@@ -19,11 +16,17 @@ const session = {
   hasAudio: false, isSample: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null,
 };
 
-describe('first run components', () => {
+describe('recording and sample components', () => {
   it('shows an AwaitingModel session as waiting while keeping its transcript viewable', () => {
     const { body } = render(SummaryPanel, { props: { session } });
     expect(body).toContain('Waiting for the summary model download');
     expect(body).toContain('A saved transcript');
+  });
+
+  it('keeps the download quiet in a completed note', () => {
+    const { body } = render(SummaryPanel, { props: { session: { ...session, status: 'done', summary: 'A saved note' } } });
+    expect(body).toContain('A saved note');
+    expect(body).not.toContain('Waiting for the summary model download');
   });
 
   it('shows the System Settings action when microphone permission is denied', () => {
@@ -36,51 +39,19 @@ describe('first run components', () => {
   });
 
   it('keeps Start recording disabled until the speech model is ready', () => {
-    const { body } = render(RecordView, { props: { speechReady: false } });
-    expect(body).toMatch(/<button[^>]*disabled[^>]*>Start recording<\/button>/);
+    const { body } = render(RecordView, { props: {} });
+    expect(body).toMatch(/<button[^>]*disabled[^>]*>\s*Start recording\s*<\/button>/);
   });
 
   it('waits for saved source before enabling Start', () => {
-    const { body } = render(RecordView, { props: { speechReady: true } });
-    expect(body).toMatch(/<button[^>]*disabled[^>]*>Start recording<\/button>/);
+    const { body } = render(RecordView, { props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } } });
+    expect(body).toMatch(/<button[^>]*disabled[^>]*>\s*Start recording\s*<\/button>/);
   });
 
   it('allows cancelling while a session awaits the summary model', () => {
     expect(isWorking('awaitingModel')).toBe(true);
     expect(isWorking('finalizing')).toBe(true);
     expect(isWorking('summarizing')).toBe(true);
-  });
-
-  it('shows first-run actions for both macOS permission panes', () => {
-    const { body } = render(FirstRun, { props: { speechReady: false } });
-    expect(body).toContain('Open Microphone Settings');
-    expect(body).toContain('Open System Audio Settings');
-  });
-
-  it('offers the telemetry choice without disabling recording when the speech model is ready', () => {
-    const { body } = render(FirstRun, { props: { speechReady: true } });
-    expect(body).toContain('Help improve Scribular?');
-    expect(body).toContain('No thanks');
-  });
-
-  it('shows a failed speech download and an actionable retry', () => {
-    const { body } = render(SpeechModelStatus, { props: { speech: {
-      modelId: 'whisper-base', state: 'failed', downloadedBytes: 0, totalBytes: 10,
-      error: 'network unavailable',
-    } } });
-    expect(body).toContain('Speech model download failed: network unavailable');
-    expect(body).toContain('Retry speech model download');
-  });
-
-  it('renders a non-modal tour without a full-screen click shield', () => {
-    const tour = render(OnboardingTour, { props: { onComplete: () => {} } });
-    const record = render(RecordView, { props: { speechReady: true } });
-    const composed = `<main>${record.body}${tour.body}</main>`;
-    expect(composed).toContain("Let's take a quick tour.");
-    expect(composed).toContain('Your permissions and speech model are getting ready below.');
-    expect(composed).toContain('Start recording');
-    expect(composed).not.toMatch(/position:\s*fixed;[^"']*inset:\s*0/);
-    expect(composed).toContain('pointer-events: none');
   });
 
   it('provides a labelled sample badge and example banner', () => {

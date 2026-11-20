@@ -297,22 +297,48 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
-    use std::sync::Mutex;
-
-    fn store() -> Store {
-        let mut conn = Connection::open_in_memory().unwrap();
-        super::super::migrations::migrate(&mut conn).unwrap();
-        Store {
-            conn: Mutex::new(conn),
-        }
-    }
+    use crate::{diag::telemetry, store::key::MemoryKeyStore};
 
     #[test]
-    fn onboarding_choice_persists() {
-        let store = store();
-        assert!(!store.onboarding_completed().unwrap());
-        store.complete_onboarding().unwrap();
-        assert!(store.onboarding_completed().unwrap());
+    fn failed_welcome_writes_leave_consent_off_and_welcome_unseen_on_reopen() {
+        for key in [telemetry::TELEMETRY_ENABLED, ONBOARDING_COMPLETED] {
+            let path = std::env::temp_dir()
+                .join(format!("scribular-welcome-{}-{key}.db", std::process::id()));
+            let keys = MemoryKeyStore::default();
+            let store = Store::open(&path, &keys).unwrap();
+            assert!(!store.onboarding_completed().unwrap());
+            store
+                .with(|conn| {
+                    conn.execute_batch(&format!(
+                        "CREATE TEMP TRIGGER reject_welcome_write BEFORE INSERT ON settings
+                         WHEN NEW.key = '{key}' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;"
+                    ))?;
+                    Ok(())
+                })
+                .unwrap();
+            let saved = telemetry::set_enabled(&store, false)
+                .and_then(|()| store.complete_onboarding().map_err(|e| e.to_string()));
+            assert!(saved.is_err());
+            drop(store);
+
+            let store = Store::open(&path, &keys).unwrap();
+            assert!(!store.onboarding_completed().unwrap());
+            assert!(!telemetry::send_allowed(&store));
+            telemetry::set_enabled(&store, false).unwrap();
+            store.complete_onboarding().unwrap();
+            drop(store);
+
+            let store = Store::open(&path, &keys).unwrap();
+            assert!(store.onboarding_completed().unwrap());
+            assert_eq!(
+                store
+                    .get_setting(telemetry::TELEMETRY_ENABLED)
+                    .unwrap()
+                    .as_deref(),
+                Some("0")
+            );
+            drop(store);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 }
