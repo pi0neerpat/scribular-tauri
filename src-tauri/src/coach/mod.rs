@@ -2,6 +2,7 @@ pub(crate) mod commands;
 mod extract;
 mod interpret;
 pub(crate) mod practice;
+pub(crate) mod session;
 mod spec;
 
 use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex, MutexGuard};
@@ -60,7 +61,7 @@ pub enum CoachRetry {
 #[serde(rename_all = "camelCase")]
 pub struct CoachAvailability {
     reason: Option<CoachBlock>,
-    message: Option<&'static str>,
+    pub(super) message: Option<&'static str>,
     session_message: Option<&'static str>,
     retry: Option<CoachRetry>,
 }

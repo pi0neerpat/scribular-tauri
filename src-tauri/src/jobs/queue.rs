@@ -76,6 +76,12 @@ pub(crate) struct PracticeJob {
     pub complete: Box<dyn FnOnce(PracticeResult) + Send>,
 }
 
+pub(crate) struct SessionCoachJob {
+    pub prompt: String,
+    pub cancel: Arc<AtomicBool>,
+    pub complete: Box<dyn FnOnce(Result<String, &'static str>) + Send>,
+}
+
 struct PracticeRun {
     job: PracticeJob,
     attempts: u8,
@@ -123,6 +129,8 @@ struct State {
     running: Option<Running>,
     practice: Option<PracticeRun>,
     running_practice: Option<Arc<AtomicBool>>,
+    session_coach: Option<SessionCoachJob>,
+    running_session_coach: Option<Arc<AtomicBool>>,
     /// Load the model now, ahead of the job a finishing recording queues.
     preload: bool,
     /// A Whisper load reserved the queue from starting a summary.
@@ -222,6 +230,12 @@ impl JobQueue {
         {
             return Err(JobError::Busy(session.status));
         }
+        if let Some(job) = state.session_coach.take() {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(cancel) = &state.running_session_coach {
+            cancel.store(true, Ordering::Relaxed);
+        }
         let waiting = !self.shared.loader.ready();
         let queued_status = if waiting {
             SessionStatus::AwaitingModel
@@ -286,6 +300,37 @@ impl JobQueue {
         Ok(())
     }
 
+    pub(crate) fn enqueue_session_coach(&self, job: SessionCoachJob) -> Result<(), &'static str> {
+        let mut state = self.shared.lock();
+        if state.shutdown || state.running.is_some() || !state.pending.is_empty() {
+            return Err(crate::coach::CoachBlock::Busy.message());
+        }
+        if state.practice.is_some()
+            || state.running_practice.is_some()
+            || state.session_coach.is_some()
+            || state.running_session_coach.is_some()
+        {
+            return Err("The coach is still working. Try again.");
+        }
+        if !self.shared.loader.ready() {
+            return Err("The coach isn’t available right now.");
+        }
+        state.session_coach = Some(job);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    pub(crate) fn cancel_session_coach(&self) {
+        let mut state = self.shared.lock();
+        if let Some(job) = state.session_coach.take() {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(cancel) = &state.running_session_coach {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.shared.changed.notify_all();
+    }
+
     pub(crate) fn cancel_practice(&self) {
         let mut state = self.shared.lock();
         if let Some(run) = state.practice.take() {
@@ -320,7 +365,10 @@ impl JobQueue {
     /// lock and must not call back into this queue.
     pub fn while_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let state = self.shared.lock();
-        if state.running.is_some() || state.running_practice.is_some() {
+        if state.running.is_some()
+            || state.running_practice.is_some()
+            || state.running_session_coach.is_some()
+        {
             return None;
         }
         Some(operation())
@@ -338,7 +386,10 @@ impl JobQueue {
         let mut state = self.shared.lock();
         let summary_waiting =
             state.running.is_some() || (!state.pending.is_empty() && self.shared.loader.ready());
-        let waiting = summary_waiting || state.whisper_loading || state.running_practice.is_some();
+        let waiting = summary_waiting
+            || state.whisper_loading
+            || state.running_practice.is_some()
+            || state.running_session_coach.is_some();
         if waiting {
             // Lock order: release the queue before callbacks that may lock recording or emit events.
             drop(state);
@@ -351,7 +402,8 @@ impl JobQueue {
             && (state.running.is_some()
                 || (!state.pending.is_empty() && self.shared.loader.ready())
                 || state.whisper_loading
-                || state.running_practice.is_some())
+                || state.running_practice.is_some()
+                || state.running_session_coach.is_some())
         {
             state = self
                 .shared
@@ -512,6 +564,7 @@ impl JobQueue {
 impl Drop for JobQueue {
     fn drop(&mut self) {
         self.cancel_practice();
+        self.cancel_session_coach();
         {
             let mut state = self.shared.lock();
             state.shutdown = true;
@@ -537,7 +590,9 @@ fn work(shared: &Shared) {
                 .changed
                 .wait_timeout_while(state, Duration::from_millis(200), |s| {
                     (s.whisper_loading
-                        || (((s.pending.is_empty() && s.practice.is_none())
+                        || (((s.pending.is_empty()
+                            && s.practice.is_none()
+                            && s.session_coach.is_none())
                             || !shared.loader.ready())
                             && !s.preload))
                         && !s.shutdown
@@ -579,6 +634,10 @@ fn work(shared: &Shared) {
                     state.running_practice = Some(Arc::clone(&run.job.cancel));
                     drop(state);
                     run_practice(shared, run, &mut llm);
+                } else if let Some(job) = state.session_coach.take() {
+                    state.running_session_coach = Some(Arc::clone(&job.cancel));
+                    drop(state);
+                    run_session_coach(shared, job, &mut llm);
                 }
                 continue;
             }
@@ -643,6 +702,64 @@ fn work(shared: &Shared) {
         shared.events.summary_queue_changed();
         shared.changed.notify_all();
     }
+}
+
+fn run_session_coach(
+    shared: &Shared,
+    job: SessionCoachJob,
+    llm: &mut Option<(String, Arc<dyn Summarizer>)>,
+) {
+    let result = crate::diag::panic::catch_unwind(|| {
+        if job.cancel.load(Ordering::Relaxed) {
+            return Err("The coach stopped. Try again.");
+        }
+        let id = shared.loader.model_id();
+        if llm.as_ref().is_none_or(|(loaded, _)| *loaded != id) {
+            *llm = None;
+            *llm = Some((
+                id.clone(),
+                shared
+                    .loader
+                    .load(&id)
+                    .map_err(|_| "The coach couldn’t load. Try again.")?,
+            ));
+        }
+        let model = llm.as_ref().unwrap().1.as_ref();
+        // shortcut: an oversized session is rejected; chunk it once real-model sessions require it.
+        if model
+            .prompt_tokens(&job.prompt)
+            .map_err(|_| "The coach couldn’t read this note.")?
+            + 512
+            > model.context_tokens()
+        {
+            return Err("This session is too long for the coach.");
+        }
+        let output = model
+            .generate(
+                &[crate::llm::Generation {
+                    prompt: job.prompt.clone(),
+                    max_tokens: 512,
+                }],
+                &job.cancel,
+                &mut |_| {},
+            )
+            .map_err(|_| "The coach couldn’t revise the note. Try again.")?;
+        output
+            .into_iter()
+            .next()
+            .ok_or("The coach couldn’t revise the note. Try again.")
+    });
+    let mut state = shared.lock();
+    state.running_session_coach = None;
+    shared.changed.notify_all();
+    if result.is_err() {
+        *llm = None;
+    }
+    if job.cancel.load(Ordering::Relaxed) || state.shutdown {
+        return;
+    }
+    drop(state);
+    (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
 }
 
 fn run_practice(

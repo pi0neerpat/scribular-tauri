@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     coach::{compile, practice::PRACTICE_SOURCE},
     llm::{GenEvent, Generation},
-    store::{key::MemoryKeyStore, InputMode, NewSession},
+    store::{key::MemoryKeyStore, InputMode, NewSession, SessionPatch},
 };
 use std::{
     path::PathBuf,
@@ -248,4 +248,121 @@ fn cancelled_practice_drops_the_result_and_has_no_persisted_job() {
     ));
     assert_eq!(store.list_sessions().unwrap().len(), 0);
     assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn session_coach_job_leaves_saved_session_unchanged() {
+    let (_db, store) = TestStore::new();
+    let (engine, _, _) = engine(true);
+    let queue = JobQueue::new(store.clone(), Arc::new(Loader(engine)), Arc::new(Silent));
+    let session = store
+        .create_session(&NewSession {
+            title: "Fixture".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some(STYLE.into()),
+            model_id: None,
+        })
+        .unwrap();
+    let sentinel = "Client Akoya reported violet lanterns.";
+    store
+        .update_session(
+            &session.id,
+            &SessionPatch {
+                title: None,
+                transcript: Some(sentinel.into()),
+                summary: Some(sentinel.into()),
+            },
+        )
+        .unwrap();
+    store
+        .set_status(&session.id, SessionStatus::Done, None)
+        .unwrap();
+    let before = store.get_session(&session.id).unwrap().unwrap();
+    let (done, result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("Shorten this: {sentinel}"),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    assert_eq!(result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    let after = store.get_session(&session.id).unwrap().unwrap();
+    assert_eq!(after.summary, before.summary);
+    assert_eq!(after.transcript, before.transcript);
+    assert!(store.queued_summaries().unwrap().is_empty());
+    assert!(queue.wait_idle(WAIT));
+}
+
+#[test]
+fn cancelled_session_coach_drops_late_result() {
+    let (_db, store) = TestStore::new();
+    let (engine, started, release) = engine(true);
+    let queue = JobQueue::new(store, Arc::new(Loader(engine)), Arc::new(Silent));
+    let (done, result) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("{INSTRUCTIONS}\nCombine them into a single"),
+            cancel: cancel.clone(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    queue.cancel_session_coach();
+    assert!(cancel.load(Ordering::Relaxed));
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+}
+
+#[test]
+fn real_summary_preempts_running_session_coach() {
+    let (_db, store) = TestStore::new();
+    let (engine, started, release) = engine(true);
+    let queue = JobQueue::new(store.clone(), Arc::new(Loader(engine)), Arc::new(Silent));
+    let session = store
+        .create_session(&NewSession {
+            title: "Real".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some(STYLE.into()),
+            model_id: None,
+        })
+        .unwrap();
+    store
+        .save_transcript(&session.id, &"word ".repeat(100), 1000)
+        .unwrap();
+    store
+        .set_status(&session.id, SessionStatus::Done, None)
+        .unwrap();
+    let (done, result) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("{INSTRUCTIONS}\nCombine them into a single"),
+            cancel: cancel.clone(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    queue.regenerate(&session.id, STYLE).unwrap();
+    assert!(cancel.load(Ordering::Relaxed));
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(
+        store.get_session(&session.id).unwrap().unwrap().summary,
+        "Real summary."
+    );
 }

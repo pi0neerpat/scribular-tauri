@@ -14,6 +14,7 @@ use crate::store::{AudioSource, SessionStatus};
 use crate::stt::TranscriptSegment;
 
 pub(crate) use queue::PracticeJob;
+pub(crate) use queue::SessionCoachJob;
 pub use queue::{JobError, JobQueue};
 pub use retention::{spawn_retention, SWEEP_EVERY};
 pub use session::{RecordError, Recorder};

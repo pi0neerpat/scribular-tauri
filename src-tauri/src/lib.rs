@@ -182,6 +182,8 @@ pub fn run() {
             coach::commands::coach_choose,
             coach::commands::coach_save,
             coach::commands::coach_cancel,
+            coach::session::session_coach_start,
+            coach::session::session_coach_stop,
             commands::set_active_prompt,
             commands::list_summary_models,
             commands::set_summary_model,
@@ -389,6 +391,7 @@ pub fn run() {
             app.manage(Arc::clone(&jobs));
             let (coach, coach_changed) = coach::Coach::new();
             app.manage(Arc::new(coach));
+            app.manage(Arc::new(coach::session::SessionCoach::default()));
             // Audio capture stays real under `fake-engines`; only the models
             // are faked.
             let recorder = Arc::new(Recorder::new_with_speakers(
