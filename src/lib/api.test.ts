@@ -78,6 +78,19 @@ describe('api', () => {
     expect(unlisten).toHaveBeenCalledTimes(2);
   });
 
+  it('delivers an immediate session coach reply during start', async () => {
+    const reply = { jobId: 'job-1', sessionId: 'session-1', outcome: { kind: 'reply', message: 'Try another request.' } };
+    const onResult = vi.fn();
+    listen.mockResolvedValue(() => {});
+    invoke.mockImplementation(async () => {
+      const handler = listen.mock.calls.find(([name]) => name === 'session-coach://result')?.[1];
+      handler({ payload: reply });
+      return reply.jobId;
+    });
+    await sessionCoachStart('session-1', 'Diagnose this', onResult, vi.fn());
+    expect(onResult).toHaveBeenCalledWith(reply);
+  });
+
   it('wraps updater commands and event', async () => {
     invoke.mockResolvedValue({ state: 'idle', installable: false });
     await checkForUpdates();
