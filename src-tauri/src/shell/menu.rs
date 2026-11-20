@@ -294,25 +294,16 @@ pub fn sync_recording_state(app: &AppHandle, state: Option<&crate::jobs::Recordi
     let Some(menu) = app.menu() else { return };
     let recording = state.is_some();
     let paused = state.is_some_and(|state| state.status == crate::jobs::RecordingStatus::Paused);
+    let locked = app
+        .try_state::<crate::commands::LockedState>()
+        .is_none_or(|state| state.reason.is_some());
+    let writable = app
+        .try_state::<std::sync::Arc<crate::license::Licensing>>()
+        .is_some_and(|license| license.require_access().is_ok());
+    let (record_state, pause_state) = recording_menu_state(recording, paused, locked, writable);
     for (id, title, enabled) in [
-        (
-            "shell-record",
-            if recording {
-                "Stop Recording"
-            } else {
-                "Start Recording"
-            },
-            recording,
-        ),
-        (
-            "shell-pause",
-            if paused {
-                "Resume Recording"
-            } else {
-                "Pause Recording"
-            },
-            recording,
-        ),
+        ("shell-record", record_state.0, record_state.1),
+        ("shell-pause", pause_state.0, pause_state.1),
     ] {
         for top in menu.items().unwrap_or_default() {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {

@@ -44,7 +44,7 @@
   let tourOpen = $state(false);
   let tourRun = $state(0);
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
-  let history = $state<{ focusSearch: () => void; toggleSidebar: () => void; moveSession: (direction: -1 | 1) => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
+  let history = $state<{ focusSearch: () => Promise<void>; toggleSidebar: () => void; moveSession: (direction: -1 | 1) => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
   let recordView = $state<{ copyResultNote: () => Promise<void>; toggleRecording: () => void; toggleRecordingPause: () => void; cancelDialog: () => boolean; refreshAfterDeletion: () => Promise<void> } | undefined>();
   let recordHasNote = $state(false);
 
@@ -153,6 +153,10 @@
     void recordView?.refreshAfterDeletion().catch((e) => (error = String(e)));
   }
 
+  function modalOpen() {
+    return !!(quitIntent || tourOpen || [...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"]')].some((dialog) => !dialog.closest('[hidden]')));
+  }
+
   onMount(() => {
     const showRecord = () => { pendingCoachInterruption = false; navigate('record'); };
     window.addEventListener('tray-start-failed', showRecord);
@@ -165,17 +169,17 @@
         if (recordView?.cancelDialog()) event.preventDefault();
         return;
       }
-      if (!coach && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault(); history?.focusSearch();
+      if (!coach && !modalOpen() && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault(); void history?.focusSearch();
       }
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
-      if (coach) return;
+      if (coach || modalOpen()) return;
       switch (id) {
         case 'shell-example-style':
         case 'shell-coach': openCoach({}); break;
-        case 'shell-find': history?.focusSearch(); break;
+        case 'shell-find': void history?.focusSearch(); break;
         case 'shell-record': if (recording) recordView?.toggleRecording(); else navigate('record', undefined, () => recordView?.toggleRecording()); break;
         case 'shell-pause': recordView?.toggleRecordingPause(); break;
         case 'shell-previous': history?.moveSession(-1); break;

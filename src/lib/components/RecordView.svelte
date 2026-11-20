@@ -85,7 +85,7 @@
   export function toggleRecording() {
     if (busy || askSpeakerCount) return;
     if (recording) void stop();
-    else if (sourceReady && !denied && speechReady && allows($accessState)) void start();
+    else if (denied !== 'microphone' && (source.location !== 'onCall' || source.targetApp) && allows($accessState)) void start();
   }
   export function toggleRecordingPause() {
     if (recording && !busy && !askSpeakerCount) void togglePause();
@@ -439,7 +439,7 @@
       </div>
     {/if}
     {#if pickerOpen}
-      <div role="dialog" aria-label="Choose a call app">
+      <div role="dialog" aria-label="Choose a call app" tabindex="-1" onkeydown={(event) => { if (event.key === 'Escape') cancelDialog(); }}>
         <p>Common apps and browsers</p>
         {#each commonApps as name}<button disabled={busy} onclick={() => chooseApp(name)}>{name}</button>{/each}
         <p>Other App — currently playing audio</p>

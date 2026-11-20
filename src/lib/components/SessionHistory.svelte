@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, type Snippet } from 'svelte';
+  import { onMount, tick, type Snippet } from 'svelte';
   import { cancelJob, clearAllSessions, countSessions, deleteSession, getPromptList, getSession, listSessions, listSummaryModels, onSessionProgress, openSettings, recoverSession, searchSessions, setShellMenuState } from '../api';
   import { navigationDisabled, type AppView } from '../navigation';
   import type { Session } from '../types/Session';
@@ -72,8 +72,9 @@
     });
   }
 
-  export function focusSearch() {
+  export async function focusSearch() {
     sidebarVisible = true;
+    await tick();
     searchField?.focus();
     searchField?.select();
   }
