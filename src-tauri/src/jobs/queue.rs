@@ -230,12 +230,6 @@ impl JobQueue {
         {
             return Err(JobError::Busy(session.status));
         }
-        if let Some(job) = state.session_coach.take() {
-            job.cancel.store(true, Ordering::Relaxed);
-        }
-        if let Some(cancel) = &state.running_session_coach {
-            cancel.store(true, Ordering::Relaxed);
-        }
         let waiting = !self.shared.loader.ready();
         let queued_status = if waiting {
             SessionStatus::AwaitingModel
@@ -253,6 +247,12 @@ impl JobQueue {
             session.status,
             already_pending,
         )?;
+        if let Some(job) = state.session_coach.take() {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(cancel) = &state.running_session_coach {
+            cancel.store(true, Ordering::Relaxed);
+        }
         match state
             .pending
             .iter_mut()
@@ -265,6 +265,7 @@ impl JobQueue {
             }),
         }
         drop(state);
+        self.shared.events.session_coach_cancelled();
         self.shared.events.summary_queue_changed();
         if waiting {
             self.shared.events.progress(SessionProgress {
@@ -282,6 +283,9 @@ impl JobQueue {
     pub(crate) fn enqueue_practice(&self, job: PracticeJob) -> Result<(), &'static str> {
         let mut state = self.shared.lock();
         if state.running.is_some() || !state.pending.is_empty() {
+            return Err(crate::coach::CoachBlock::Busy.message());
+        }
+        if state.session_coach.is_some() || state.running_session_coach.is_some() {
             return Err(crate::coach::CoachBlock::Busy.message());
         }
         if state.practice.is_some() || state.running_practice.is_some() {
@@ -349,7 +353,10 @@ impl JobQueue {
 
     pub fn is_busy(&self) -> bool {
         let state = self.shared.lock();
-        !state.pending.is_empty() || state.running.is_some()
+        !state.pending.is_empty()
+            || state.running.is_some()
+            || state.session_coach.is_some()
+            || state.running_session_coach.is_some()
     }
 
     pub(crate) fn while_real_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
@@ -367,6 +374,7 @@ impl JobQueue {
         let state = self.shared.lock();
         if state.running.is_some()
             || state.running_practice.is_some()
+            || state.session_coach.is_some()
             || state.running_session_coach.is_some()
         {
             return None;
@@ -554,10 +562,16 @@ impl JobQueue {
             .shared
             .changed
             .wait_timeout_while(state, timeout, |s| {
-                !s.pending.is_empty() || s.running.is_some()
+                !s.pending.is_empty()
+                    || s.running.is_some()
+                    || s.session_coach.is_some()
+                    || s.running_session_coach.is_some()
             })
             .unwrap_or_else(|p| p.into_inner());
-        state.pending.is_empty() && state.running.is_none()
+        state.pending.is_empty()
+            && state.running.is_none()
+            && state.session_coach.is_none()
+            && state.running_session_coach.is_none()
     }
 }
 
@@ -749,17 +763,15 @@ fn run_session_coach(
             .next()
             .ok_or("The coach couldn’t revise the note. Try again.")
     });
-    let mut state = shared.lock();
-    state.running_session_coach = None;
-    shared.changed.notify_all();
     if result.is_err() {
         *llm = None;
     }
-    if job.cancel.load(Ordering::Relaxed) || state.shutdown {
-        return;
+    let shutdown = shared.lock().shutdown;
+    if !job.cancel.load(Ordering::Relaxed) && !shutdown {
+        (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
     }
-    drop(state);
-    (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
+    shared.lock().running_session_coach = None;
+    shared.changed.notify_all();
 }
 
 fn run_practice(

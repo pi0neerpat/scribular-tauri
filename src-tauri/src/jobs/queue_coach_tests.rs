@@ -257,6 +257,7 @@ fn session_coach_job_leaves_saved_session_unchanged() {
         "scribular-session-coach-logs-{}",
         std::process::id()
     ));
+    let _ = std::fs::remove_dir_all(&log_dir);
     crate::diag::log::init(&log_dir).unwrap();
     crate::diag::telemetry::set_enabled(&store, true).unwrap();
     let (engine, _, _) = engine(true);
@@ -314,6 +315,8 @@ fn session_coach_job_leaves_saved_session_unchanged() {
     assert_eq!(store.get_setting("usage_sessions").unwrap(), None);
     assert_eq!(store.get_setting("usage_total_seconds").unwrap(), None);
     assert_eq!(store.get_setting("pending_report").unwrap(), None);
+    crate::diag::log::reset_for_tests();
+    let _ = std::fs::remove_dir_all(log_dir);
 }
 
 #[test]
@@ -335,11 +338,16 @@ fn cancelled_session_coach_drops_late_result() {
     started.recv_timeout(WAIT).unwrap();
     queue.cancel_session_coach();
     assert!(cancel.load(Ordering::Relaxed));
+    assert!(queue.is_busy());
+    assert!(queue.while_idle(|| ()).is_none());
+    assert!(queue.enqueue_practice(fixture_job().0).is_err());
+    assert!(!queue.wait_idle(Duration::from_millis(10)));
     release.send(()).unwrap();
     assert!(matches!(
         result.recv_timeout(WAIT),
         Err(mpsc::RecvTimeoutError::Disconnected)
     ));
+    assert!(queue.wait_idle(WAIT));
 }
 
 #[test]

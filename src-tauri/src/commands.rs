@@ -1552,6 +1552,10 @@ fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -
 }
 
 impl JobEvents for TauriJobEvents {
+    fn session_coach_cancelled(&self) {
+        crate::coach::session::cancel_for_gate(&self.0);
+    }
+
     fn recording_starting(&self) {
         crate::coach::session::cancel_for_gate(&self.0);
         crate::coach::discard(&self.0, crate::coach::CoachCancelReason::Recording);

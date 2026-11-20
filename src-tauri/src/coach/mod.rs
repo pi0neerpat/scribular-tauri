@@ -61,7 +61,7 @@ pub enum CoachRetry {
 #[serde(rename_all = "camelCase")]
 pub struct CoachAvailability {
     reason: Option<CoachBlock>,
-    pub(super) message: Option<&'static str>,
+    message: Option<&'static str>,
     session_message: Option<&'static str>,
     retry: Option<CoachRetry>,
 }

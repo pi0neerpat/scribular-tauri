@@ -1,9 +1,6 @@
-use std::{
-    collections::HashSet,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 
 use serde::Serialize;
@@ -20,6 +17,7 @@ pub const RESULT_EVENT: &str = "session-coach://result";
 pub const STOPPED_EVENT: &str = "session-coach://stopped";
 const FAILED: &str = "I couldn’t revise that note. Try again.";
 const UNSUPPORTED: &str = "I can change length, quotes and sections. Ask for one of those changes.";
+const END_NOTE: &str = "<<END_OF_NOTE>>";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -58,28 +56,51 @@ struct State {
     candidate: Option<(String, String, String)>,
 }
 
-fn words(text: &str) -> HashSet<String> {
+fn words(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
         .filter(|word| !word.is_empty())
         .map(|word| word.to_lowercase())
         .collect()
 }
 
+fn spans(text: &str) -> impl Iterator<Item = Vec<String>> + '_ {
+    text.split(['\n', '.', '!', '?'])
+        .map(words)
+        .filter(|span| !span.is_empty())
+}
+
 fn grounded(note: &str, transcript: &str, output: &str) -> bool {
-    let source = words(&format!("{note}\n{transcript}"));
-    !output.trim().is_empty()
-        && words(output).is_subset(&source)
+    // shortcut: safe paraphrases may be rejected, upgrade when claim-level validation exists.
+    let source: Vec<_> = spans(note).chain(spans(transcript)).collect();
+    !words(output).is_empty()
+        && spans(output).all(|claim| source.contains(&claim))
         && super::extract::quotes(output)
             .all(|quote| note.contains(quote) || transcript.contains(quote))
 }
 
+fn complete_note(text: &str) -> Option<&str> {
+    text.trim_end().strip_suffix(END_NOTE).map(str::trim_end)
+}
+
 fn supported(request: &str) -> bool {
-    let request = request.to_lowercase();
-    [
-        "short", "brief", "length", "long", "quote", "section", "bullet",
-    ]
-    .iter()
-    .any(|term| request.contains(term))
+    words(request).iter().any(|word| {
+        matches!(
+            word.as_str(),
+            "short"
+                | "shorter"
+                | "shorten"
+                | "brief"
+                | "length"
+                | "long"
+                | "longer"
+                | "quote"
+                | "quotes"
+                | "section"
+                | "sections"
+                | "bullet"
+                | "bullets"
+        )
+    })
 }
 
 fn available(app: &AppHandle) -> Result<(), &'static str> {
@@ -145,7 +166,7 @@ pub fn session_coach_start(
         }
         let candidate_id = commands::opaque_id()?;
         let prompt = format!(
-            "Revise the saved clinical note for writing form only. Preserve every clinical fact and attribution. Use only words already in the saved note or transcript. Return the full revised note, no preamble.\nSaved note:\n{}\nTranscript:\n{}\nEarlier requests:\n{}\nEarlier candidate:\n{}\nCurrent request:\n{}",
+            "Revise the saved clinical note for writing form only. Preserve every clinical fact and attribution. Use only source spans from the saved note or transcript; do not recombine claims. Return the full revised note, no preamble. End with {END_NOTE}.\nSaved note:\n{}\nTranscript:\n{}\nEarlier requests:\n{}\nEarlier candidate:\n{}\nCurrent request:\n{}",
             session.summary, session.transcript, prior_requests.join("\n"), prior.unwrap_or_default(), request
         );
         let cancel = Arc::new(AtomicBool::new(false));
@@ -163,7 +184,8 @@ pub fn session_coach_start(
             }
             state.active = None;
             let outcome = match result {
-                Ok(text) if grounded(&note, &transcript, &text) => {
+                Ok(text) if complete_note(&text).is_some_and(|text| grounded(&note, &transcript, text)) => {
+                    let text = complete_note(&text).unwrap().to_string();
                     state.candidate = Some((session_for_result.clone(), candidate_id.clone(), text.clone()));
                     SessionCoachOutcome::Candidate { candidate_id, note: text }
                 }
@@ -245,7 +267,20 @@ mod tests {
             "",
             "Client said ‘helps rest’."
         ));
+        assert!(!grounded("Alice slept. Bob cried.", "", "Alice cried."));
+        assert!(!grounded(
+            "Client said rest helps.",
+            "",
+            "Client said rest."
+        ));
+        assert!(grounded("Client took a break.", "", "Client took a break."));
         assert!(supported("Use bullet points in Assessment"));
         assert!(!supported("Diagnose the client"));
+        assert!(!supported("Prolonged shortness"));
+        assert_eq!(
+            complete_note("Client took a break.\n<<END_OF_NOTE>>"),
+            Some("Client took a break.")
+        );
+        assert_eq!(complete_note("Client took a break."), None);
     }
 }

@@ -97,6 +97,7 @@ pub struct TranscriptWaiting {
 pub trait JobEvents: Send + Sync {
     fn recording_starting(&self) {}
     fn summary_queue_changed(&self) {}
+    fn session_coach_cancelled(&self) {}
     /// Called under the recording lock to keep tray updates in transition order.
     fn recording_changed(&self, _recording: bool, _multi_speaker: bool) {}
     fn recording_state(&self, _: Option<RecordingState>) {}

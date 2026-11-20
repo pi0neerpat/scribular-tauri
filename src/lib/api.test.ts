@@ -23,6 +23,7 @@ const {
   requestSessionAudio,
   startFresh,
   startRecording,
+  sessionCoachStart,
 } = await import('./api');
 
 describe('api', () => {
@@ -63,6 +64,18 @@ describe('api', () => {
     expect(name).toBe('app://heartbeat');
     cb({ payload: { seq: 3 } });
     expect(seen).toEqual([3]);
+  });
+
+  it('subscribes to session coach results before invoking start', async () => {
+    const order: string[] = [];
+    const unlisten = vi.fn();
+    listen.mockImplementation(async (name) => { order.push(name); return unlisten; });
+    invoke.mockImplementation(async (name) => { order.push(name); return 'job-1'; });
+    const started = await sessionCoachStart('session-1', 'Shorten this', vi.fn(), vi.fn());
+    expect(order).toEqual(['session-coach://result', 'session-coach://stopped', 'session_coach_start']);
+    expect(started.jobId).toBe('job-1');
+    started.unlisten();
+    expect(unlisten).toHaveBeenCalledTimes(2);
   });
 
   it('wraps updater commands and event', async () => {

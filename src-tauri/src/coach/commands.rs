@@ -490,7 +490,7 @@ pub fn discard(app: &AppHandle, reason: CoachCancelReason) {
 
 pub fn refresh_availability(app: &AppHandle, last: &mut Option<(CoachAvailability, bool)>) {
     let availability = availability(app);
-    if availability.message.is_some() {
+    if availability.message.is_some() && availability.reason != Some(CoachBlock::Busy) {
         super::session::cancel_for_gate(app);
     }
     if availability.reason == Some(CoachBlock::AccessDenied) {

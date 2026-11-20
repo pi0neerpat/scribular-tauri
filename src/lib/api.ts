@@ -227,8 +227,23 @@ export const coachChoose = (draftId: string, proposalId: string, useThis: boolea
 export const coachSave = (draftId: string, name: string, useNext: boolean) => invoke<PromptList>('coach_save', { draftId, name, useNext });
 export const coachCancel = (draftId: string) => invoke<void>('coach_cancel', { draftId });
 export const getCoachAvailability = () => invoke<CoachAvailability>('get_coach_availability');
-export const sessionCoachStart = (sessionId: string, request: string, priorRequests: string[] = [], priorCandidateId: string | null = null) =>
-  invoke<string>('session_coach_start', { sessionId, request, priorRequests, priorCandidateId });
+export async function sessionCoachStart(
+  sessionId: string, request: string, onResult: (result: SessionCoachResult) => void,
+  onStopped: (stopped: SessionCoachStopped) => void,
+  priorRequests: string[] = [], priorCandidateId: string | null = null,
+): Promise<{ jobId: string; unlisten: () => void }> {
+  const stopResult = await onSessionCoachResult(onResult);
+  let stopStopped: UnlistenFn = () => {};
+  try {
+    stopStopped = await onSessionCoachStopped(onStopped);
+    const jobId = await invoke<string>('session_coach_start', { sessionId, request, priorRequests, priorCandidateId });
+    return { jobId, unlisten: () => { stopResult(); stopStopped(); } };
+  } catch (error) {
+    stopResult();
+    stopStopped?.();
+    throw error;
+  }
+}
 export const sessionCoachStop = (jobId: string) => invoke<void>('session_coach_stop', { jobId });
 export const onSessionCoachResult = (handler: (result: SessionCoachResult) => void): Promise<UnlistenFn> =>
   listen<SessionCoachResult>('session-coach://result', (event) => handler(event.payload));
