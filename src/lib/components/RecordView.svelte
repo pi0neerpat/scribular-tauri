@@ -82,6 +82,19 @@
   let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
   $effect(() => onResultNote(!!result?.summary));
   export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
+  export function toggleRecording() {
+    if (busy || askSpeakerCount) return;
+    if (recording) void stop();
+    else if (sourceReady && !denied && speechReady && allows($accessState)) void start();
+  }
+  export function toggleRecordingPause() {
+    if (recording && !busy && !askSpeakerCount) void togglePause();
+  }
+  export function cancelDialog() {
+    if (askSpeakerCount) { askSpeakerCount = false; return true; }
+    if (pickerOpen) { pickerOpen = false; return true; }
+    return false;
+  }
   export async function refreshAfterDeletion() {
     const id = sessionId ?? result?.id;
     if (!id || await getSession(id)) return;

@@ -184,10 +184,8 @@ pub fn set_shell_menu_state(
     let has_sessions = app
         .try_state::<Arc<Store>>()
         .is_some_and(|store| store.session_count().is_ok_and(|count| count > 0));
-    let recording = recording
-        || app
-            .try_state::<Arc<Recorder>>()
-            .is_some_and(|r| r.is_recording());
+    let recorder_state = app.try_state::<Arc<Recorder>>().and_then(|r| r.recording_state());
+    let recording = recording || recorder_state.is_some();
     crate::shell::menu::set_state(
         &app,
         has_sessions,
@@ -199,6 +197,7 @@ pub fn set_shell_menu_state(
         // Locked-store startup never manages Licensing: treat it as non-writable.
         app.try_state::<Arc<Licensing>>()
             .is_some_and(|l| l.require_access().is_ok()),
+        recorder_state.is_some_and(|state| state.status == crate::jobs::RecordingStatus::Paused),
     )
 }
 
@@ -1618,6 +1617,11 @@ impl JobEvents for TauriJobEvents {
     }
 
     fn recording_state(&self, state: Option<RecordingState>) {
+        let app = self.0.clone();
+        let menu_state = state.clone();
+        let _ = self.0.run_on_main_thread(move || {
+            crate::shell::menu::sync_recording_state(&app, menu_state.as_ref());
+        });
         let _ = self.0.emit(RECORDING_STATE_EVENT, state);
     }
 

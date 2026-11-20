@@ -22,6 +22,8 @@
   let clearing = $state(false);
   let query = $state('');
   let searchField: HTMLInputElement;
+  let sidebar: HTMLElement;
+  let sidebarVisible = $state(true);
   let request = 0;
   let copiedId = $state<string | null>(null);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -71,8 +73,24 @@
   }
 
   export function focusSearch() {
+    sidebarVisible = true;
     searchField?.focus();
     searchField?.select();
+  }
+  export function toggleSidebar() { sidebarVisible = !sidebarVisible; }
+  export function moveSession(direction: -1 | 1) {
+    if (navigationLocked || !sessions.length) return;
+    const index = sessions.findIndex((item) => item.id === selected?.id);
+    const next = sessions[Math.max(0, Math.min(sessions.length - 1, index + direction))];
+    const button = [...sidebar.querySelectorAll<HTMLButtonElement>('button.session')].find((row) => row.dataset.sessionId === next.id);
+    if (button) open(next, button);
+  }
+  function sidebarKeydown(event: KeyboardEvent) {
+    const rows = [...sidebar.querySelectorAll<HTMLButtonElement>('button.session:not(:disabled)')];
+    const index = rows.indexOf(event.target as HTMLButtonElement);
+    if (index < 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+    event.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
   }
   export function confirmDeleteSelected() { if (view === 'history' && selected && !['recording', 'finalizing'].includes(selected.status)) summaryPanel?.requestDelete(); }
   export async function copySelectedNote() { if (view === 'history' && selected?.summary) await summaryPanel?.copy(); }
@@ -104,11 +122,12 @@
   }
 
   onMount(() => {
+    window.addEventListener('keydown', sidebarKeydown);
     void refresh();
     getPromptList().then((p) => (prompts = p)).catch(() => {});
     listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = onSessionProgress((p) => { void applyProgress(p).catch((e) => (error = String(e))); });
-    return () => { unlisten.then((fn) => fn()); clearTimeout(deleteTimer); clearTimeout(copiedTimer); };
+    return () => { window.removeEventListener('keydown', sidebarKeydown); unlisten.then((fn) => fn()); clearTimeout(deleteTimer); clearTimeout(copiedTimer); };
   });
 
   async function recover(id: string) {
@@ -166,8 +185,8 @@
 
 </script>
 
-<div class="shell">
-  <aside aria-label="Sidebar" data-tour="sessions">
+<div class="shell" class:sidebar-hidden={!sidebarVisible}>
+  <aside bind:this={sidebar} aria-label="Sidebar" data-tour="sessions" hidden={!sidebarVisible}>
     <div class="sidebar">
       <input bind:this={searchField} type="search" aria-label="Search sessions" placeholder="Search sessions" bind:value={query} oninput={(e) => { query = e.currentTarget.value; void refresh(); }} />
       {#if error}<p role="alert">Could not update sidebar: {error} <button onclick={() => { void refresh(); }}>Retry</button></p>{/if}
@@ -184,7 +203,7 @@
               {#each group.rows as item (item.id)}
                 {@const event = progress[item.id]}
                 <li>
-                  <button class="session" onclick={(e) => open(item, e.currentTarget)} oncontextmenu={(e) => { e.preventDefault(); const menu = e.currentTarget.nextElementSibling; if (menu instanceof HTMLDetailsElement) menu.open = true; }} aria-current={view === 'history' && selected?.id === item.id ? 'page' : undefined} disabled={navigationLocked}>
+                  <button class="session" data-session-id={item.id} onclick={(e) => open(item, e.currentTarget)} oncontextmenu={(e) => { e.preventDefault(); const menu = e.currentTarget.nextElementSibling; if (menu instanceof HTMLDetailsElement) menu.open = true; }} aria-current={view === 'history' && selected?.id === item.id ? 'page' : undefined} disabled={navigationLocked}>
                     <strong>{item.title || new Date(item.createdAt).toLocaleString()}</strong>
                     <time>{new Date(item.createdAt).toLocaleDateString('en-US')}</time>
                     <span>{event?.message ?? item.status} {item.isSample ? 'Sample' : ''}</span>
@@ -231,6 +250,7 @@
 
 <style>
   .shell { display: grid; grid-template-columns: minmax(14rem, 17rem) minmax(0, 1fr); gap: 1rem; }
+  .shell.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
   aside { border-right: 1px solid #8884; padding: 1rem; }
   .sidebar { display: flex; flex-direction: column; height: 70vh; }
   .sessions { flex: 1; overflow-y: auto; }
