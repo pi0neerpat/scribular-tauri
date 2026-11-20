@@ -253,6 +253,12 @@ fn cancelled_practice_drops_the_result_and_has_no_persisted_job() {
 #[test]
 fn session_coach_job_leaves_saved_session_unchanged() {
     let (_db, store) = TestStore::new();
+    let log_dir = std::env::temp_dir().join(format!(
+        "scribular-session-coach-logs-{}",
+        std::process::id()
+    ));
+    crate::diag::log::init(&log_dir).unwrap();
+    crate::diag::telemetry::set_enabled(&store, true).unwrap();
     let (engine, _, _) = engine(true);
     let queue = JobQueue::new(store.clone(), Arc::new(Loader(engine)), Arc::new(Silent));
     let session = store
@@ -294,6 +300,20 @@ fn session_coach_job_leaves_saved_session_unchanged() {
     assert_eq!(after.transcript, before.transcript);
     assert!(store.queued_summaries().unwrap().is_empty());
     assert!(queue.wait_idle(WAIT));
+    let diagnostics = crate::diag::info::diagnostics(
+        &store,
+        &crate::models::ModelManager::new(log_dir.join("models"), crate::models::manifest()),
+        &log_dir,
+    )
+    .unwrap();
+    let logs = std::fs::read_to_string(log_dir.join("scribular.log")).unwrap();
+    for text in [diagnostics, logs] {
+        assert!(!text.contains(sentinel));
+        assert!(!text.contains("Shorten this"));
+    }
+    assert_eq!(store.get_setting("usage_sessions").unwrap(), None);
+    assert_eq!(store.get_setting("usage_total_seconds").unwrap(), None);
+    assert_eq!(store.get_setting("pending_report").unwrap(), None);
 }
 
 #[test]
