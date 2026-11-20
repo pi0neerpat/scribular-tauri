@@ -107,6 +107,7 @@ pub struct ModelManager {
     /// Serializes requests so concurrent callers see an owner's result before retrying.
     download_locks: Vec<AsyncMutex<()>>,
     pub readiness: Readiness,
+    progress: Mutex<HashMap<String, ModelProgress>>,
     /// The summary model (spec 03 R18); only it downloads with the rest.
     selected_llm: Mutex<String>,
     /// The recorder's update install gate, shared so downloads cannot start mid-install.
@@ -153,6 +154,7 @@ impl ModelManager {
             specs,
             client: reqwest::Client::new(),
             readiness: Readiness::default(),
+            progress: Mutex::new(HashMap::new()),
             selected_llm: Mutex::new(first_llm),
             install_gate: OnceLock::new(),
             availability: Mutex::new(if unsupported {
@@ -262,10 +264,14 @@ impl ModelManager {
     /// Current state of every model, for the first render before any
     /// progress event arrives.
     pub fn status(&self) -> Vec<ModelProgress> {
+        let progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
         self.specs
             .iter()
             .map(|spec| {
                 let state = self.readiness.get(&spec.id);
+                if let Some(latest) = progress.get(&spec.id).filter(|p| p.state == state) {
+                    return latest.clone();
+                }
                 ModelProgress {
                     model_id: spec.id.clone(),
                     state,
@@ -381,7 +387,11 @@ impl ModelManager {
             self.set_summary_availability(SummaryAvailability::Downloading);
         }
         let report = |p: ModelProgress| {
-            self.readiness.set(&p.model_id, p.state);
+            {
+                let mut progress = self.progress.lock().unwrap_or_else(|p| p.into_inner());
+                self.readiness.set(&p.model_id, p.state);
+                progress.insert(p.model_id.clone(), p.clone());
+            }
             on_progress(p);
         };
         match ensure(&self.client, &self.dir, spec, &report).await {

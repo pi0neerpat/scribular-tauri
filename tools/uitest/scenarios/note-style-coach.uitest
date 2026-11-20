@@ -1,7 +1,7 @@
 # Automated sample-to-style flow. Use a supported Mac with the summary download available.
 launch
-click "Close tour"
-expect-not "Getting Scribular ready" timeout 300s
+click "Continue"
+expect-not "Welcome to Scribular"
 click "Note Styles"
 click "Use a Sample Note" timeout 300s
 click "DAP"

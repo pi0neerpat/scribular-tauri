@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount, setContext, tick } from 'svelte';
-  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, onAppSettingsChanged, completeOnboarding, getOnboardingState, listSessions } from './lib/api';
+  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, onAppSettingsChanged, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
-  import FirstRun from './lib/components/FirstRun.svelte';
-  import ModelStatus from './lib/components/ModelStatus.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import NoteStyles from './lib/components/NoteStyles.svelte';
   import UpdateAlert from './lib/components/UpdateAlert.svelte';
@@ -12,8 +10,10 @@
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
   import { navigation, navigationDisabled, navigationLockedBy, type AppView } from './lib/navigation';
-  import { modelsStatus, onModelsProgress, setMainWindowVisible } from './lib/api';
-  import OnboardingTour from './lib/components/OnboardingTour.svelte';
+  import { downloadModels, modelsStatus, onModelsProgress, setMainWindowVisible } from './lib/api';
+  import { mergeSnapshot } from './lib/models';
+  import WelcomeSheet from './lib/components/WelcomeSheet.svelte';
+  import type { ModelProgress } from './lib/types/ModelProgress';
   import type { AppVersion } from './lib/types/AppVersion';
   import type { LockReason } from './lib/types/LockReason';
   import { accessState, allows } from './lib/license';
@@ -32,17 +32,21 @@
   let error = $state<string | null>(null);
   let beats = $state(0);
   let interrupted = $state(0);
-  let modelProgress = $state<import('./lib/types/ModelProgress').ModelProgress[]>([]);
-  let navigationLocked = $derived(navigationLockedBy(modelProgress));
+  let modelProgress = $state<ModelProgress[]>([]);
+  let speech = $derived(modelProgress.find((m) => m.modelId === 'whisper-base'));
+  // Background speech and summary downloads leave the sidebar usable.
+  let navigationLocked = $derived(navigationLockedBy(modelProgress.filter((m) => m.modelId === 'speaker-campplus')));
+  let modelError = $state(false);
+  let preparingModels = $state(false);
+  let retryModels = $state<() => void>(() => {});
   let view = $derived($navigation.view);
   $effect(() => navigation.update((n) => ({ ...n, navigationLocked })));
   $effect(() => { if (typeof gate === 'object') void setShellMenuState({ selected: false, hasNote: false, recording: false, recoverable: false, locked: true }).catch(() => {}); });
-  let speechReady = $state(false);
   let recording = $state(false);
   let recordingKnown = $state(false);
   let quitIntent = $state<'quit' | 'restart' | null>(null);
-  let tourOpen = $state(false);
-  let tourRun = $state(0);
+  let welcomeOpen = $state(false);
+  let welcome = $state<{ show: () => void }>();
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
   let history = $state<{ focusSearch: () => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
   let recordView = $state<{ copyResultNote: () => Promise<void>; refreshAfterDeletion: () => Promise<void> } | undefined>();
@@ -157,13 +161,13 @@
     const showRecord = () => { pendingCoachInterruption = false; navigate('record'); };
     window.addEventListener('tray-start-failed', showRecord);
     const find = (event: KeyboardEvent) => {
-      if (!coach && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      if (!coach && !welcomeOpen && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault(); history?.focusSearch();
       }
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
-      if (coach) return;
+      if (coach || welcomeOpen) return;
       switch (id) {
         case 'shell-example-style':
         case 'shell-coach': openCoach({}); break;
@@ -176,7 +180,7 @@
         case 'shell-copy-note': void (view === 'record' ? recordView?.copyResultNote() : history?.copySelectedNote()); break;
         case 'shell-recover': if (!recording && allows($accessState)) navigate('history', undefined, () => history?.recoverFirst()); break;
         case 'shell-update': void checkForUpdates().catch((e) => (error = String(e))); break;
-        case 'shell-welcome': showTour(); break;
+        case 'shell-welcome': welcome?.show(); break;
         case 'shell-restore-sample': if (allows($accessState)) void restoreSampleSessions().then(() => history?.refreshSessions()).catch((e) => (error = String(e))); break;
         case 'shell-support': void openExternalLink('mailto:support@scribular.com').catch((e) => (error = String(e))); break;
         case 'shell-privacy': void openExternalLink('https://www.scribular.com/privacy').catch((e) => (error = String(e))); break;
@@ -184,19 +188,14 @@
       }
     });
     setMainWindowVisible(true).catch(() => {});
-    const modelEventsSeen = new Set<string>();
-    const modelEvents = onModelsProgress((p) => {
-      modelEventsSeen.add(p.modelId);
-      modelProgress = [...modelProgress.filter((m) => m.modelId !== p.modelId), p];
-    });
-    modelEvents.then(() => modelsStatus()).then((snapshot) => {
-      modelProgress = [...snapshot.filter((m) => !modelEventsSeen.has(m.modelId)), ...modelProgress.filter((m) => modelEventsSeen.has(m.modelId))];
-    }).catch(() => {});
     const quitRequest = onQuitRequested((restart) => {
       if (typeof gate === 'object') void quitApp();
       else quitIntent = restart ? 'restart' : 'quit';
     });
-    const trayStart = onTrayStartRecording(() => window.dispatchEvent(new Event('tray-start-recording')));
+    const trayStart = onTrayStartRecording(() => {
+      if (welcomeOpen) void setMainWindowVisible(true).catch((e) => (error = String(e)));
+      else window.dispatchEvent(new Event('tray-start-recording'));
+    });
     const closeRequest = onWindowCloseRequested(() => {
       if (coach) closeCoach(false);
       const hide = () => { void setMainWindowVisible(false).catch((e) => (error = String(e))); };
@@ -243,9 +242,6 @@
           takeEncryptionNotice()
             .then((n) => (notice = n))
             .catch((e) => (error = String(e)));
-          getOnboardingState()
-            .then((state) => { if (tourRun === 0) tourOpen = !state.completed; })
-            .catch((e) => { error = String(e); if (tourRun === 0) tourOpen = true; });
         }
       })
       .catch((e) => (error = String(e)));
@@ -260,7 +256,6 @@
       menuRequest.then((fn) => fn());
       unlisten.then((fn) => fn());
       progress.then((fn) => fn());
-      modelEvents.then((fn) => fn());
       quitRequest.then((fn) => fn());
       trayStart.then((fn) => fn());
       closeRequest.then((fn) => fn());
@@ -269,20 +264,39 @@
     };
   });
 
-  async function finishTour() {
-    try {
-      await completeOnboarding();
-      tourOpen = false;
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  function showTour() {
-    navigate('record');
-    tourRun++;
-    tourOpen = true;
-  }
+  $effect(() => {
+    if (gate !== 'open') return;
+    let disposed = false;
+    let remove: (() => void) | undefined;
+    let snapshotLoaded = false;
+    const prepare = async () => {
+      if (disposed || preparingModels) return;
+      preparingModels = true;
+      try {
+        remove ??= await onModelsProgress((progress) => {
+          if (disposed) return;
+          modelProgress = [...modelProgress.filter((m) => m.modelId !== progress.modelId), progress];
+        });
+        if (disposed) { remove(); return; }
+        if (!snapshotLoaded) {
+          const snapshot = await modelsStatus();
+          if (disposed) return;
+          modelProgress = mergeSnapshot(snapshot, modelProgress);
+          snapshotLoaded = true;
+        }
+        await downloadModels();
+        if (!disposed) modelError = false;
+      } catch {
+        if (!disposed) modelError = true;
+      } finally {
+        if (!disposed) preparingModels = false;
+      }
+    };
+    retryModels = prepare;
+    // Start with a live listener so a delayed snapshot cannot overwrite progress.
+    void Promise.resolve().then(prepare);
+    return () => { disposed = true; remove?.(); };
+  });
 </script>
 
 {#if typeof gate === 'object'}
@@ -305,8 +319,6 @@
       <button onclick={() => navigate('history')}>Recover</button>
     </p>
   {/if}
-  <FirstRun bind:speechReady />
-  <ModelStatus />
   {#if version}
     <h1>{version.name} <span data-testid="version">{version.version}</span></h1>
   {:else if error}
@@ -314,10 +326,13 @@
   {:else}
     <p>Loading…</p>
   {/if}
-  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} {recordHasNote} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onTour={showTour} onSessionsChanged={sessionsChanged}>
+  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} {recordHasNote} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onSessionsChanged={sessionsChanged}>
     <!-- Keep the recorder mounted so its progress survives navigation. -->
     <div hidden={view !== 'record'}><RecordView bind:this={recordView}
-        {speechReady}
+        {speech}
+        {modelError}
+        {preparingModels}
+        onRetryModels={retryModels}
         {coachInterrupted}
         onDismissCoachInterruption={() => (coachInterrupted = false)}
         onStartFailed={() => (pendingCoachInterruption = false)}
@@ -328,7 +343,7 @@
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}
   </SessionHistory>
-  {#if tourOpen}{#key tourRun}<OnboardingTour onComplete={finishTour} />{/key}{/if}
+  <WelcomeSheet bind:this={welcome} bind:open={welcomeOpen} suspended={!!quitIntent} />
   <p>Heartbeat: {beats}</p>
   {#if error && version}<p role="alert">{error}</p>{/if}
 </main>
