@@ -34,8 +34,7 @@
   let interrupted = $state(0);
   let modelProgress = $state<ModelProgress[]>([]);
   let speech = $derived(modelProgress.find((m) => m.modelId === 'whisper-base'));
-  // Background speech and summary downloads leave the sidebar usable.
-  let navigationLocked = $derived(navigationLockedBy(modelProgress.filter((m) => m.modelId === 'speaker-campplus')));
+  let navigationLocked = $derived(navigationLockedBy(modelProgress));
   let modelError = $state(false);
   let preparingModels = $state(false);
   let retryModels = $state<() => void>(() => {});
@@ -276,6 +275,7 @@
         remove ??= await onModelsProgress((progress) => {
           if (disposed) return;
           modelProgress = [...modelProgress.filter((m) => m.modelId !== progress.modelId), progress];
+          if (progress.modelId === 'whisper-base' && (progress.state === 'ready' || progress.state === 'failed')) preparingModels = false;
         });
         if (disposed) { remove(); return; }
         if (!snapshotLoaded) {
@@ -287,9 +287,7 @@
         await downloadModels();
         if (!disposed) modelError = false;
       } catch {
-        if (!disposed) modelError = true;
-      } finally {
-        if (!disposed) preparingModels = false;
+        if (!disposed) { modelError = true; preparingModels = false; }
       }
     };
     retryModels = prepare;

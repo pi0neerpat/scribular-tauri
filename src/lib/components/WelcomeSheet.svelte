@@ -29,16 +29,16 @@
     if (!open && !busy) void load(true);
   }
 
-  async function run(action: () => Promise<void>, failure: string) {
+  async function run(action: () => Promise<void>, failure: string, openOnError = true) {
     busy = true;
     try {
       await action();
       error = '';
       retry = null;
     } catch {
-      open = true;
+      if (openOnError) open = true;
       error = failure;
-      retry = () => { void run(action, failure); };
+      retry = () => { void run(action, failure, openOnError); };
     } finally {
       busy = false;
     }
@@ -54,7 +54,7 @@
         open = true;
         consent = (await getTelemetrySetting()) === 'on';
       }
-    }, 'Could not read your welcome settings.');
+    }, 'Could not read your welcome settings.', reopen);
   }
 
   function saveFirstDisplay() {
@@ -76,6 +76,10 @@
   }
 </script>
 
+{#if error && !open}
+  <p role="alert">{error}</p>
+  <button onclick={() => retry?.()} disabled={busy}>Retry welcome settings</button>
+{/if}
 <dialog bind:this={dialog} aria-labelledby="welcome-title" oncancel={(e) => e.preventDefault()}>
   <h2 id="welcome-title">Welcome to Scribular</h2>
   <ul>

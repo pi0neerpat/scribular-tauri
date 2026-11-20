@@ -166,6 +166,26 @@ describe('AS1 welcome on first launch', () => {
 });
 
 describe('AS2 Help and usage-data consent', () => {
+  it.each([true, false])('recovers a failed startup read without guessing whether welcome was seen (completed=%s)', async (seen) => {
+    completed = seen;
+    fail = 'get_onboarding_state';
+    launch();
+    await vi.waitFor(() => expect(button('Retry welcome settings')).toBeDefined());
+    expect(dialog()).toBeNull();
+    expect(target.textContent).toContain('Could not read your welcome settings.');
+    fail = undefined;
+    button('Retry welcome settings').click();
+    if (seen) {
+      await vi.waitFor(() => expect(target.textContent).not.toContain('Could not read your welcome settings.'));
+      expect(dialog()).toBeNull();
+      expect(calls('set_telemetry_setting')).toHaveLength(0);
+    } else {
+      await vi.waitFor(() => expect(dialog()).not.toBeNull());
+      await vi.waitFor(() => expect(next().disabled).toBe(false));
+      expect(consent).toBe('off');
+    }
+  });
+
   it('reads the saved opt-in when Help reopens welcome and makes no writes', async () => {
     completed = true;
     consent = 'on';
@@ -225,12 +245,13 @@ describe('AS3 Record model download', () => {
     await vi.waitFor(() => expect(target.textContent).toContain('Downloading the speech model (65%)'));
     expect(target.querySelector<HTMLElement>('.record-ring')?.style.getPropertyValue('--speech-progress')).toBe('65%');
     expect(start().disabled).toBe(true);
-    expect(button('New Recording').disabled).toBe(false);
-    expect(target.querySelector<HTMLButtonElement>('button.session')?.disabled).toBe(false);
+    expect(button('New Recording').disabled).toBe(true);
+    expect(target.querySelector<HTMLButtonElement>('button.session')?.disabled).toBe(true);
     expect(target.textContent).not.toMatch(/Getting Scribular ready|Waiting for the summary model|Summary model download|Help improve Scribular|Show tour/);
 
     emit('models://progress', speech('ready', 100));
     await vi.waitFor(() => expect(start().disabled).toBe(false));
+    expect(button('New Recording').disabled).toBe(true);
     expect(start().hasAttribute('aria-describedby')).toBe(false);
     expect(dialog()).toBeNull();
   });
@@ -244,9 +265,14 @@ describe('AS3 Record model download', () => {
     expect(start().disabled).toBe(true);
     button('Retry speech model download').click();
     await vi.waitFor(() => expect(calls('download_models')).toHaveLength(2));
+    expect(button('Retry speech model download').disabled).toBe(true);
+    button('Retry speech model download').click();
+    expect(calls('download_models')).toHaveLength(2);
     emit('models://progress', speech('downloading', 50));
     await vi.waitFor(() => expect(target.textContent).toContain('Downloading the speech model (50%)'));
     expect(button('Retry speech model download')).toBeUndefined();
+    emit('models://progress', speech('failed', 50, 'connection lost again'));
+    await vi.waitFor(() => expect(button('Retry speech model download').disabled).toBe(false));
   });
 
   it('retries when the initial status IPC fails', async () => {
