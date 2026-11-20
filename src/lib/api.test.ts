@@ -73,6 +73,9 @@ describe('api', () => {
     invoke.mockImplementation(async (name) => { order.push(name); return 'job-1'; });
     const started = await sessionCoachStart('session-1', 'Shorten this', vi.fn(), vi.fn());
     expect(order).toEqual(['session-coach://result', 'session-coach://stopped', 'session_coach_start']);
+    expect(invoke).toHaveBeenCalledWith('session_coach_start', {
+      sessionId: 'session-1', request: 'Shorten this', priorRequests: [], priorCandidateId: null,
+    });
     expect(started.jobId).toBe('job-1');
     started.unlisten();
     expect(unlisten).toHaveBeenCalledTimes(2);

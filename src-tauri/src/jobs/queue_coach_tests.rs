@@ -39,12 +39,43 @@ impl Drop for TestStore {
     }
 }
 
+struct TestLogDir(PathBuf);
+
+impl Drop for TestLogDir {
+    fn drop(&mut self) {
+        crate::diag::log::reset_for_tests();
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct Silent;
 
 impl JobEvents for Silent {
     fn progress(&self, _: SessionProgress) {}
     fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
     fn segments(&self, _: crate::jobs::SessionSegments) {}
+}
+
+struct AvailabilityChanged(mpsc::Sender<()>);
+
+impl JobEvents for AvailabilityChanged {
+    fn progress(&self, _: SessionProgress) {}
+    fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
+    fn segments(&self, _: crate::jobs::SessionSegments) {}
+    fn summary_queue_changed(&self) {
+        self.0.send(()).unwrap();
+    }
+}
+
+struct CoachCancelled(mpsc::Sender<()>);
+
+impl JobEvents for CoachCancelled {
+    fn progress(&self, _: SessionProgress) {}
+    fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
+    fn segments(&self, _: crate::jobs::SessionSegments) {}
+    fn session_coach_cancelled(&self) {
+        self.0.send(()).unwrap();
+    }
 }
 
 struct Scripted {
@@ -258,6 +289,7 @@ fn session_coach_job_leaves_saved_session_unchanged() {
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&log_dir);
+    let _log_cleanup = TestLogDir(log_dir.clone());
     crate::diag::log::init(&log_dir).unwrap();
     crate::diag::telemetry::set_enabled(&store, true).unwrap();
     let (engine, _, _) = engine(true);
@@ -315,8 +347,31 @@ fn session_coach_job_leaves_saved_session_unchanged() {
     assert_eq!(store.get_setting("usage_sessions").unwrap(), None);
     assert_eq!(store.get_setting("usage_total_seconds").unwrap(), None);
     assert_eq!(store.get_setting("pending_report").unwrap(), None);
-    crate::diag::log::reset_for_tests();
-    let _ = std::fs::remove_dir_all(log_dir);
+}
+
+#[test]
+fn session_coach_completion_signals_availability() {
+    let (_db, store) = TestStore::new();
+    let (engine, _, _) = engine(true);
+    let (changed, signals) = mpsc::channel();
+    let queue = JobQueue::new(
+        store,
+        Arc::new(Loader(engine)),
+        Arc::new(AvailabilityChanged(changed)),
+    );
+    let (done, result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: "Shorten the note".into(),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    assert_eq!(result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    signals.recv_timeout(WAIT).unwrap();
+    assert!(!queue.is_busy());
 }
 
 #[test]
@@ -354,7 +409,12 @@ fn cancelled_session_coach_drops_late_result() {
 fn real_summary_preempts_running_session_coach() {
     let (_db, store) = TestStore::new();
     let (engine, started, release) = engine(true);
-    let queue = JobQueue::new(store.clone(), Arc::new(Loader(engine)), Arc::new(Silent));
+    let (cancelled, signal) = mpsc::channel();
+    let queue = JobQueue::new(
+        store.clone(),
+        Arc::new(Loader(engine)),
+        Arc::new(CoachCancelled(cancelled)),
+    );
     let session = store
         .create_session(&NewSession {
             title: "Real".into(),
@@ -383,6 +443,7 @@ fn real_summary_preempts_running_session_coach() {
     started.recv_timeout(WAIT).unwrap();
     queue.regenerate(&session.id, STYLE).unwrap();
     assert!(cancel.load(Ordering::Relaxed));
+    signal.recv_timeout(WAIT).unwrap();
     release.send(()).unwrap();
     assert!(matches!(
         result.recv_timeout(WAIT),

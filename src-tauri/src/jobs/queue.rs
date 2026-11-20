@@ -771,6 +771,7 @@ fn run_session_coach(
         (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
     }
     shared.lock().running_session_coach = None;
+    shared.events.summary_queue_changed();
     shared.changed.notify_all();
 }
 
