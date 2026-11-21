@@ -589,7 +589,7 @@
   {:else if capture?.sessionId === sessionId && capture?.appAudioStatus === 'unavailable'}
     <p role="status">App audio is unavailable. Your microphone is still recording. <button onclick={showCallExplainer}>Retry app audio</button></p>
   {/if}
-  {#if error}<p role="alert">{error}</p>{/if}
+  {#if error && !denied}<p role="alert">{error}</p>{/if}
 
   {#if result}
     {@const session = result}

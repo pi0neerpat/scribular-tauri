@@ -17,7 +17,7 @@ const recordingState = vi.fn();
 const onRecordingState = vi.fn();
 const onSessionLevels = vi.fn();
 const listAudioApps = vi.fn();
-const deniedPrivacy = vi.fn(() => null as 'systemAudio' | null);
+const deniedPrivacy = vi.fn(() => null as 'microphone' | 'systemAudio' | null);
 const getSession = vi.fn();
 const onSessionProgress = vi.fn();
 const onSessionTranscriptWaiting = vi.fn(async (_handler: (state: { sessionId: string; waiting: boolean }) => void) => () => {});
@@ -206,6 +206,17 @@ describe('recording speaker-count prompt', () => {
     emitRecordingState!({ sessionId: recording.id, status: 'running', activeElapsedMs: 0, targetApp: 'Zoom', appAudioStatus: 'unavailable' });
     await vi.waitFor(() => expect(target.textContent).toContain('App audio is unavailable.'));
     expect(target.textContent).toContain('stop failed');
+    unmount(app);
+    target.remove();
+  });
+  it('shows only the permission notice when microphone access is denied', async () => {
+    startRecording.mockRejectedValueOnce(new Error('microphone permission denied'));
+    deniedPrivacy.mockReturnValueOnce('microphone');
+    const { target, app } = await renderRecordView();
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Microphone access is off.'));
+    expect(target.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(target.textContent).not.toContain('microphone permission denied');
     unmount(app);
     target.remove();
   });
