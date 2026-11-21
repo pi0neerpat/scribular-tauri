@@ -17,11 +17,9 @@ const apply = (next: Appearance) => {
 };
 
 export async function saveAppearance(next: Appearance): Promise<void> {
-  const previous = current;
-  apply(next);
   appearanceError.set(null);
   try { apply(await setAppearance(next)); }
-  catch (error) { apply(previous); appearanceError.set(`Could not save Appearance. Try again. ${String(error)}`); }
+  catch (error) { appearanceError.set(`Could not save Appearance. Try again. ${String(error)}`); }
 }
 
 export async function startAppearance(): Promise<() => void> {

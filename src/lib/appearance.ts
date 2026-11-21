@@ -23,7 +23,7 @@ export function selectPreset(state: Appearance, selected: Selection): Appearance
 
 export function customize(state: Appearance, preset: Preset, replaceConfirmed = false): Appearance {
   if (state.myTheme && !replaceConfirmed) return state;
-  return { ...state, selected: 'myTheme', myTheme: { origin: preset, values: presetValues(preset) } };
+  return { ...state, selected: 'myTheme', myTheme: { origin: preset, values: { ...presetValues(preset), mode: preset === 'scribularV1' ? 'dark' : state.mode } } };
 }
 
 export function resetMyTheme(state: Appearance): Appearance {
@@ -37,7 +37,7 @@ const accents: Record<Exclude<Accent, { custom: string }>, string> = {
 };
 const tints: Record<Exclude<Tint, 'none'>, { light: string; dark: string }> = {
   warm: { light: '#fff2e6', dark: '#33271f' }, cool: { light: '#edf4ff', dark: '#1d2938' },
-  sage: { light: '#f0f4ea', dark: '#253329' }, rose: { light: '#fff0f3', dark: '#38252d' },
+  sage: { light: '#fcfbf8', dark: '#110f0d' }, rose: { light: '#fff0f3', dark: '#38252d' },
 };
 
 export function resolveAppearance(state: Appearance, systemDark: boolean, systemAccent: string) {
@@ -45,11 +45,14 @@ export function resolveAppearance(state: Appearance, systemDark: boolean, system
   const values = preset ? presetValues(preset) : state.myTheme?.values ?? presetValues('default');
   const mode: Mode = preset === 'scribularV1' ? 'dark' : preset ? state.mode : values.mode;
   const dark = mode === 'dark' || (mode === 'automatic' && systemDark);
-  const accent = typeof values.accent === 'string' ? accents[values.accent] || systemAccent : values.accent.custom;
-  const tint = values.tint === 'none' ? (dark ? '#1c1c1e' : '#ffffff') : tints[values.tint][dark ? 'dark' : 'light'];
+  const accent = preset === 'scribularV1' ? '#057dcd' : preset === 'sage' ? (dark ? '#59a682' : '#467c63')
+    : typeof values.accent === 'string' ? accents[values.accent] || systemAccent : values.accent.custom;
+  const tint = values.tint === 'none'
+    ? preset === 'scribularV1' ? '#000000' : preset === 'sage' ? (dark ? '#110f0d' : '#fcfbf8') : (dark ? '#1c1c1e' : '#ffffff')
+    : tints[values.tint][dark ? 'dark' : 'light'];
   return {
     dark, modeEditable: preset !== 'scribularV1', accent, tint,
-    text: dark ? '#f5f5f7' : '#1c1c1e', record: '#e53935', background: values.background,
+    text: preset === 'scribularV1' ? '#e8eef1' : dark ? '#f5f5f7' : '#1c1c1e', record: '#e53935', background: values.background,
   };
 }
 

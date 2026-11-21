@@ -15,6 +15,9 @@ describe('appearance state', () => {
       expect(resolveAppearance({ ...state, mode: 'light' }, true, '#123456').dark).toBe(selected === 'scribularV1');
       expect(resolveAppearance({ ...state, mode: 'dark' }, false, '#123456').dark).toBe(true);
     }
+    expect(resolveAppearance({ ...defaultAppearance, selected: 'scribularV1' }, false, '#123456')).toMatchObject({ accent: '#057dcd', tint: '#000000', text: '#e8eef1' });
+    expect(resolveAppearance({ ...defaultAppearance, selected: 'sage' }, false, '#123456')).toMatchObject({ accent: '#467c63', tint: '#fcfbf8' });
+    expect(resolveAppearance({ ...defaultAppearance, selected: 'sage' }, true, '#123456')).toMatchObject({ accent: '#59a682', tint: '#110f0d' });
   });
 
   it('preserves My Theme, canceling replacement, and resets to its origin', () => {
@@ -24,6 +27,7 @@ describe('appearance state', () => {
     expect(customize(edited, 'scribularV1')).toEqual(edited);
     expect(customize(edited, 'scribularV1', true).myTheme).toEqual({ origin: 'scribularV1', values: presetValues('scribularV1') });
     expect(resetMyTheme(edited)).toEqual(copied);
+    expect(customize({ ...defaultAppearance, mode: 'light' }, 'sage').myTheme?.values.mode).toBe('light');
   });
 
   it('updates accents and every tint without changing text or record colors', () => {
