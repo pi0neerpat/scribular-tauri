@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
 import type { AppSettings } from './types/AppSettings';
+import type { Appearance } from './types/Appearance';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { CoachAvailability } from './types/CoachAvailability';
@@ -99,6 +100,9 @@ export function onSettingsPane(handler: (pane: string) => void): Promise<Unliste
 }
 export function onAppSettingsChanged(handler: (settings: AppSettings) => void): Promise<UnlistenFn> {
   return listen<AppSettings>('app-settings://changed', (event) => handler(event.payload));
+}
+export function onAppearanceChanged(handler: (appearance: Appearance) => void): Promise<UnlistenFn> {
+  return listen<Appearance>('appearance://changed', (event) => handler(event.payload));
 }
 
 export function listSessions(): Promise<SessionListItem[]> {
@@ -384,6 +388,8 @@ export function getRecordingSettings(): Promise<RecordingSettings> {
 
 export function getAppSettings(): Promise<AppSettings> { return invoke<AppSettings>('get_app_settings'); }
 export function setAppSettings(settings: AppSettings): Promise<void> { return invoke<void>('set_app_settings', { settings }); }
+export function getAppearance(): Promise<Appearance> { return invoke<Appearance>('get_appearance'); }
+export function setAppearance(appearance: Appearance): Promise<Appearance> { return invoke<Appearance>('set_appearance', { appearance }); }
 export function requestNotificationPermission(): Promise<boolean> { return invoke<boolean>('request_notification_permission'); }
 
 export function setRecordingSettings(settings: RecordingSettings): Promise<void> {

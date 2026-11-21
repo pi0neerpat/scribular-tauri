@@ -3,6 +3,7 @@
 //! and the recording-time chunk writers (U8). A second `Store::open` would run
 //! launch recovery and mark the live recording interrupted.
 
+mod appearance;
 pub mod key;
 mod migrations;
 mod plaintext_migration;
@@ -17,6 +18,9 @@ use rusqlite::Connection;
 
 use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Plan};
 
+pub use appearance::{
+    Accent, Appearance, Background, Mode, MyTheme, Preset, Selection, ThemeValues,
+};
 pub use prompts::{Prompt, MAX_PROMPT_CHARS};
 pub use sessions::{
     now_ms, AudioSource, DiarizationState, InputMode, KeptAudio, NewSession, Session,
@@ -51,6 +55,7 @@ pub enum StoreError {
     DetachCoachStyle,
     CoachStyle(&'static str),
     InvalidRecordingSource,
+    InvalidAppearance,
 }
 
 impl fmt::Display for StoreError {
@@ -82,6 +87,7 @@ impl fmt::Display for StoreError {
             Self::InvalidRecordingSource => {
                 f.write_str("Choose In the room or On a call with a valid app name.")
             }
+            Self::InvalidAppearance => f.write_str("Choose valid appearance settings."),
         }
     }
 }
