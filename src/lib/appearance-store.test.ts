@@ -32,11 +32,13 @@ describe('appearance saves', () => {
     const saveSecond = store.saveAppearance(v1);
     await Promise.resolve();
     expect(api.setAppearance).toHaveBeenCalledTimes(1);
+    expect(api.setAppearance).toHaveBeenNthCalledWith(1, sage);
     event(v1);
     first.resolve(sage);
     await saveFirst;
     expect(get(store.appearance)).toEqual(v1);
     expect(api.setAppearance).toHaveBeenCalledTimes(2);
+    expect(api.setAppearance).toHaveBeenNthCalledWith(2, v1);
     second.resolve(v1);
     await saveSecond;
     expect(get(store.appearance)).toEqual(v1);

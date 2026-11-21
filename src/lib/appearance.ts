@@ -29,8 +29,8 @@ export function customize(state: Appearance, preset: Preset, replaceConfirmed = 
 
 export function resetMyTheme(state: Appearance): Appearance {
   if (!state.myTheme) return state;
-  const { origin, copiedMode } = state.myTheme;
-  return { ...state, selected: 'myTheme', myTheme: { origin, copiedMode, values: { ...presetValues(origin), mode: copiedMode ?? presetValues(origin).mode } } };
+  const { origin, copiedMode, values } = state.myTheme;
+  return { ...state, selected: 'myTheme', myTheme: { origin, copiedMode, values: { ...presetValues(origin), mode: copiedMode ?? values.mode } } };
 }
 
 const accents: Record<Exclude<Accent, { custom: string }>, string> = {

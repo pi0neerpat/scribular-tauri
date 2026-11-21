@@ -36,6 +36,8 @@ describe('appearance state', () => {
       const changed: Appearance = { ...override, myTheme: { ...override.myTheme!, values: { ...override.myTheme!.values, mode: 'automatic' } } };
       expect(resetMyTheme(changed).myTheme?.values.mode).toBe(mode);
     }
+    const legacy: Appearance = { ...copied, myTheme: { ...copied.myTheme!, copiedMode: null, values: { ...copied.myTheme!.values, mode: 'dark', tint: 'rose' } } };
+    expect(resetMyTheme(legacy).myTheme?.values).toEqual({ ...presetValues('sage'), mode: 'dark' });
   });
 
   it('updates accents and every tint without changing text or record colors', () => {
