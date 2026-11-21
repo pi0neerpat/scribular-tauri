@@ -132,6 +132,13 @@ pub fn init(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+pub fn reset_for_tests() {
+    if let Some(logger) = LOGGER.get() {
+        *logger.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
 pub fn log(level: &str, module: &str, message: &str) {
     let Some(lock) = LOGGER.get() else {
         if level == "PANIC" && !DISK_FAILURE_REPORTED.swap(true, Ordering::Relaxed) {

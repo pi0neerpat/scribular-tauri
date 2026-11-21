@@ -9,9 +9,9 @@
   import TrialBadge from './TrialBadge.svelte';
   import { accessState, allows } from '../license';
 
-  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onTour = () => {}, onSessionsChanged, children }: {
+  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onSessionsChanged, children }: {
     view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; recordHasNote?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
-    onLicense?: () => void; onTour?: () => void; onSessionsChanged?: () => void; children?: Snippet;
+    onLicense?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
   let hasSessions = $state(false);
@@ -194,7 +194,7 @@
       {#if clearResult}<p role="status">{clearResult}</p>{/if}
       <nav aria-label="Main navigation">
         <button onclick={(e) => onNavigate('record', e.currentTarget)} aria-current={view === 'record' ? 'page' : undefined} disabled={navigationDisabled(navigationLocked, 'record', view)}>New Recording</button>
-        <button data-tour="styles" onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined}>Note Styles</button>
+        <button onclick={(e) => onNavigate('styles', e.currentTarget)} aria-current={view === 'styles' ? 'page' : undefined}>Note Styles</button>
       </nav>
       <div class="sessions">
         {#each groups as group (group.label)}
@@ -229,8 +229,7 @@
         {/each}
       </div>
       <nav aria-label="More">
-        <button data-tour="settings" onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
-        <button onclick={onTour}>Show tour</button>
+        <button onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
         <TrialBadge onclick={onLicense} />
       </nav>
       {#if interrupted}<p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'}</p>{/if}

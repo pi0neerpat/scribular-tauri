@@ -23,6 +23,7 @@ const {
   requestSessionAudio,
   startFresh,
   startRecording,
+  sessionCoachStart,
 } = await import('./api');
 
 describe('api', () => {
@@ -63,6 +64,34 @@ describe('api', () => {
     expect(name).toBe('app://heartbeat');
     cb({ payload: { seq: 3 } });
     expect(seen).toEqual([3]);
+  });
+
+  it('subscribes to session coach results before invoking start', async () => {
+    const order: string[] = [];
+    const unlisten = vi.fn();
+    listen.mockImplementation(async (name) => { order.push(name); return unlisten; });
+    invoke.mockImplementation(async (name) => { order.push(name); return 'job-1'; });
+    const started = await sessionCoachStart('session-1', 'Shorten this', vi.fn(), vi.fn());
+    expect(order).toEqual(['session-coach://result', 'session-coach://stopped', 'session_coach_start']);
+    expect(invoke).toHaveBeenCalledWith('session_coach_start', {
+      sessionId: 'session-1', request: 'Shorten this', priorRequests: [], priorCandidateId: null,
+    });
+    expect(started.jobId).toBe('job-1');
+    started.unlisten();
+    expect(unlisten).toHaveBeenCalledTimes(2);
+  });
+
+  it('delivers an immediate session coach reply during start', async () => {
+    const reply = { jobId: 'job-1', sessionId: 'session-1', outcome: { kind: 'reply', message: 'Try another request.' } };
+    const onResult = vi.fn();
+    listen.mockResolvedValue(() => {});
+    invoke.mockImplementation(async () => {
+      const handler = listen.mock.calls.find(([name]) => name === 'session-coach://result')?.[1];
+      handler({ payload: reply });
+      return reply.jobId;
+    });
+    await sessionCoachStart('session-1', 'Diagnose this', onResult, vi.fn());
+    expect(onResult).toHaveBeenCalledWith(reply);
   });
 
   it('wraps updater commands and event', async () => {

@@ -56,6 +56,8 @@ pub const EVENTS: &[&str] = &[
     crate::coach::PROGRESS_EVENT,
     crate::coach::RESULT_EVENT,
     crate::coach::CANCELLED_EVENT,
+    crate::coach::session::RESULT_EVENT,
+    crate::coach::session::STOPPED_EVENT,
 ];
 
 /// The new [`AccessState`] after activation, removal, re-validation or a day
@@ -128,6 +130,8 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     crate::coach::CoachProgress::export_all(cfg)?;
     crate::coach::CoachResult::export_all(cfg)?;
     crate::coach::CoachCancelled::export_all(cfg)?;
+    crate::coach::session::SessionCoachResult::export_all(cfg)?;
+    crate::coach::session::SessionCoachStopped::export_all(cfg)?;
     PromptList::export_all(cfg)?;
     SummaryModel::export_all(cfg)?;
     ModelSpec::export_all(cfg)?;
@@ -1547,7 +1551,12 @@ fn should_notify_summary(enabled: bool, focused: bool, already_notified: bool) -
 }
 
 impl JobEvents for TauriJobEvents {
+    fn session_coach_cancelled(&self) {
+        crate::coach::session::cancel_for_gate(&self.0);
+    }
+
     fn recording_starting(&self) {
+        crate::coach::session::cancel_for_gate(&self.0);
         crate::coach::discard(&self.0, crate::coach::CoachCancelReason::Recording);
     }
 

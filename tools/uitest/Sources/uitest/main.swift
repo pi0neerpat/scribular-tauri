@@ -8,40 +8,6 @@ import UITestCore
 
 nonisolated(unsafe) private var processRunLock: RunLock?
 
-private final class RunLock {
-    private let descriptor: Int32
-
-    private init(descriptor: Int32) { self.descriptor = descriptor }
-    deinit { close(descriptor) }
-
-    static func acquire() throws -> RunLock {
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Caches/scribular-uitest", isDirectory: true)
-            .appendingPathComponent("uitest.lock")
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            var buffer = [CChar](repeating: 0, count: 32)
-            let count = buffer.withUnsafeMutableBytes { pread(descriptor, $0.baseAddress, $0.count - 1, 0) }
-            let pid = count > 0
-                ? trimmedRunLockPID(String(decoding: buffer.prefix(Int(count)).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
-                : "unknown"
-            close(descriptor)
-            throw NSError(domain: "uitest.lock", code: 1, userInfo: [NSLocalizedDescriptionKey: "another uitest run is active (pid \(pid))"])
-        }
-        _ = ftruncate(descriptor, 0)
-        _ = lseek(descriptor, 0, SEEK_SET)
-        let pid = "\(getpid())\n"
-        let written = pid.withCString { write(descriptor, $0, strlen($0)) }
-        guard written == pid.utf8.count else {
-            close(descriptor)
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
-        return RunLock(descriptor: descriptor)
-    }
-}
-
 private final class Cleanup {
     private let lifecycle: AppLifecycle
     private let recorder: Recorder?
@@ -66,6 +32,23 @@ private final class Cleanup {
     }
 }
 
+private func keychainPassword() -> String? {
+    resolveKeychainPassword(environment: ProcessInfo.processInfo.environment) {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "scribular-uitest", "-a", "login-password", "-w"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        guard (try? process.run()) != nil else { return nil }
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let password = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .newlines)
+        return password.isEmpty ? nil : password
+    }
+}
+
 private func runCLI() -> Int32 {
     setvbuf(stdout, nil, _IOLBF, 0)  // one line per step as it happens, even when piped to a log or agent
     let args = Array(CommandLine.arguments.dropFirst())
@@ -73,12 +56,12 @@ private func runCLI() -> Int32 {
     let cli: UITestOptions
     do { cli = try UITestOptions.parse(args) }
     catch {
-        print("usage: uitest <script> [--app <path to .app>] [--record <name>] [--record-dir <dir>] [--pace <duration>]")
+        print("usage: uitest <script> [--app <path to .app>] [--record <name>] [--record-dir <dir>] [--pace <duration>] [--lock-timeout <duration>] [--no-trust]")
         print("argument error: \(error.localizedDescription)")
         return 2
     }
     let runLock: RunLock
-    do { runLock = try RunLock.acquire() }
+    do { runLock = try RunLock.acquire(timeout: cli.lockTimeout, label: cli.lockTimeoutLabel) }
     catch {
         print(error.localizedDescription)
         return 2
@@ -115,6 +98,7 @@ private func runCLI() -> Int32 {
     let recordingURL = finalizer?.recordingURL
     do {
         try FileManager.default.createDirectory(at: runDir, withIntermediateDirectories: true)
+        try Data().write(to: runDir.appendingPathComponent("trust-build.log"))
         if finalizer != nil {
             try FileManager.default.createDirectory(at: recordingsBase, withIntermediateDirectories: true)
             try finalizer?.validateAvailable()
@@ -137,7 +121,7 @@ private func runCLI() -> Int32 {
         }
     }
 
-    let lifecycle = AppLifecycle(appPath: appPath)
+    let lifecycle = AppLifecycle(appPath: appPath, noTrust: cli.noTrust)
     let player = Player()
     let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder, player: player)
     let start = Date()
@@ -185,10 +169,11 @@ private func runCLI() -> Int32 {
         cleanup.run()
     }
 
-    let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"], player: player)
+    let password = keychainPassword()
+    let driver = AXDriver(lifecycle: lifecycle, runDir: runDir, keychainPassword: password, player: player)
     let passed = runSteps(steps, driver: driver,
                           options: RunOptions(runDir: runDir, recordingPath: recordingURL?.path ?? "no recording",
-                                              secrets: [ProcessInfo.processInfo.environment["UITEST_KEYCHAIN_PASSWORD"]].compactMap { $0 },
+                                              secrets: [password].compactMap { $0 },
                                               pace: cli.pace,
                                               onStep: { step, date in finalizer?.record(step, at: date) }),
                           out: { print($0) })

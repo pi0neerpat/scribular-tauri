@@ -219,7 +219,7 @@
   }
 </script>
 
-<section data-tour="input-mode">
+<section>
   <h2>Settings</h2>
   <nav aria-label="Settings categories">
     {#each ['General', 'Appearance', 'Recording', 'Keyboard Shortcuts', 'License'] as item}
@@ -229,8 +229,6 @@
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
     <SummaryUnavailable />
     {#if summaryAvailability === 'loadFailed'}<button onclick={retrySummary}>Try again</button>{/if}
-  {:else if summaryAvailability === 'downloading' && !summaryAvailabilityError}
-    <p>Waiting for the summary model download…</p>
   {/if}
   {#if summaryAvailabilityError}
     <p role="alert">Couldn't check summary availability.</p>

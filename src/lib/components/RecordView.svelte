@@ -25,6 +25,7 @@
     stopRecording,
     notifyTrayStartFailure,
   } from '../api';
+  import type { ModelProgress } from '../types/ModelProgress';
   import type { Privacy } from '../types/Privacy';
   import type { PromptList } from '../types/PromptList';
   import type { Session } from '../types/Session';
@@ -46,14 +47,24 @@
   const coach = getCoachContext();
 
   let {
-    speechReady = false,
+    speech,
+    modelError = false,
+    preparingModels = false,
+    onRetryModels = () => {},
     active = true,
     onEnterLicense = () => {},
     onResultNote = () => {},
     coachInterrupted = false,
     onStartFailed = () => {},
     onDismissCoachInterruption = () => {},
-  }: { speechReady: boolean; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
+  }: { speech?: ModelProgress; modelError?: boolean; preparingModels?: boolean; onRetryModels?: () => void; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
+
+  let speechReady = $derived(speech?.state === 'ready');
+  let speechPercent = $derived(speech && speech.totalBytes > 0
+    ? Math.min(100, Math.floor(speech.downloadedBytes / speech.totalBytes * 100))
+    : 0);
+  const recordViewId = $props.id();
+  const modelStatusId = `${recordViewId}-speech-model`;
 
   const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
@@ -475,9 +486,29 @@
       <button onclick={cancel}>Cancel</button>
     {/if}
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
-    <button onclick={start} disabled={busy || !sourceReady || denied === 'microphone' || (source.location === 'onCall' && !source.targetApp) || !speechReady || !allows($accessState)}>
-      Start recording
-    </button>
+    <div class="record-control">
+      <div class="record-ring" class:downloading={!speechReady} style:--speech-progress={`${speechPercent}%`}>
+        <button onclick={start} aria-describedby={speechReady ? undefined : modelStatusId} disabled={busy || !sourceReady || denied === 'microphone' || (source.location === 'onCall' && !source.targetApp) || !speechReady || !allows($accessState)}>
+          Start recording
+        </button>
+      </div>
+      {#if !speechReady}
+        <p id={modelStatusId} role="status">
+          {#if speech?.state === 'failed'}
+            Speech model download failed{speech.error ? `: ${speech.error}` : '.'}
+          {:else if modelError}
+            Could not start or check the speech model download.
+          {:else if speech?.state === 'verifying'}
+            Verifying the speech model…
+          {:else}
+            Downloading the speech model{speech?.state === 'downloading' && speech.totalBytes > 0 ? ` (${speechPercent}%)` : '…'}
+          {/if}
+        </p>
+        {#if speech?.state === 'failed' || modelError}
+          <button onclick={onRetryModels} disabled={preparingModels}>Retry speech model download</button>
+        {/if}
+      {/if}
+    </div>
   {/if}
   {#if styles}
     <StylePicker prompts={styles.prompts} selectedId={styles.activeId} disabled={!allows($accessState)} onSelect={chooseStyle} />
@@ -513,3 +544,27 @@
     <button onclick={() => (askSpeakerCount = false)}>Keep recording</button>
   </div>
 {/if}
+
+<style>
+  .record-control { margin-block: .75rem; }
+  .record-ring {
+    display: inline-grid;
+    place-items: center;
+    padding: 4px;
+    border-radius: 50%;
+  }
+  .record-ring.downloading {
+    background: conic-gradient(Highlight var(--speech-progress), color-mix(in srgb, CanvasText 15%, Canvas) 0);
+  }
+  .record-ring button {
+    width: 6.75rem;
+    height: 6.75rem;
+    border-radius: 50%;
+  }
+  .record-ring.downloading button {
+    background: Canvas;
+    color: GrayText;
+    border: 1px solid transparent;
+  }
+  .record-control p { margin-block: .5rem; }
+</style>

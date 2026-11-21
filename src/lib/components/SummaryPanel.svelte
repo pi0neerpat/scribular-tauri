@@ -171,7 +171,7 @@
   {#if management}<LicenseGate access={$accessState} onEnter={() => { void openSettings('License').catch((e) => (error = String(e))); }} showWarning={false} />{/if}
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
     <SummaryUnavailable />
-  {:else if (summaryAvailability === 'downloading' || session.status === 'awaitingModel') && !summaryAvailabilityError}
+  {:else if session.status === 'awaitingModel' && !summaryAvailabilityError}
     <p>Waiting for the summary model download…</p>
   {/if}
   {#if summaryAvailabilityError}

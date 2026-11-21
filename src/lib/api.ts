@@ -15,6 +15,8 @@ import type { CoachProgress } from './types/CoachProgress';
 import type { CoachReply } from './types/CoachReply';
 import type { CoachResult } from './types/CoachResult';
 import type { CoachSample } from './types/CoachSample';
+import type { SessionCoachResult } from './types/SessionCoachResult';
+import type { SessionCoachStopped } from './types/SessionCoachStopped';
 import type { ClearSessionsResult } from './types/ClearSessionsResult';
 import type { Heartbeat } from './types/Heartbeat';
 import type { InputMode } from './types/InputMode';
@@ -225,6 +227,28 @@ export const coachChoose = (draftId: string, proposalId: string, useThis: boolea
 export const coachSave = (draftId: string, name: string, useNext: boolean) => invoke<PromptList>('coach_save', { draftId, name, useNext });
 export const coachCancel = (draftId: string) => invoke<void>('coach_cancel', { draftId });
 export const getCoachAvailability = () => invoke<CoachAvailability>('get_coach_availability');
+export async function sessionCoachStart(
+  sessionId: string, request: string, onResult: (result: SessionCoachResult) => void,
+  onStopped: (stopped: SessionCoachStopped) => void,
+  priorRequests: string[] = [], priorCandidateId: string | null = null,
+): Promise<{ jobId: string; unlisten: () => void }> {
+  const stopResult = await onSessionCoachResult(onResult);
+  let stopStopped: UnlistenFn = () => {};
+  try {
+    stopStopped = await onSessionCoachStopped(onStopped);
+    const jobId = await invoke<string>('session_coach_start', { sessionId, request, priorRequests, priorCandidateId });
+    return { jobId, unlisten: () => { stopResult(); stopStopped(); } };
+  } catch (error) {
+    stopResult();
+    stopStopped?.();
+    throw error;
+  }
+}
+export const sessionCoachStop = (jobId: string) => invoke<void>('session_coach_stop', { jobId });
+export const onSessionCoachResult = (handler: (result: SessionCoachResult) => void): Promise<UnlistenFn> =>
+  listen<SessionCoachResult>('session-coach://result', (event) => handler(event.payload));
+export const onSessionCoachStopped = (handler: (stopped: SessionCoachStopped) => void): Promise<UnlistenFn> =>
+  listen<SessionCoachStopped>('session-coach://stopped', (event) => handler(event.payload));
 
 export function onCoachProgress(handler: (progress: CoachProgress) => void): Promise<UnlistenFn> {
   return listen<CoachProgress>('coach-progress', (event) => handler(event.payload));

@@ -369,6 +369,7 @@ impl Recorder {
                 }
             };
         inner.jobs.cancel_practice();
+        inner.jobs.cancel_session_coach();
         inner.events.recording_starting();
         lock(&inner.transcript_waiting).clear();
         lock(&inner.transcript_started).clear();

@@ -68,7 +68,7 @@ afterEach(() => vi.clearAllMocks());
 async function renderRecordView() {
   const target = document.createElement('div');
   document.body.append(target);
-  const app = mount(RecordView, { target, props: { speechReady: true } });
+  const app = mount(RecordView, { target, props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } } });
   await vi.waitFor(() => expect(target.querySelector('button')).not.toBeNull());
   return { target, app };
 }

@@ -25,17 +25,18 @@ private final class LaunchResult: @unchecked Sendable {
 
 final class AppLifecycle {
     private let appPath: URL
+    private let noTrust: Bool
     private var app: NSRunningApplication?
     private var launched = false
     private var launching: LaunchResult?
     private var dataMoved = false
     private var detail: String?
 
-    init(appPath: URL) { self.appPath = appPath }
+    init(appPath: URL, noTrust: Bool = false) { self.appPath = appPath; self.noTrust = noTrust }
 
     func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
         if !launched {
-            let trusted = try trustBuild()
+            let trusted = try trustBuild(runDir: runDir)
             try terminateExisting()
             let home = FileManager.default.homeDirectoryForCurrentUser
             let source = home.appendingPathComponent("Library/Application Support/com.app.scribular.tauri", isDirectory: true)
@@ -89,7 +90,21 @@ final class AppLifecycle {
     }
 
     /// Runs trust-build.sh so a rebuilt (new cdhash) app reads its keychain key without a prompt.
-    private func trustBuild() throws(DriverError) -> String {
+    private func trustBuild(runDir: URL) throws(DriverError) -> String {
+        let log = runDir.appendingPathComponent("trust-build.log")
+        func appendLog(_ data: Data) throws(DriverError) {
+            do {
+                let handle = try FileHandle(forWritingTo: log)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+            } catch { throw .fatal("could not save trust-build.log: \(error.localizedDescription)") }
+        }
+        if noTrust {
+            let message = "trust-build skipped (--no-trust)\n"
+            try appendLog(Data(message.utf8))
+            return message.trimmingCharacters(in: .newlines)
+        }
         let script = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("trust-build.sh")
@@ -100,9 +115,10 @@ final class AppLifecycle {
         process.standardOutput = pipe
         process.standardError = pipe
         do { try process.run() } catch { throw .fatal("could not run trust-build.sh: \(error.localizedDescription)") }
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        try appendLog(data)
+        let output = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard process.terminationStatus == 0 else { throw .fatal("trust-build.sh failed: \(output)") }
         return output
     }

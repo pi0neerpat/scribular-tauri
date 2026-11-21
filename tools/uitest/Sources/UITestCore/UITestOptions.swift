@@ -6,6 +6,9 @@ public struct UITestOptions {
     public let recordingName: String?
     public let recordingDirectory: String?
     public let pace: Double
+    public let lockTimeout: Double
+    public let lockTimeoutLabel: String
+    public let noTrust: Bool
 
     public func makeRecorder<T>(using factory: (String) -> T) -> T? {
         recordingName.map(factory)
@@ -17,9 +20,16 @@ public struct UITestOptions {
         var name: String?
         var directory: String?
         var pace: Double?
+        var lockTimeout: Double?
+        var lockTimeoutLabel = "30m"
+        var noTrust = false
         var index = 1
         while index < arguments.count {
             let flag = arguments[index]
+            if flag == "--no-trust" {
+                guard !noTrust else { throw UITestOptionsError("unexpected or duplicate option: \(flag)") }
+                noTrust = true; index += 1; continue
+            }
             guard index + 1 < arguments.count else { throw UITestOptionsError("missing value for \(flag)") }
             let value = arguments[index + 1]
             switch flag {
@@ -31,19 +41,23 @@ public struct UITestOptions {
                 name = value
             case "--record-dir" where directory == nil: directory = value
             case "--pace" where pace == nil: pace = try Self.duration(value)
+            case "--lock-timeout" where lockTimeout == nil: lockTimeout = try Self.duration(value); lockTimeoutLabel = value
             default: throw UITestOptionsError("unexpected or duplicate option: \(flag)")
             }
             index += 2
         }
-        return UITestOptions(scriptPath: script, appPath: app, recordingName: name, recordingDirectory: directory, pace: pace ?? (name == nil ? 0 : 2.5))
+        return UITestOptions(scriptPath: script, appPath: app, recordingName: name, recordingDirectory: directory, pace: pace ?? (name == nil ? 0 : 2.5), lockTimeout: lockTimeout ?? 1800, lockTimeoutLabel: lockTimeoutLabel, noTrust: noTrust)
     }
 
-    private init(scriptPath: String, appPath: String?, recordingName: String?, recordingDirectory: String?, pace: Double) {
+    private init(scriptPath: String, appPath: String?, recordingName: String?, recordingDirectory: String?, pace: Double, lockTimeout: Double, lockTimeoutLabel: String, noTrust: Bool) {
         self.scriptPath = scriptPath
         self.appPath = appPath
         self.recordingName = recordingName
         self.recordingDirectory = recordingDirectory
         self.pace = pace
+        self.lockTimeout = lockTimeout
+        self.lockTimeoutLabel = lockTimeoutLabel
+        self.noTrust = noTrust
     }
 
     private static func duration(_ value: String) throws -> Double {
@@ -51,8 +65,9 @@ public struct UITestOptions {
         let number: Double?
         if value.hasSuffix("ms"), let ms = Double(value.dropLast(2)) { number = ms / 1000 }
         else if value.hasSuffix("s"), let seconds = Double(value.dropLast()) { number = seconds }
+        else if value.hasSuffix("m"), let minutes = Double(value.dropLast()) { number = minutes * 60 }
         else { number = nil }
-        guard let number, number.isFinite, number >= 0 else { throw UITestOptionsError("invalid pace: \(value)") }
+        guard let number, number.isFinite, number >= 0 else { throw UITestOptionsError("invalid duration: \(value)") }
         return number
     }
 }
