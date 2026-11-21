@@ -25,18 +25,7 @@ final class AXDriver: Driver {
         switch command {
         case .launch(let keepData):
             let detail = try lifecycle.launch(keepData: keepData, runDir: runDir)
-            // a rebuilt (re-signed) app blocks on a keychain prompt before its window opens
-            // re-arm once a prompt closes: setup reads two keychain items, so a second prompt can follow
-            if keychainWindow() == nil { keychainHandled = false }
-            else if !keychainHandled {
-                keychainHandled = true
-                if keychainPassword != nil { _ = try handleKeychain() }
-                else {
-                    // no password: give a person 2 minutes to approve the prompt by hand
-                    let deadline = Date().addingTimeInterval(120)
-                    while keychainWindow() != nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
-                }
-            }
+            try answerKeychainPrompt()
             guard let app = appElement(),
                   let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement], !windows.isEmpty else {
                 throw .retryable("app window not ready")
@@ -58,6 +47,7 @@ final class AXDriver: Driver {
             keychainHandled = false
             return nil
         case .click(let label, let index, let within):
+            try answerKeychainPrompt()
             let element = try resolve(label, index: index, within: within)
             // a click on a disabled button is silently dropped; wait for it like any other UI state
             if attribute(element, kAXEnabledAttribute) as? Bool == false { throw .retryable("disabled") }
@@ -142,7 +132,9 @@ final class AXDriver: Driver {
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
         case .handleKeychain:
-            return try handleKeychain()
+            guard waitUntil(timeout: 5, { keychainWindow() != nil }) else { return "no prompt" }
+            try answerKeychainPrompt()
+            return nil
         case .labels:
             return labelListing()
         case .screenshot:
@@ -411,6 +403,7 @@ final class AXDriver: Driver {
     }
 
     private func guardClick(at point: CGPoint, target: AXUIElement? = nil) throws(DriverError) {
+        try answerKeychainPrompt()
         if keychainWindow() != nil { throw blocked(.keychainPrompt, target: target) }
         guard let app = application.flatMap({ $0.isTerminated ? nil : $0 })
                 ?? NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else {
@@ -478,6 +471,23 @@ final class AXDriver: Driver {
         return (attribute(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement])?.first
     }
 
+    private func answerKeychainPrompt() throws(DriverError) {
+        guard let window = keychainWindow() else { keychainHandled = false; return }
+        guard !keychainHandled else { return }
+        keychainHandled = true
+        guard keychainPassword != nil else {
+            if let deny = allElements(from: window).first(where: { matches($0, exact: "Deny") }) {
+                _ = AXUIElementPerformAction(deny, kAXPressAction as CFString)
+            }
+            throw .fatal("keychain prompt not answered: no stored password; fix: bash tools/uitest/trust-build.sh --store-password")
+        }
+        _ = try handleKeychain()
+        guard waitUntil(timeout: 10, { keychainWindow().map { CFEqual($0, window) } != true }) else {
+            throw .fatal("keychain prompt not answered: prompt still open; fix: bash tools/uitest/trust-build.sh --store-password")
+        }
+        keychainHandled = false
+    }
+
     private func handleKeychain() throws(DriverError) -> String? {
         // the prompt can appear a moment after the app touches the keychain; wait up to 5s before concluding there is none
         var found: (AXUIElement)?
@@ -489,7 +499,9 @@ final class AXDriver: Driver {
             if attempt < 19 { Thread.sleep(forTimeInterval: 0.25) }
         }
         guard let window = found else { return "no prompt" }
-        guard let keychainPassword else { throw .fatal("UITEST_KEYCHAIN_PASSWORD not set") }
+        let promptText = allElements(from: window).flatMap { labelValues($0) }.joined(separator: " ")
+        guard promptText.contains("com.app.scribular.tauri") else { throw .fatal("keychain prompt is not for com.app.scribular.tauri") }
+        guard let keychainPassword else { throw .fatal("keychain prompt not answered: no stored password; fix: bash tools/uitest/trust-build.sh --store-password") }
         let fields = allElements(from: window).filter {
             let role = attribute($0, kAXRoleAttribute) as? String
             return role == kAXTextFieldRole || role == "AXSecureTextField"
