@@ -182,6 +182,8 @@ export function clearAllSessions(): Promise<ClearSessionsResult | null> {
 export function undoSummary(id: string): Promise<Session> {
   return invoke<Session>('undo_summary', { id });
 }
+export function redoSummary(id: string): Promise<Session> { return invoke<Session>('redo_summary', { id }); }
+export function markNoteCopied(id: string, summary: string): Promise<void> { return invoke<void>('mark_note_copied', { id, summary }); }
 
 export function copyText(text: string): Promise<void> {
   return invoke<void>('copy_text', { text });
@@ -249,6 +251,7 @@ export async function sessionCoachStart(
   }
 }
 export const sessionCoachStop = (jobId: string) => invoke<void>('session_coach_stop', { jobId });
+export const sessionCoachAccept = (sessionId: string, candidateId: string) => invoke<Session>('session_coach_accept', { sessionId, candidateId });
 export const onSessionCoachResult = (handler: (result: SessionCoachResult) => void): Promise<UnlistenFn> =>
   listen<SessionCoachResult>('session-coach://result', (event) => handler(event.payload));
 export const onSessionCoachStopped = (handler: (stopped: SessionCoachStopped) => void): Promise<UnlistenFn> =>

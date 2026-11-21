@@ -199,7 +199,9 @@ pub fn set_shell_menu_state(
     let has_sessions = app
         .try_state::<Arc<Store>>()
         .is_some_and(|store| store.session_count().is_ok_and(|count| count > 0));
-    let recorder_state = app.try_state::<Arc<Recorder>>().and_then(|r| r.recording_state());
+    let recorder_state = app
+        .try_state::<Arc<Recorder>>()
+        .and_then(|r| r.recording_state());
     let recording = recording || recorder_state.is_some();
     crate::shell::menu::set_state(
         &app,
@@ -579,6 +581,27 @@ pub fn undo_summary(
 ) -> Result<Session, String> {
     licensing.require_access()?;
     store.undo_summary(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn redo_summary(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<Session, String> {
+    licensing.require_access()?;
+    store.redo_summary(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_note_copied(
+    store: State<Arc<Store>>,
+    id: String,
+    summary: String,
+) -> Result<(), String> {
+    store
+        .mark_note_copied(&id, &summary)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1760,6 +1783,7 @@ mod tests {
                 "restore_sample_sessions",
                 "update_session",
                 "undo_summary",
+                "redo_summary",
                 "create_prompt",
                 "duplicate_prompt",
                 "update_prompt",

@@ -53,7 +53,16 @@ pub struct SessionCoach(Mutex<State>);
 #[derive(Default)]
 struct State {
     active: Option<(String, String, Arc<AtomicBool>)>,
-    candidate: Option<(String, String, String)>,
+    candidate: Option<Candidate>,
+}
+
+struct Candidate {
+    session_id: String,
+    id: String,
+    note: String,
+    base: String,
+    prompt_id: Option<String>,
+    model_id: Option<String>,
 }
 
 fn words(text: &str) -> Vec<String> {
@@ -147,8 +156,8 @@ pub fn session_coach_start(
         }
         let prior = match prior_candidate_id {
             Some(id) => Some(state.candidate.as_ref()
-                .filter(|(session, candidate, _)| session == &session_id && candidate == &id)
-                .ok_or("That revision is no longer available. Try again.")?.2.clone()),
+                .filter(|candidate| candidate.session_id == session_id && candidate.id == id)
+                .ok_or("That revision is no longer available. Try again.")?.note.clone()),
             None => None,
         };
         let job_id = commands::opaque_id()?;
@@ -174,6 +183,8 @@ pub fn session_coach_start(
         let job_for_result = job_id.clone();
         let session_for_result = session_id.clone();
         let note = session.summary;
+        let prompt_id = session.prompt_id;
+        let model_id = session.model_id;
         let transcript = session.transcript;
         let token = Arc::clone(&cancel);
         let completion = move |result: Result<String, &'static str>| {
@@ -186,7 +197,11 @@ pub fn session_coach_start(
             let outcome = match result {
                 Ok(text) if complete_note(&text).is_some_and(|text| grounded(&note, &transcript, text)) => {
                     let text = complete_note(&text).unwrap().to_string();
-                    state.candidate = Some((session_for_result.clone(), candidate_id.clone(), text.clone()));
+                    state.candidate = Some(Candidate {
+                        session_id: session_for_result.clone(), id: candidate_id.clone(),
+                        note: text.clone(), base: note.clone(),
+                        prompt_id, model_id,
+                    });
                     SessionCoachOutcome::Candidate { candidate_id, note: text }
                 }
                 _ => SessionCoachOutcome::Reply { message: FAILED },
@@ -201,6 +216,49 @@ pub fn session_coach_start(
         state.active = Some((job_id.clone(), session_id, cancel));
         Ok(job_id)
     }).ok_or(super::CoachBlock::Recording.message())?
+}
+
+#[tauri::command]
+pub fn session_coach_accept(
+    window: WebviewWindow,
+    session_id: String,
+    candidate_id: String,
+) -> Result<crate::store::Session, String> {
+    let app = commands::main_window(&window).map_err(str::to_string)?;
+    let recorder = app.try_state::<Arc<Recorder>>().ok_or(FAILED)?;
+    recorder
+        .while_not_recording(|| {
+            available(app).map_err(str::to_string)?;
+            let coach = app.try_state::<Arc<SessionCoach>>().ok_or(FAILED)?;
+            let mut state = coach.0.lock().unwrap_or_else(|p| p.into_inner());
+            if state.active.is_some() {
+                return Err("The coach is still working. Try again.".into());
+            }
+            let candidate = state
+                .candidate
+                .as_ref()
+                .filter(|candidate| {
+                    candidate.session_id == session_id && candidate.id == candidate_id
+                })
+                .ok_or("That revision is no longer available. Ask for a new one.")?;
+            let store = app.try_state::<Arc<Store>>().ok_or(FAILED)?;
+            let result = store
+                .accept_coach_candidate(
+                    &session_id,
+                    (
+                        &candidate.base,
+                        candidate.prompt_id.as_deref(),
+                        candidate.model_id.as_deref(),
+                    ),
+                    &candidate.note,
+                )
+                .map_err(|e| e.to_string());
+            if result.is_ok() {
+                state.candidate = None;
+            }
+            result
+        })
+        .ok_or_else(|| super::CoachBlock::Recording.message().to_string())?
 }
 
 #[tauri::command]

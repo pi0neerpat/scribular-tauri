@@ -17,7 +17,18 @@ const MIGRATIONS: &[Migration] = &[
     v6_sample_sessions,
     v7_summary_undo,
     v8_style_spec,
+    v9_note_redo,
 ];
+
+fn v9_note_redo(tx: &Transaction) -> Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE sessions ADD COLUMN redo_summary TEXT;
+        ALTER TABLE sessions ADD COLUMN redo_prompt_id TEXT;
+        ALTER TABLE sessions ADD COLUMN redo_model_id TEXT;
+        ALTER TABLE sessions ADD COLUMN copied_at INTEGER;",
+    )?;
+    Ok(())
+}
 
 fn v6_sample_sessions(tx: &Transaction) -> Result<()> {
     tx.execute_batch("ALTER TABLE sessions ADD COLUMN is_sample INTEGER NOT NULL DEFAULT 0;")?;
