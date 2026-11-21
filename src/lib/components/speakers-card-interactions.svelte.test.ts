@@ -22,7 +22,7 @@ function session(state: Session['diarizationState'], name = 'Alice', summary = '
     promptId: null, modelId: null, transcript: 'Alice: hello', plainTranscript: 'hello',
     rawTranscript: 'SPEAKER_0: hello', speakerMap: { SPEAKER_0: name }, diarizationState: state,
     summary, durationMs: 1000, timings: null, hasAudio: false, isSample: false, audioExpiresAt: null,
-    previousSummary: null, previousPromptId: null, previousModelId: null,
+    previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false,
   } as Session;
 }
 
@@ -55,8 +55,9 @@ it('refreshes the parent summary after renaming a confirmed speaker', async () =
   });
   const target = document.createElement('div');
   const app = mount(SummaryPanel, { target, props });
-  await vi.waitFor(() => expect(target.querySelector('button')?.textContent).toBe('Edit speakers'));
-  target.querySelector('button')!.click();
+  const edit = () => [...target.querySelectorAll('button')].find((button) => button.textContent === 'Edit speakers');
+  await vi.waitFor(() => expect(edit()).toBeDefined());
+  edit()!.click();
   flushSync();
   await vi.waitFor(() => expect(target.querySelector('input')).not.toBeNull());
   const input = target.querySelector('input')!;

@@ -153,6 +153,7 @@ pub struct Session {
     pub previous_summary: Option<String>,
     pub previous_prompt_id: Option<String>,
     pub previous_model_id: Option<String>,
+    pub can_redo: bool,
     pub is_sample: bool,
 }
 
@@ -290,6 +291,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
         previous_summary: row.get(16)?,
         previous_prompt_id: row.get(17)?,
         previous_model_id: row.get(18)?,
+        can_redo: row.get(21)?,
         is_sample,
     })
 }
@@ -525,7 +527,7 @@ impl Store {
     pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
         self.with(|c| {
             Ok(c.query_row(
-                &format!("SELECT {COLUMNS}, {HAS_AUDIO} FROM sessions WHERE id = ?1"),
+                &format!("SELECT {COLUMNS}, {HAS_AUDIO}, (redo_summary IS NOT NULL) FROM sessions WHERE id = ?1"),
                 [id],
                 from_row,
             )
@@ -540,6 +542,13 @@ impl Store {
                 "UPDATE sessions SET
                      title      = COALESCE(?2, title),
                      transcript = COALESCE(?3, transcript),
+                     previous_summary = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN summary ELSE previous_summary END,
+                     previous_prompt_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN prompt_id ELSE previous_prompt_id END,
+                     previous_model_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN model_id ELSE previous_model_id END,
+                     redo_summary = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_summary END,
+                     redo_prompt_id = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_prompt_id END,
+                     redo_model_id = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_model_id END,
+                     copied_at = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE copied_at END,
                      summary    = COALESCE(?4, summary)
                  WHERE id = ?1",
                 params![id, patch.title, patch.transcript, patch.summary],
@@ -549,6 +558,41 @@ impl Store {
             return Err(session_not_found(id));
         }
         self.get_session(id)?.ok_or_else(|| session_not_found(id))
+    }
+
+    pub fn accept_coach_candidate(
+        &self,
+        id: &str,
+        base: (&str, Option<&str>, Option<&str>),
+        note: &str,
+    ) -> Result<Session> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET previous_summary = summary, previous_prompt_id = prompt_id,
+                previous_model_id = model_id, redo_summary = NULL, redo_prompt_id = NULL,
+                redo_model_id = NULL, copied_at = NULL, summary = ?5
+             WHERE id = ?1 AND status = 'done' AND summary = ?2
+               AND prompt_id IS ?3 AND model_id IS ?4",
+                params![id, base.0, base.1, base.2, note],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(StoreError::StaleCandidate);
+        }
+        self.get_session(id)?.ok_or_else(|| session_not_found(id))
+    }
+
+    pub fn mark_note_copied(&self, id: &str, summary: &str) -> Result<()> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+            "UPDATE sessions SET copied_at = ?3 WHERE id = ?1 AND summary = ?2 AND summary <> ''",
+            params![id, summary, now_ms()],
+        )?)
+        })?;
+        if changed == 0 {
+            return Err(StoreError::StaleCandidate);
+        }
+        Ok(())
     }
 
     /// Moves a session to `status`, recording `error` (cleared when `None`).
@@ -622,7 +666,8 @@ impl Store {
                      previous_summary = CASE WHEN summary <> '' THEN summary ELSE NULL END,
                      previous_prompt_id = CASE WHEN summary <> '' THEN prompt_id ELSE NULL END,
                      previous_model_id = CASE WHEN summary <> '' THEN model_id ELSE NULL END,
-                     summary = ?2, prompt_id = ?3, model_id = ?4, timings = ?5,
+                     redo_summary = NULL, redo_prompt_id = NULL, redo_model_id = NULL,
+                     copied_at = NULL, summary = ?2, prompt_id = ?3, model_id = ?4, timings = ?5,
                      status = ?6, error = NULL
                  WHERE id = ?1",
                 params![
@@ -654,9 +699,11 @@ impl Store {
     pub fn undo_summary(&self, id: &str) -> Result<Session> {
         let changed = self.with(|c| {
             Ok(c.execute(
-                "UPDATE sessions SET summary = previous_summary,
+                "UPDATE sessions SET redo_summary = summary, redo_prompt_id = prompt_id,
+                 redo_model_id = model_id, summary = previous_summary,
                  prompt_id = previous_prompt_id, model_id = previous_model_id,
-                 previous_summary = NULL, previous_prompt_id = NULL, previous_model_id = NULL
+                 previous_summary = NULL, previous_prompt_id = NULL, previous_model_id = NULL,
+                 copied_at = NULL
              WHERE id = ?1 AND previous_summary IS NOT NULL
                  AND status NOT IN ('recording', 'finalizing', 'awaitingModel', 'summarizing')",
                 [id],
@@ -677,6 +724,27 @@ impl Store {
             }
             return Err(StoreError::NotFound(format!(
                 "previous summary for session {id}"
+            )));
+        }
+        self.get_session(id)?.ok_or_else(|| session_not_found(id))
+    }
+
+    pub fn redo_summary(&self, id: &str) -> Result<Session> {
+        let changed = self.with(|c| {
+            Ok(c.execute(
+                "UPDATE sessions SET previous_summary = summary, previous_prompt_id = prompt_id,
+                 previous_model_id = model_id, summary = redo_summary,
+                 prompt_id = redo_prompt_id, model_id = redo_model_id,
+                 redo_summary = NULL, redo_prompt_id = NULL, redo_model_id = NULL,
+                 copied_at = NULL
+             WHERE id = ?1 AND redo_summary IS NOT NULL
+                 AND status NOT IN ('recording', 'finalizing', 'awaitingModel', 'summarizing')",
+                [id],
+            )?)
+        })?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!(
+                "redo summary for session {id}"
             )));
         }
         self.get_session(id)?.ok_or_else(|| session_not_found(id))
@@ -1187,6 +1255,183 @@ fn retain_or_delete_audio(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<()
         tx.execute("DELETE FROM audio_chunks WHERE session_id = ?1", [id])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod coach_accept_tests {
+    use super::*;
+    use crate::store::key::MemoryKeyStore;
+    use std::sync::Mutex;
+
+    #[test]
+    fn guarded_accept_keeps_undo_and_redo_and_rejects_stale_base() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        super::super::migrations::migrate(&mut conn).unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        let original = store
+            .create_session(&NewSession {
+                title: "Fixture".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: Some("style-a".into()),
+                model_id: Some("model-a".into()),
+            })
+            .unwrap();
+        store
+            .update_session(
+                &original.id,
+                &SessionPatch {
+                    summary: Some("Original note".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .set_status(&original.id, SessionStatus::Done, None)
+            .unwrap();
+        let base = ("Original note", Some("style-a"), Some("model-a"));
+        store
+            .mark_note_copied(&original.id, "Original note")
+            .unwrap();
+        let accepted = store
+            .accept_coach_candidate(&original.id, base, "Revised note")
+            .unwrap();
+        assert_eq!(accepted.summary, "Revised note");
+        assert_eq!(accepted.previous_summary.as_deref(), Some("Original note"));
+        assert!(!accepted.can_redo);
+        let copied: Option<i64> = store
+            .with(|c| {
+                Ok(c.query_row(
+                    "SELECT copied_at FROM sessions WHERE id = ?1",
+                    [&original.id],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(copied, None);
+        assert!(matches!(
+            store.accept_coach_candidate(&original.id, base, "Stale"),
+            Err(StoreError::StaleCandidate)
+        ));
+        assert_eq!(
+            store.undo_summary(&original.id).unwrap().summary,
+            "Original note"
+        );
+        assert_eq!(
+            store.redo_summary(&original.id).unwrap().summary,
+            "Revised note"
+        );
+        store
+            .update_session(
+                &original.id,
+                &SessionPatch {
+                    summary: Some("Manual edit".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            store.accept_coach_candidate(
+                &original.id,
+                ("Revised note", Some("style-a"), Some("model-a")),
+                "Stale"
+            ),
+            Err(StoreError::StaleCandidate)
+        ));
+        assert_eq!(
+            store.get_session(&original.id).unwrap().unwrap().summary,
+            "Manual edit"
+        );
+        assert_eq!(
+            store
+                .get_session(&original.id)
+                .unwrap()
+                .unwrap()
+                .previous_summary
+                .as_deref(),
+            Some("Revised note")
+        );
+        store
+            .with(|c| {
+                c.execute(
+                    "UPDATE sessions SET prompt_id = 'style-b' WHERE id = ?1",
+                    [&original.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            store.accept_coach_candidate(
+                &original.id,
+                ("Manual edit", Some("style-a"), Some("model-a")),
+                "Stale"
+            ),
+            Err(StoreError::StaleCandidate)
+        ));
+        store
+            .with(|c| {
+                c.execute(
+                    "UPDATE sessions SET prompt_id = 'style-a', model_id = 'model-b' WHERE id = ?1",
+                    [&original.id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            store.accept_coach_candidate(
+                &original.id,
+                ("Manual edit", Some("style-a"), Some("model-a")),
+                "Stale"
+            ),
+            Err(StoreError::StaleCandidate)
+        ));
+    }
+
+    #[test]
+    fn accepted_edit_undo_survives_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("scribular-coach-undo-{}.db", std::process::id()));
+        let keys = MemoryKeyStore::with_key([9; 32]);
+        let store = Store::open(&path, &keys).unwrap();
+        let session = store
+            .create_session(&NewSession {
+                title: "Fixture".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store
+            .update_session(
+                &session.id,
+                &SessionPatch {
+                    summary: Some("Original".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .set_status(&session.id, SessionStatus::Done, None)
+            .unwrap();
+        store
+            .accept_coach_candidate(&session.id, ("Original", None, None), "Revised")
+            .unwrap();
+        drop(store);
+        let reopened = Store::open(&path, &keys).unwrap();
+        assert_eq!(
+            reopened.undo_summary(&session.id).unwrap().summary,
+            "Original"
+        );
+        assert_eq!(
+            reopened.redo_summary(&session.id).unwrap().summary,
+            "Revised"
+        );
+        drop(reopened);
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
 }
 
 #[cfg(test)]
