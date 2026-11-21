@@ -204,8 +204,8 @@
   }
 
   let recording = $derived(status === 'recording');
-  let appAudioDenied = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'denied');
-  let callPermissionStatus = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'capturing' ? 'granted' : appAudioDenied ? 'denied' : permissionStatus);
+  let appAudioPermissionRequired = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'permissionRequired');
+  let callPermissionStatus = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'capturing' ? 'granted' : permissionStatus);
   let working = $derived(isWorking(status));
   let elapsedMs = $derived(capture?.sessionId === sessionId
     ? (capture.status === 'paused' ? capture.activeElapsedMs : (level.mic?.activeElapsedMs ?? capture.activeElapsedMs))
@@ -375,6 +375,7 @@
       if (sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) sessionStorage.removeItem(IN_FLIGHT_START_KEY);
       resultFetch++;
       sessionId = session.id;
+      firstCall = false;
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
@@ -582,14 +583,13 @@
     <LiveTranscript {sessionId} {labeled} activeElapsedMs={elapsedMs} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
 
-  {#if denied || appAudioDenied}
+  {#if denied || appAudioPermissionRequired}
     <PermissionNotice pane={denied ?? 'systemAudio'} />
-    {#if denied === 'systemAudio' || appAudioDenied}<button onclick={showCallExplainer}>Retry app audio</button>{/if}
+    {#if denied === 'systemAudio' || appAudioPermissionRequired}<button onclick={showCallExplainer}>Retry app audio</button>{/if}
   {:else if capture?.sessionId === sessionId && capture?.appAudioStatus === 'unavailable'}
     <p role="status">App audio is unavailable. Your microphone is still recording. <button onclick={showCallExplainer}>Retry app audio</button></p>
-  {:else if error}
-    <p role="alert">{error}</p>
   {/if}
+  {#if error}<p role="alert">{error}</p>{/if}
 
   {#if result}
     {@const session = result}
@@ -606,7 +606,7 @@
 {#if firstCall}
   <dialog bind:this={callDialog} aria-label="App audio access" oncancel={(event) => { event.preventDefault(); void notNow(); }}>
     <p>On a call records your microphone and one selected app. To include app audio, allow Scribular in macOS Screen &amp; System Audio Recording.</p>
-    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : callPermissionStatus === 'denied' ? 'Denied' : 'Unknown — check System Settings or try recording.'}</p>
+    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : 'Permission unconfirmed — check System Settings or try recording.'}</p>
     {#if explainerError || statusError}<p role="alert">{explainerError ?? statusError} <button onclick={explainerError ? (explainerShown ? openCallSettings : showCallExplainer) : () => systemAudioPermissionStatus().then((status) => { permissionStatus = status; statusError = null; }).catch((e) => { statusError = String(e); })}>Retry</button></p>{/if}
     <button onclick={openCallSettings}>Open System Settings</button>
     {#if source.targetApp}

@@ -31,7 +31,7 @@ pub enum RecordingStatus {
 pub enum AppAudioStatus {
     Pending,
     Capturing,
-    Denied,
+    PermissionRequired,
     Unavailable,
 }
 

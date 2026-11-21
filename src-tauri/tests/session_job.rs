@@ -1286,7 +1286,7 @@ fn refused_app_audio_leaves_capture_and_summary_available() {
             .iter()
             .any(|state| {
                 state.as_ref().and_then(|state| state.app_audio_status)
-                    == Some(AppAudioStatus::Denied)
+                    == Some(AppAudioStatus::PermissionRequired)
             })
     });
     h.feed(3);
