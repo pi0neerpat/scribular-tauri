@@ -6,6 +6,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
 import type { AppSettings } from './types/AppSettings';
+import type { ShortcutSettings } from './types/ShortcutSettings';
+import type { ShortcutRegistrationState } from './types/ShortcutRegistrationState';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { CoachAvailability } from './types/CoachAvailability';
@@ -383,6 +385,12 @@ export function getRecordingSettings(): Promise<RecordingSettings> {
 }
 
 export function getAppSettings(): Promise<AppSettings> { return invoke<AppSettings>('get_app_settings'); }
+export function getShortcutSettings(): Promise<ShortcutSettings> { return invoke<ShortcutSettings>('get_shortcut_settings'); }
+export function getShortcutBindings(): Promise<[string, string][]> { return invoke<[string, string][]>('get_shortcut_bindings'); }
+export function shortcutRegistrationState(): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('shortcut_registration_state'); }
+export function onShortcutRegistration(handler: (state: ShortcutRegistrationState) => void): Promise<UnlistenFn> { return listen<ShortcutRegistrationState>('shortcut://registration', (event) => handler(event.payload)); }
+export function setShortcutSettings(settings: ShortcutSettings): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('set_shortcut_settings', { settings }); }
+export function setShortcutCapture(capturing: boolean): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('set_shortcut_capture', { capturing }); }
 export function setAppSettings(settings: AppSettings): Promise<void> { return invoke<void>('set_app_settings', { settings }); }
 export function requestNotificationPermission(): Promise<boolean> { return invoke<boolean>('request_notification_permission'); }
 

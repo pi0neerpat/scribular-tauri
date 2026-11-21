@@ -23,6 +23,9 @@ const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 const RECORD_LOCATION: &str = "record_location";
 const RECORD_TARGET_APP: &str = "record_target_app";
+const GLOBAL_SHORTCUTS_ENABLED: &str = "global_shortcuts_enabled";
+const TOGGLE_RECORDING_SHORTCUT: &str = "toggle_recording_shortcut";
+pub const DEFAULT_TOGGLE_RECORDING: &str = "control+alt+super+KeyR";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
 pub(super) const KEEP_AUDIO: &str = "keep_audio";
 
@@ -55,6 +58,22 @@ pub struct RecordingSettings {
     /// Keep the audio (encrypted, 7 days) after the transcript is saved.
     pub keep_audio: bool,
     pub multi_speaker: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutSettings {
+    pub global_shortcuts_enabled: bool,
+    pub toggle_recording: Option<String>,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            global_shortcuts_enabled: false,
+            toggle_recording: Some(DEFAULT_TOGGLE_RECORDING.into()),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -152,6 +171,40 @@ pub(super) fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 impl Store {
+    pub fn shortcut_settings(&self) -> Result<ShortcutSettings> {
+        self.with(|c| {
+            Ok(ShortcutSettings {
+                global_shortcuts_enabled: select(c, GLOBAL_SHORTCUTS_ENABLED)?.as_deref()
+                    == Some("1"),
+                toggle_recording: select(c, TOGGLE_RECORDING_SHORTCUT)?
+                    .map(|s| if s.is_empty() { None } else { Some(s) })
+                    .unwrap_or_else(|| Some(DEFAULT_TOGGLE_RECORDING.into())),
+            })
+        })
+    }
+
+    pub fn set_shortcut_settings(&self, settings: &ShortcutSettings) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            insert(
+                &tx,
+                GLOBAL_SHORTCUTS_ENABLED,
+                if settings.global_shortcuts_enabled {
+                    "1"
+                } else {
+                    "0"
+                },
+            )?;
+            insert(
+                &tx,
+                TOGGLE_RECORDING_SHORTCUT,
+                settings.toggle_recording.as_deref().unwrap_or(""),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn recording_source(&self) -> Result<RecordingSource> {
         self.with(|c| recording_source(c))
     }
@@ -291,6 +344,42 @@ impl Store {
             tx.commit()?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn shortcut_settings_round_trip_and_clear() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        assert_eq!(
+            store.shortcut_settings().unwrap(),
+            ShortcutSettings::default()
+        );
+        let settings = ShortcutSettings {
+            global_shortcuts_enabled: true,
+            toggle_recording: None,
+        };
+        store.set_shortcut_settings(&settings).unwrap();
+        assert_eq!(store.shortcut_settings().unwrap(), settings);
+        store
+            .set_shortcut_settings(&ShortcutSettings::default())
+            .unwrap();
+        assert_eq!(
+            store.shortcut_settings().unwrap(),
+            ShortcutSettings::default()
+        );
     }
 }
 
