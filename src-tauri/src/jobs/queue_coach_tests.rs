@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     coach::{compile, practice::PRACTICE_SOURCE},
     llm::{GenEvent, Generation},
-    store::{key::MemoryKeyStore, InputMode, NewSession},
+    store::{key::MemoryKeyStore, InputMode, NewSession, SessionPatch},
 };
 use std::{
     path::PathBuf,
@@ -39,12 +39,43 @@ impl Drop for TestStore {
     }
 }
 
+struct TestLogDir(PathBuf);
+
+impl Drop for TestLogDir {
+    fn drop(&mut self) {
+        crate::diag::log::reset_for_tests();
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 struct Silent;
 
 impl JobEvents for Silent {
     fn progress(&self, _: SessionProgress) {}
     fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
     fn segments(&self, _: crate::jobs::SessionSegments) {}
+}
+
+struct AvailabilityChanged(mpsc::Sender<()>);
+
+impl JobEvents for AvailabilityChanged {
+    fn progress(&self, _: SessionProgress) {}
+    fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
+    fn segments(&self, _: crate::jobs::SessionSegments) {}
+    fn summary_queue_changed(&self) {
+        self.0.send(()).unwrap();
+    }
+}
+
+struct CoachCancelled(mpsc::Sender<()>);
+
+impl JobEvents for CoachCancelled {
+    fn progress(&self, _: SessionProgress) {}
+    fn summary_delta(&self, _: crate::jobs::SummaryDelta) {}
+    fn segments(&self, _: crate::jobs::SessionSegments) {}
+    fn session_coach_cancelled(&self) {
+        self.0.send(()).unwrap();
+    }
 }
 
 struct Scripted {
@@ -248,4 +279,179 @@ fn cancelled_practice_drops_the_result_and_has_no_persisted_job() {
     ));
     assert_eq!(store.list_sessions().unwrap().len(), 0);
     assert!(store.queued_summaries().unwrap().is_empty());
+}
+
+#[test]
+fn session_coach_job_leaves_saved_session_unchanged() {
+    let (_db, store) = TestStore::new();
+    let log_dir = std::env::temp_dir().join(format!(
+        "scribular-session-coach-logs-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&log_dir);
+    let _log_cleanup = TestLogDir(log_dir.clone());
+    crate::diag::log::init(&log_dir).unwrap();
+    crate::diag::telemetry::set_enabled(&store, true).unwrap();
+    let (engine, _, _) = engine(true);
+    let queue = JobQueue::new(store.clone(), Arc::new(Loader(engine)), Arc::new(Silent));
+    let session = store
+        .create_session(&NewSession {
+            title: "Fixture".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some(STYLE.into()),
+            model_id: None,
+        })
+        .unwrap();
+    let sentinel = "Client Akoya reported violet lanterns.";
+    store
+        .update_session(
+            &session.id,
+            &SessionPatch {
+                title: None,
+                transcript: Some(sentinel.into()),
+                summary: Some(sentinel.into()),
+            },
+        )
+        .unwrap();
+    store
+        .set_status(&session.id, SessionStatus::Done, None)
+        .unwrap();
+    let before = store.get_session(&session.id).unwrap().unwrap();
+    let (done, result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("Shorten this: {sentinel}"),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    assert_eq!(result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    let after = store.get_session(&session.id).unwrap().unwrap();
+    assert_eq!(after.summary, before.summary);
+    assert_eq!(after.transcript, before.transcript);
+    assert!(store.queued_summaries().unwrap().is_empty());
+    assert!(queue.wait_idle(WAIT));
+    let diagnostics = crate::diag::info::diagnostics(
+        &store,
+        &crate::models::ModelManager::new(log_dir.join("models"), crate::models::manifest()),
+        &log_dir,
+    )
+    .unwrap();
+    let logs = std::fs::read_to_string(log_dir.join("scribular.log")).unwrap();
+    for text in [diagnostics, logs] {
+        assert!(!text.contains(sentinel));
+        assert!(!text.contains("Shorten this"));
+    }
+    assert_eq!(store.get_setting("usage_sessions").unwrap(), None);
+    assert_eq!(store.get_setting("usage_total_seconds").unwrap(), None);
+    assert_eq!(store.get_setting("pending_report").unwrap(), None);
+}
+
+#[test]
+fn session_coach_completion_signals_availability() {
+    let (_db, store) = TestStore::new();
+    let (engine, _, _) = engine(true);
+    let (changed, signals) = mpsc::channel();
+    let queue = JobQueue::new(
+        store,
+        Arc::new(Loader(engine)),
+        Arc::new(AvailabilityChanged(changed)),
+    );
+    let (done, result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: "Shorten the note".into(),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    assert_eq!(result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    signals.recv_timeout(WAIT).unwrap();
+    assert!(!queue.is_busy());
+}
+
+#[test]
+fn cancelled_session_coach_drops_late_result() {
+    let (_db, store) = TestStore::new();
+    let (engine, started, release) = engine(true);
+    let queue = JobQueue::new(store, Arc::new(Loader(engine)), Arc::new(Silent));
+    let (done, result) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("{INSTRUCTIONS}\nCombine them into a single"),
+            cancel: cancel.clone(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    queue.cancel_session_coach();
+    assert!(cancel.load(Ordering::Relaxed));
+    assert!(queue.is_busy());
+    assert!(queue.while_idle(|| ()).is_none());
+    assert!(queue.enqueue_practice(fixture_job().0).is_err());
+    assert!(!queue.wait_idle(Duration::from_millis(10)));
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(queue.wait_idle(WAIT));
+}
+
+#[test]
+fn real_summary_preempts_running_session_coach() {
+    let (_db, store) = TestStore::new();
+    let (engine, started, release) = engine(true);
+    let (cancelled, signal) = mpsc::channel();
+    let queue = JobQueue::new(
+        store.clone(),
+        Arc::new(Loader(engine)),
+        Arc::new(CoachCancelled(cancelled)),
+    );
+    let session = store
+        .create_session(&NewSession {
+            title: "Real".into(),
+            input_mode: InputMode::Mic,
+            prompt_id: Some(STYLE.into()),
+            model_id: None,
+        })
+        .unwrap();
+    store
+        .save_transcript(&session.id, &"word ".repeat(100), 1000)
+        .unwrap();
+    store
+        .set_status(&session.id, SessionStatus::Done, None)
+        .unwrap();
+    let (done, result) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("{INSTRUCTIONS}\nCombine them into a single"),
+            cancel: cancel.clone(),
+            complete: Box::new(move |result| {
+                done.send(result).unwrap();
+            }),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    queue.regenerate(&session.id, STYLE).unwrap();
+    assert!(cancel.load(Ordering::Relaxed));
+    signal.recv_timeout(WAIT).unwrap();
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+    assert!(queue.wait_idle(WAIT));
+    assert_eq!(
+        store.get_session(&session.id).unwrap().unwrap().summary,
+        "Real summary."
+    );
 }

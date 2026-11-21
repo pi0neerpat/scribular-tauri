@@ -17,12 +17,12 @@ use crate::{
 const DRAFT_GONE: &str = "This style is no longer open. Start again from Note Styles.";
 const UNAVAILABLE: &str = "The coach isn’t available right now.";
 
-fn opaque_id() -> Result<String, &'static str> {
+pub(super) fn opaque_id() -> Result<String, &'static str> {
     let bytes = crate::store::key::new_key().map_err(|_| UNAVAILABLE)?;
     Ok(bytes[..16].iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn main_window(window: &WebviewWindow) -> Result<&AppHandle, &'static str> {
+pub(super) fn main_window(window: &WebviewWindow) -> Result<&AppHandle, &'static str> {
     (window.label() == "main")
         .then(|| window.app_handle())
         .ok_or(UNAVAILABLE)
@@ -34,7 +34,7 @@ fn get_state<T: Send + Sync + 'static>(
     app.try_state::<Arc<T>>().ok_or(UNAVAILABLE)
 }
 
-fn available(app: &AppHandle) -> CoachAvailability {
+pub(super) fn available(app: &AppHandle) -> CoachAvailability {
     let components = (
         get_state::<Licensing>(app),
         get_state::<JobQueue>(app),
@@ -490,6 +490,9 @@ pub fn discard(app: &AppHandle, reason: CoachCancelReason) {
 
 pub fn refresh_availability(app: &AppHandle, last: &mut Option<(CoachAvailability, bool)>) {
     let availability = availability(app);
+    if availability.message.is_some() && availability.reason != Some(CoachBlock::Busy) {
+        super::session::cancel_for_gate(app);
+    }
     if availability.reason == Some(CoachBlock::AccessDenied) {
         discard(app, CoachCancelReason::AccessDenied);
     }
