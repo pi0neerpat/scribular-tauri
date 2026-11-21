@@ -6,6 +6,6 @@
 </script>
 
 <p role="alert">
-  {pane === 'microphone' ? 'Microphone' : 'App audio'} access is off.
+  {pane === 'microphone' ? 'Microphone access is off.' : 'App audio permission is required or unconfirmed.'}
   <button onclick={() => openPrivacySettings(pane)}>{pane === 'systemAudio' ? 'Reopen System Audio Settings' : 'Open System Settings'}</button>
 </p>

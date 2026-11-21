@@ -26,6 +26,15 @@ pub enum RecordingStatus {
     Paused,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AppAudioStatus {
+    Pending,
+    Capturing,
+    PermissionRequired,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingState {
@@ -33,6 +42,7 @@ pub struct RecordingState {
     pub status: RecordingStatus,
     pub active_elapsed_ms: u32,
     pub target_app: Option<String>,
+    pub app_audio_status: Option<AppAudioStatus>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
