@@ -8,6 +8,10 @@ const cancelJob = vi.fn();
 const currentRecording = vi.fn();
 const getRecordingSettings = vi.fn();
 const getRecordingSource = vi.fn();
+const getOnboardingState = vi.fn();
+const markAppAudioExplainerShown = vi.fn();
+const systemAudioPermissionStatus = vi.fn();
+const openPrivacySettings = vi.fn();
 const setRecordingSource = vi.fn();
 const recordingState = vi.fn();
 const onRecordingState = vi.fn();
@@ -26,8 +30,9 @@ let emitProgress: ((progress: SessionProgress) => void) | undefined;
 let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
   accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy, getRecordingSettings, getSession,
-  getRecordingSource, setRecordingSource, recordingState, onRecordingState, onSessionLevels,
-  listAudioApps, openPrivacySettings: vi.fn(), pauseRecording: vi.fn(), resumeRecording: vi.fn(),
+  getRecordingSource, setRecordingSource, getOnboardingState, markAppAudioExplainerShown,
+  systemAudioPermissionStatus, recordingState, onRecordingState, onSessionLevels,
+  listAudioApps, openPrivacySettings, pauseRecording: vi.fn(), resumeRecording: vi.fn(),
   onSessionProgress, onSessionTranscriptWaiting, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
   getSummaryAvailability, onSummaryAvailability,
@@ -41,10 +46,16 @@ const settings = (multiSpeaker: boolean) => ({
 const recording = { id: 'recording-1', inputMode: 'mic', status: 'recording', createdAt: 0 };
 
 beforeEach(() => {
+  HTMLDialogElement.prototype.showModal ??= function () { this.open = true; };
+  HTMLDialogElement.prototype.close ??= function () { this.open = false; };
   sessionStorage.clear();
   currentRecording.mockResolvedValue(null);
   getRecordingSettings.mockResolvedValue(settings(true));
   getRecordingSource.mockResolvedValue({ location: 'inRoom', targetApp: null });
+  getOnboardingState.mockResolvedValue({ completed: true, appAudioExplainerShown: false, firstNoteTipDismissed: false });
+  markAppAudioExplainerShown.mockResolvedValue(undefined);
+  systemAudioPermissionStatus.mockResolvedValue('unknown');
+  openPrivacySettings.mockResolvedValue(undefined);
   recordingState.mockResolvedValue(null);
   onRecordingState.mockResolvedValue(() => {});
   onSessionLevels.mockResolvedValue(() => {});
@@ -81,19 +92,58 @@ async function clickButton(target: HTMLElement, name: string) {
 }
 
 describe('recording speaker-count prompt', () => {
-  it('reopens the first-call sheet after Not Now', async () => {
+  it('shows the first-call sheet once, saves it, and returns to mic without capture', async () => {
     const { target, app } = await renderRecordView();
     await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    expect(target.querySelector('input[value="system"]')).toBeNull();
     const call = target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1];
     call.click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    expect(markAppAudioExplainerShown).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio'));
+    expect(target.textContent).toContain('Unknown');
+    await clickButton(target, 'Open System Settings');
+    expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio');
     await clickButton(target, 'Not Now');
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'inRoom', targetApp: null });
     expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[0].checked).toBe(true);
     expect(call.checked).toBe(false);
     call.click();
-    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="Choose a call app"]')).not.toBeNull());
+    expect(target.querySelector('[aria-label="App audio access"]')).toBeNull();
+    expect(startRecording).not.toHaveBeenCalled();
+    unmount(app);
+    target.remove();
+  });
+  it('retries a failed flag write and skips the explainer on relaunch', async () => {
+    markAppAudioExplainerShown.mockRejectedValueOnce(new Error('store unavailable'));
+    const first = await renderRecordView();
+    await vi.waitFor(() => expect((first.target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    first.target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
+    await vi.waitFor(() => expect(first.target.textContent).toContain('store unavailable'));
+    expect(openPrivacySettings).not.toHaveBeenCalled();
+    await clickButton(first.target, 'Retry');
+    await vi.waitFor(() => expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio'));
+    unmount(first.app);
+    first.target.remove();
+
+    getOnboardingState.mockResolvedValue({ completed: true, appAudioExplainerShown: true, firstNoteTipDismissed: false });
+    const second = await renderRecordView();
+    await vi.waitFor(() => expect((second.target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    second.target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
+    await vi.waitFor(() => expect(second.target.querySelector('[aria-label="Choose a call app"]')).not.toBeNull());
+    expect(second.target.querySelector('[aria-label="App audio access"]')).toBeNull();
+    unmount(second.app);
+    second.target.remove();
+  });
+  it('reports a macOS grant without starting capture', async () => {
+    systemAudioPermissionStatus.mockResolvedValue('granted');
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
+    await vi.waitFor(() => expect(target.textContent).toContain('App audio access: Granted'));
+    expect(startRecording).not.toHaveBeenCalled();
     unmount(app);
     target.remove();
   });
@@ -103,7 +153,7 @@ describe('recording speaker-count prompt', () => {
     const call = target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1];
     call.click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
-    await clickButton(target, 'Choose an app');
+    await clickButton(target, 'Choose an app to try recording');
     await vi.waitFor(() => expect(target.textContent).toContain('Playing Other App'));
     await clickButton(target, 'Playing Other App');
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'onCall', targetApp: 'Playing Other App' });
@@ -135,13 +185,13 @@ describe('recording speaker-count prompt', () => {
     const call = target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1];
     call.click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
-    await clickButton(target, 'Choose an app');
+    await clickButton(target, 'Choose an app to try recording');
     listAudioApps.mockRejectedValueOnce(new Error('system audio recording permission denied'));
     deniedPrivacy.mockReturnValueOnce('systemAudio');
     await clickButton(target, 'Refresh');
     await vi.waitFor(() => expect(target.textContent).toContain('Retry app audio'));
     await clickButton(target, 'Retry app audio');
-    await vi.waitFor(() => expect(target.textContent).not.toContain('Retry app audio'));
+    await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
     unmount(app);
     target.remove();
   });

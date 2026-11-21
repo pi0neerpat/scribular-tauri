@@ -108,6 +108,16 @@ pub struct Heartbeat {
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingState {
     pub completed: bool,
+    pub app_audio_explainer_shown: bool,
+    pub first_note_tip_dismissed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SystemAudioPermissionStatus {
+    Unknown,
+    Denied,
+    Granted,
 }
 
 /// Exports every IPC root type, plus the types they reference, into
@@ -118,6 +128,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     AppSettings::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
     OnboardingState::export_all(cfg)?;
+    SystemAudioPermissionStatus::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
     Session::export_all(cfg)?;
     ClearSessionsResult::export_all(cfg)?;
@@ -215,10 +226,40 @@ pub fn app_version() -> AppVersion {
 
 #[tauri::command]
 pub fn get_onboarding_state(store: State<Arc<Store>>) -> Result<OnboardingState, String> {
+    Ok(OnboardingState {
+        completed: store.onboarding_completed().map_err(|e| e.to_string())?,
+        app_audio_explainer_shown: store
+            .app_audio_explainer_shown()
+            .map_err(|e| e.to_string())?,
+        first_note_tip_dismissed: store
+            .get_setting("first_note_tip_dismissed")
+            .map_err(|e| e.to_string())?
+            .as_deref()
+            == Some("1"),
+    })
+}
+
+#[tauri::command]
+pub fn mark_app_audio_explainer_shown(store: State<Arc<Store>>) -> Result<(), String> {
     store
-        .onboarding_completed()
-        .map(|completed| OnboardingState { completed })
+        .mark_app_audio_explainer_shown()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn system_audio_permission_status() -> SystemAudioPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        if unsafe { CGPreflightScreenCaptureAccess() } {
+            return SystemAudioPermissionStatus::Granted;
+        }
+    }
+    // shortcut: preflight cannot distinguish denied from unrequested, upgrade if macOS exposes a richer read-only status API.
+    SystemAudioPermissionStatus::Unknown
 }
 
 #[tauri::command]
