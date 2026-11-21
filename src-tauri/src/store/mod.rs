@@ -19,7 +19,7 @@ use rusqlite::Connection;
 use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Plan};
 
 pub use appearance::{
-    Accent, Appearance, Background, Mode, MyTheme, Preset, Selection, ThemeValues,
+    Accent, Appearance, Background, Mode, MyTheme, Preset, Selection, ThemeValues, Tint,
 };
 pub use prompts::{Prompt, MAX_PROMPT_CHARS};
 pub use sessions::{

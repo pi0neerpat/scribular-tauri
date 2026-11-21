@@ -10,16 +10,26 @@ export const appearanceError = writable<string | null>(null);
 let current = defaultAppearance;
 let systemDark = false;
 let systemAccent = '#007aff';
+let changeVersion = 0;
+let saves: Promise<void> = Promise.resolve();
 const apply = (next: Appearance) => {
   current = next;
   appearance.set(next);
   effectiveAppearance.set(resolveAppearance(next, systemDark, systemAccent));
 };
 
-export async function saveAppearance(next: Appearance): Promise<void> {
-  appearanceError.set(null);
-  try { apply(await setAppearance(next)); }
-  catch (error) { appearanceError.set(`Could not save Appearance. Try again. ${String(error)}`); }
+export function saveAppearance(next: Appearance): Promise<void> {
+  saves = saves.then(async () => {
+    const version = changeVersion;
+    appearanceError.set(null);
+    try {
+      const saved = await setAppearance(next);
+      if (version === changeVersion) apply(saved);
+    } catch (error) {
+      if (version === changeVersion) appearanceError.set(`Could not save Appearance. Try again. ${String(error)}`);
+    }
+  });
+  return saves;
 }
 
 export async function startAppearance(): Promise<() => void> {
@@ -30,7 +40,7 @@ export async function startAppearance(): Promise<() => void> {
   });
   let changed = false;
   try {
-    const stopEvents = await onAppearanceChanged((next) => { changed = true; apply(next); });
+    const stopEvents = await onAppearanceChanged((next) => { changed = true; changeVersion++; apply(next); appearanceError.set(null); });
     try { const snapshot = await getAppearance(); if (!changed && snapshot) apply(snapshot); }
     catch (error) { appearanceError.set(`Could not load Appearance. ${String(error)}`); }
     return () => { stopEvents(); stopSystem(); };

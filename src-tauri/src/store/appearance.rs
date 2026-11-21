@@ -82,6 +82,8 @@ pub struct ThemeValues {
 #[serde(rename_all = "camelCase")]
 pub struct MyTheme {
     pub origin: Preset,
+    #[serde(default)]
+    pub copied_mode: Option<Mode>,
     pub values: ThemeValues,
 }
 
@@ -183,6 +185,7 @@ mod tests {
             selected: Selection::MyTheme,
             my_theme: Some(MyTheme {
                 origin: Preset::Sage,
+                copied_mode: Some(Mode::Dark),
                 values: ThemeValues {
                     mode: Mode::Dark,
                     accent: Accent::Custom("#12abEF".into()),
@@ -195,6 +198,15 @@ mod tests {
             }),
             ..Appearance::default()
         }
+    }
+
+    #[test]
+    fn loads_my_theme_saved_before_copied_mode_was_added() {
+        let old = serde_json::to_string(&custom())
+            .unwrap()
+            .replace(",\"copiedMode\":\"dark\"", "");
+        let loaded: Appearance = serde_json::from_str(&old).unwrap();
+        assert_eq!(loaded.my_theme.unwrap().copied_mode, None);
     }
 
     #[test]
