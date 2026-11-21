@@ -9,21 +9,21 @@
 3. Create the local signing identity once with `bash tools/uitest/setup-signing.sh`. It adds a self-signed "Scribular Local Dev" codesigning certificate to the login keychain (nothing is written to the repo). Apps signed with it keep the same identity across rebuilds, so the Screen & System Audio Recording grant and the keychain ACL survive a rebuild: you answer each prompt once, by hand, on the first signed launch.
 4. Store the Mac login password once with `bash tools/uitest/trust-build.sh --store-password`. Every `launch` then runs `trust-build.sh`, which uses it to trust each new build (see below). It is saved in the login keychain (service `scribular-uitest`), readable by `/usr/bin/security` without a prompt, so any process running as you can read it. Re-run `--store-password` after changing your Mac login password; a wrong stored password is reported on the next launch. Remove it with `security delete-generic-password -s scribular-uitest -a login-password`.
 
-   `UITEST_KEYCHAIN_PASSWORD`, if set, overrides the stored password and lets `handle-keychain` answer any prompt that still appears. The runner redacts it from output.
+   `UITEST_KEYCHAIN_PASSWORD`, if set, overrides the stored password. The runner answers Scribular keychain prompts automatically and redacts the password from output. If no password is available or a prompt stays open, it fails within 15 seconds with the fix command. For prompt tests only, `UITEST_NO_STORED_PASSWORD=1` disables the stored-password lookup.
 
 ### Run safety and failure evidence
 
-Each run takes a non-blocking lock at `~/Library/Caches/scribular-uitest/uitest.lock`; a second run exits with code 2 and reports the active PID. The lock is held until the process exits. Before a mouse click, the runner waits up to 2 seconds for Scribular to become frontmost and checks the click point with the system Accessibility hit-test. For `click` steps only, if the point is covered or Scribular is not frontmost, the runner presses the resolved target through Accessibility; the success log marks this as `pressed via Accessibility (...)`. This was verified with a window covering Stop in AS2 (`runs/as2-covered-stop-20261109T104107/uitest.log`, 15/15 steps passed). The guard also checks that a same-process hit belongs to the resolved target, so another Scribular element is treated as a cover. An open keychain prompt remains a retryable failure. Other covered-click retries continue until the step timeout.
+Each run holds the lock at `~/Library/Caches/scribular-uitest/uitest.lock` until it exits. A second run waits up to 30 minutes, printing the holder PID; `--lock-timeout 10s` changes the limit, and `--lock-timeout 0` refuses immediately. Before a mouse click, the runner waits up to 2 seconds for Scribular to become frontmost and checks the click point with the system Accessibility hit-test. For `click` steps only, if the point is covered or Scribular is not frontmost, the runner presses the resolved target through Accessibility; the success log marks this as `pressed via Accessibility (...)`. This was verified with a window covering Stop in AS2 (`runs/as2-covered-stop-20261109T104107/uitest.log`, 15/15 steps passed). The guard also checks that a same-process hit belongs to the resolved target, so another Scribular element is treated as a cover. Other covered-click retries continue until the step timeout.
 
 Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fail-<line>-screen.png`, and print the frontmost app name. After quitting the app, every run copies a snapshot of `scribular.log` to `app.log` in that run directory when the source log exists. With `launch --keep-data`, that snapshot can include earlier app runs. A missing source or copy error is printed in the run output.
 
 ### Scenario rules
 
-- Before a run, check `pgrep -fl "uitest|Scribular.app|codex"`, stop any other uitest or Scribular process, make sure no other window covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
+- Before a run, check `pgrep -fl "Scribular.app|codex"`, make sure no unrelated GUI automation covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
 - Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
 - Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `since we last met`).
 - On a slow VM, allow at least 400 seconds for the summary.
-- Never run two uitest runs or other GUI automation at once.
+- Concurrent uitest runs queue on the desktop lock; do not run other GUI automation at the same time.
 
 ## Build and run
 
@@ -41,7 +41,7 @@ Recorded runs default to 2.5 seconds of pacing after UI actions. `--pace 2s` ove
 
 Generate a local throwaway updater key with `npm run tauri signer generate -- -w <path>` and use its private key value for `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
 
-This machine places the bundle at `/Users/admin/cargo-target/scribular-tauri/release/bundle/macos/Scribular.app`; pass the path printed by your own build with `--app` if it differs. `launch` reports the app path and executable modification time so stale builds are visible.
+The bundle is at `$CARGO_TARGET_DIR/<debug|release>/bundle/macos/Scribular.app` (under cwf, the target directory is per clone). Pass the path printed by your build with `--app`. `launch` reports the app path and executable modification time so stale builds are visible. Trust output is saved in `runs/<timestamp>/trust-build.log`. For prompt tests only, `--no-trust` skips trust-build.
 
 Other scenarios:
 
@@ -124,7 +124,7 @@ Run `swift run --package-path tools/uitest uitest doctor [--app /path/to/Scribul
 
 ### Keychain after rebuild
 
-Store the login password once with `bash tools/uitest/trust-build.sh --store-password`. After each rebuild, run `bash tools/uitest/trust-build.sh <path>/Scribular.app` so the new build's cdhash can read the existing Scribular keychain items. Keep `handle-keychain` in a scenario as a safety net for a prompt that still appears; the Always-Allow path is not verified.
+Store the login password once with `bash tools/uitest/trust-build.sh --store-password`. Each launch trusts the build and answers any remaining Scribular keychain prompt with Always Allow. If the password is missing or the prompt stays open, the run fails within 15 seconds with the fix command. `handle-keychain` is available for scenarios that request an explicit prompt check.
 
 ### Developer controls
 
