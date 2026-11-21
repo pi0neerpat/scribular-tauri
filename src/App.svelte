@@ -47,8 +47,8 @@
   let welcomeOpen = $state(false);
   let welcome = $state<{ show: () => void }>();
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
-  let history = $state<{ focusSearch: () => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
-  let recordView = $state<{ copyResultNote: () => Promise<void>; refreshAfterDeletion: () => Promise<void> } | undefined>();
+  let history = $state<{ focusSearch: () => Promise<void>; toggleSidebar: () => void; moveSession: (direction: -1 | 1) => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
+  let recordView = $state<{ copyResultNote: () => Promise<void>; toggleRecording: () => void; toggleRecordingPause: () => void; cancelDialog: () => boolean; refreshAfterDeletion: () => Promise<void> } | undefined>();
   let recordHasNote = $state(false);
 
   let coach = $state<CoachTarget | null>(null);
@@ -156,21 +156,38 @@
     void recordView?.refreshAfterDeletion().catch((e) => (error = String(e)));
   }
 
+  function modalOpen() {
+    return !!(quitIntent || [...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"]')].some((dialog) => !dialog.closest('[hidden]')));
+  }
+
   onMount(() => {
     const showRecord = () => { pendingCoachInterruption = false; navigate('record'); };
     window.addEventListener('tray-start-failed', showRecord);
     const find = (event: KeyboardEvent) => {
-      if (!coach && !welcomeOpen && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
-        event.preventDefault(); history?.focusSearch();
+      if (event.metaKey && event.key === '.') {
+        const dialog = document.querySelector<HTMLDialogElement>('dialog[open]');
+        if (dialog) { event.preventDefault(); dialog.dispatchEvent(new Event('cancel', { cancelable: true })); return; }
+        const ownerDialog = (event.target as HTMLElement | null)?.closest('[role="dialog"], [role="alertdialog"]');
+        if (ownerDialog) { event.preventDefault(); ownerDialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return; }
+        if (recordView?.cancelDialog()) event.preventDefault();
+        return;
+      }
+      if (!coach && !welcomeOpen && !modalOpen() && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault(); void history?.focusSearch();
       }
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
-      if (coach || welcomeOpen) return;
+      if (coach || welcomeOpen || modalOpen()) return;
       switch (id) {
         case 'shell-example-style':
         case 'shell-coach': openCoach({}); break;
-        case 'shell-find': history?.focusSearch(); break;
+        case 'shell-find': void history?.focusSearch(); break;
+        case 'shell-record': if (recording) recordView?.toggleRecording(); else navigate('record', undefined, () => recordView?.toggleRecording()); break;
+        case 'shell-pause': recordView?.toggleRecordingPause(); break;
+        case 'shell-previous': history?.moveSession(-1); break;
+        case 'shell-next': history?.moveSession(1); break;
+        case 'shell-sidebar': history?.toggleSidebar(); break;
         case 'shell-manage-styles': navigate('styles'); break;
         case 'shell-blank-style': if (!recording && allows($accessState)) navigate('styles', undefined, () => { void tick().then(() => noteStyles?.newBlank()); }); break;
         case 'shell-new-recording': if (!recording && allows($accessState)) navigate('record'); break;

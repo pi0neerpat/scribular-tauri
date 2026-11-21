@@ -93,6 +93,19 @@
   let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
   $effect(() => onResultNote(!!result?.summary));
   export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
+  export function toggleRecording() {
+    if (busy || askSpeakerCount) return;
+    if (recording) void stop();
+    else if (denied !== 'microphone' && (source.location !== 'onCall' || source.targetApp) && allows($accessState)) void start();
+  }
+  export function toggleRecordingPause() {
+    if (recording && !busy && !askSpeakerCount) void togglePause();
+  }
+  export function cancelDialog() {
+    if (askSpeakerCount) { askSpeakerCount = false; return true; }
+    if (pickerOpen) { pickerOpen = false; return true; }
+    return false;
+  }
   export async function refreshAfterDeletion() {
     const id = sessionId ?? result?.id;
     if (!id || await getSession(id)) return;
@@ -437,7 +450,7 @@
       </div>
     {/if}
     {#if pickerOpen}
-      <div role="dialog" aria-label="Choose a call app">
+      <div role="dialog" aria-label="Choose a call app" tabindex="-1" onkeydown={(event) => { if (event.key === 'Escape') cancelDialog(); }}>
         <p>Common apps and browsers</p>
         {#each commonApps as name}<button disabled={busy} onclick={() => chooseApp(name)}>{name}</button>{/each}
         <p>Other App — currently playing audio</p>

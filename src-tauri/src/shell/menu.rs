@@ -5,6 +5,76 @@ use tauri::{
     AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 
+// Fixed app bindings live here so the menu and later shortcut settings use the same map.
+pub const BINDINGS: &[(&str, &str)] = &[
+    ("shell-settings", "CmdOrCtrl+,"),
+    ("shell-quit", "CmdOrCtrl+Q"),
+    ("shell-new-recording", "CmdOrCtrl+N"),
+    ("shell-record", "CmdOrCtrl+R"),
+    ("shell-pause", "Alt+CmdOrCtrl+R"),
+    ("shell-example-style", "Alt+CmdOrCtrl+N"),
+    ("shell-copy-note", "Shift+CmdOrCtrl+C"),
+    ("shell-close", "CmdOrCtrl+W"),
+    ("shell-delete-session", "CmdOrCtrl+Backspace"),
+    ("shell-find", "CmdOrCtrl+F"),
+    ("shell-note", "CmdOrCtrl+1"),
+    ("shell-transcript", "CmdOrCtrl+2"),
+    ("shell-audio", "CmdOrCtrl+3"),
+    ("shell-manage-styles", "Alt+CmdOrCtrl+S"),
+    ("shell-previous", "Alt+CmdOrCtrl+Up"),
+    ("shell-next", "Alt+CmdOrCtrl+Down"),
+    ("shell-sidebar", "Ctrl+CmdOrCtrl+S"),
+    ("shell-main", "CmdOrCtrl+0"),
+    ("shell-help", "CmdOrCtrl+Shift+/"),
+    ("native-undo", "CmdOrCtrl+Z"),
+    ("native-redo", "Shift+CmdOrCtrl+Z"),
+    ("native-cut", "CmdOrCtrl+X"),
+    ("native-copy", "CmdOrCtrl+C"),
+    ("native-paste", "CmdOrCtrl+V"),
+    ("native-select-all", "CmdOrCtrl+A"),
+    ("native-fullscreen", "Ctrl+CmdOrCtrl+F"),
+    ("native-hide", "CmdOrCtrl+H"),
+    ("native-hide-others", "Alt+CmdOrCtrl+H"),
+    ("native-minimize", "CmdOrCtrl+M"),
+];
+
+fn binding(id: &str) -> Option<&'static str> {
+    BINDINGS
+        .iter()
+        .find(|(command, _)| *command == id)
+        .map(|(_, key)| *key)
+}
+
+fn recording_menu_state(
+    recording: bool,
+    paused: bool,
+    locked: bool,
+    writable: bool,
+) -> ((&'static str, bool), (&'static str, bool)) {
+    (
+        (
+            if recording {
+                "Stop Recording"
+            } else {
+                "Start Recording"
+            },
+            recording || writable && !locked,
+        ),
+        (
+            if paused {
+                "Resume Recording"
+            } else {
+                "Pause Recording"
+            },
+            recording && !locked,
+        ),
+    )
+}
+
+fn note_menu_state(selected: bool, has_note: bool, locked: bool, recording: bool) -> (bool, bool) {
+    (!locked && selected && !recording, !locked && has_note)
+}
+
 #[derive(Default)]
 struct CoachMenuState(Mutex<Option<HashMap<String, bool>>>);
 
@@ -173,21 +243,41 @@ pub fn set_state(
     recoverable: bool,
     locked: bool,
     writable: bool,
+    paused: bool,
 ) -> Result<(), String> {
     let menu = app.menu().ok_or("no app menu")?;
+    let (record_state, pause_state) = recording_menu_state(recording, paused, locked, writable);
+    let (can_delete, can_copy) = note_menu_state(selected, has_note, locked, recording);
+    for (id, title) in [
+        ("shell-record", record_state.0),
+        ("shell-pause", pause_state.0),
+    ] {
+        for top in menu.items().map_err(|e| e.to_string())? {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = sub.get(id) {
+                    item.set_text(title).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+    }
     for (id, enabled) in [
         ("shell-new-recording", writable && !locked && !recording),
+        ("shell-record", record_state.1),
+        ("shell-pause", pause_state.1),
         ("shell-manage-styles", !locked),
         ("shell-blank-style", writable && !locked && !recording),
         ("shell-find", !locked),
         ("shell-delete-all", !recording && has_sessions),
-        ("shell-delete-session", !locked && selected && !recording),
-        ("shell-copy-note", !locked && has_note),
+        ("shell-delete-session", can_delete),
+        ("shell-copy-note", can_copy),
         (
             "shell-recover",
             writable && !locked && recoverable && !recording,
         ),
         ("shell-restore-sample", writable && !locked),
+        ("shell-previous", !locked && has_sessions),
+        ("shell-next", !locked && has_sessions),
+        ("shell-sidebar", !locked),
     ] {
         for top in menu.items().map_err(|e| e.to_string())? {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {
@@ -198,6 +288,32 @@ pub fn set_state(
         }
     }
     Ok(())
+}
+
+pub fn sync_recording_state(app: &AppHandle, state: Option<&crate::jobs::RecordingState>) {
+    let Some(menu) = app.menu() else { return };
+    let recording = state.is_some();
+    let paused = state.is_some_and(|state| state.status == crate::jobs::RecordingStatus::Paused);
+    let locked = app
+        .try_state::<crate::commands::LockedState>()
+        .is_none_or(|state| state.reason.is_some());
+    let writable = app
+        .try_state::<std::sync::Arc<crate::license::Licensing>>()
+        .is_some_and(|license| license.require_access().is_ok());
+    let (record_state, pause_state) = recording_menu_state(recording, paused, locked, writable);
+    for (id, title, enabled) in [
+        ("shell-record", record_state.0, record_state.1),
+        ("shell-pause", pause_state.0, pause_state.1),
+    ] {
+        for top in menu.items().unwrap_or_default() {
+            if let tauri::menu::MenuItemKind::Submenu(sub) = top {
+                if let Some(tauri::menu::MenuItemKind::MenuItem(item)) = sub.get(id) {
+                    let _ = item.set_text(title);
+                    let _ = set_enabled(app, &item, enabled);
+                }
+            }
+        }
+    }
 }
 
 pub fn set_coach_state(app: &AppHandle, enabled: bool, open: bool, reason: Option<&str>) {
@@ -228,7 +344,13 @@ fn item(
     enabled: bool,
     shortcut: Option<&str>,
 ) -> tauri::Result<()> {
-    menu.append(&MenuItem::with_id(app, id, title, enabled, shortcut)?)
+    menu.append(&MenuItem::with_id(
+        app,
+        id,
+        title,
+        enabled,
+        binding(id).or(shortcut),
+    )?)
 }
 
 pub fn build(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
@@ -463,4 +585,42 @@ pub fn build(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     )?;
     menu.append(&help)?;
     Ok(menu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recording_labels_and_availability_follow_owner_state() {
+        assert_eq!(
+            recording_menu_state(false, false, false, true),
+            (("Start Recording", true), ("Pause Recording", false))
+        );
+        assert_eq!(
+            recording_menu_state(true, false, false, true),
+            (("Stop Recording", true), ("Pause Recording", true))
+        );
+        assert_eq!(
+            recording_menu_state(true, true, false, true),
+            (("Stop Recording", true), ("Resume Recording", true))
+        );
+        assert_eq!(
+            recording_menu_state(true, true, false, false),
+            (("Stop Recording", true), ("Resume Recording", true))
+        );
+        assert_eq!(
+            recording_menu_state(false, false, true, true),
+            (("Start Recording", false), ("Pause Recording", false))
+        );
+        assert_eq!(
+            recording_menu_state(false, false, false, false),
+            (("Start Recording", false), ("Pause Recording", false))
+        );
+        assert_eq!(binding("shell-record"), Some("CmdOrCtrl+R"));
+        assert_eq!(binding("shell-pause"), Some("Alt+CmdOrCtrl+R"));
+        assert_eq!(note_menu_state(false, false, false, false), (false, false));
+        assert_eq!(note_menu_state(true, true, false, false), (true, true));
+        assert_eq!(note_menu_state(true, true, true, false), (false, false));
+    }
 }
