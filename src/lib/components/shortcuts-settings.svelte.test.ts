@@ -60,3 +60,41 @@ it('restores the saved chord when capture loses focus', async () => {
   await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(false));
   expect(active).toBe(saved.toggleRecording);
 });
+
+it('cancels Command+Period without saving a chord', async () => {
+  target = document.body.appendChild(document.createElement('div'));
+  app = mount(ShortcutsSettings, { target });
+  const field = await vi.waitFor(() => { const element = target.querySelector<HTMLButtonElement>('#toggle-recording-shortcut'); expect(element).not.toBeNull(); return element!; });
+  field.focus();
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(true));
+  field.dispatchEvent(new KeyboardEvent('keydown', { key: '.', code: 'Period', metaKey: true, bubbles: true }));
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(false));
+  expect(setShortcutSettings).not.toHaveBeenCalled();
+  expect(target.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('restores registration if focus leaves before capture starts', async () => {
+  let finish!: (value: { settings: ShortcutSettings; activeChord: string | null; error: null }) => void;
+  setShortcutCapture.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  target = document.body.appendChild(document.createElement('div'));
+  app = mount(ShortcutsSettings, { target });
+  const field = await vi.waitFor(() => { const element = target.querySelector<HTMLButtonElement>('#toggle-recording-shortcut'); expect(element).not.toBeNull(); return element!; });
+  field.focus();
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(true));
+  field.blur();
+  finish({ settings: saved, activeChord: null, error: null });
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(false));
+});
+
+it('restores registration if the pane closes before capture starts', async () => {
+  let finish!: (value: { settings: ShortcutSettings; activeChord: string | null; error: null }) => void;
+  setShortcutCapture.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  target = document.body.appendChild(document.createElement('div'));
+  app = mount(ShortcutsSettings, { target });
+  const field = await vi.waitFor(() => { const element = target.querySelector<HTMLButtonElement>('#toggle-recording-shortcut'); expect(element).not.toBeNull(); return element!; });
+  field.focus();
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(true));
+  unmount(app);
+  finish({ settings: saved, activeChord: null, error: null });
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(false));
+});

@@ -135,11 +135,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(shortcuts::pressed)
-                .build(),
-        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(QuitConfirmed(AtomicBool::new(false)))
         .manage(shortcuts::Registration::default())
@@ -429,7 +425,7 @@ pub fn run() {
             let shortcut_store = Arc::clone(&store);
             std::thread::spawn(move || {
                 shortcuts::restore(&shortcut_app, &shortcut_store);
-                shell::tray::refresh(&shortcut_app, false, false);
+                shortcuts::refresh_tray(&shortcut_app, &shortcut_store);
             });
             let handle = app.handle().clone();
             std::thread::spawn(move || {

@@ -2,7 +2,7 @@ use std::{str::FromStr, sync::Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut};
 use ts_rs::TS;
 
 use crate::{
@@ -17,6 +17,8 @@ pub struct ShortcutRegistrationState {
     pub active_chord: Option<String>,
     pub error: Option<String>,
 }
+
+pub const REGISTRATION_EVENT: &str = "shortcut://registration";
 
 #[derive(Default)]
 pub struct Registration(Mutex<Actual>);
@@ -130,7 +132,9 @@ fn replace_with(
     if let Some(old) = &actual.active {
         if unregister(old).is_err() {
             if let Some(chord) = next {
-                let _ = unregister(chord);
+                if unregister(chord).is_err() {
+                    actual.active = None;
+                }
             }
             return Err("Could not release the previous shortcut. Try again.".into());
         }
@@ -167,14 +171,36 @@ pub fn set(
     }
     if let Err(error) = store.set_shortcut_settings(&settings) {
         let previous = desired(&current, false);
-        let _ = replace(app, &mut actual, previous);
-        return Err(error.to_string());
+        let message = match replace(app, &mut actual, previous) {
+            Ok(()) => error.to_string(),
+            Err(rollback) => {
+                let failed = next.is_some_and(|chord| app.global_shortcut().is_registered(chord));
+                let old = previous.is_some_and(|chord| app.global_shortcut().is_registered(chord));
+                actual.active = if failed && old {
+                    None
+                } else if failed {
+                    next.map(str::to_owned)
+                } else if old {
+                    previous.map(str::to_owned)
+                } else {
+                    None
+                };
+                format!("Could not save shortcut: {error}; could not restore previous shortcut: {rollback}")
+            }
+        };
+        actual.error = Some(message.clone());
+        drop(actual);
+        if let Ok(result) = state(app, store) {
+            let _ = app.emit(REGISTRATION_EVENT, result);
+        }
+        refresh_tray(app, store);
+        return Err(message);
     }
     actual.capturing = false;
     actual.error = None;
     drop(actual);
     let result = state(app, store)?;
-    let _ = app.emit("shortcut://registration", &result);
+    let _ = app.emit(REGISTRATION_EVENT, &result);
     refresh_tray(app, store);
     Ok(result)
 }
@@ -200,11 +226,11 @@ pub fn capture(
     drop(actual);
     refresh_tray(app, store);
     let result = state(app, store)?;
-    let _ = app.emit("shortcut://registration", &result);
+    let _ = app.emit(REGISTRATION_EVENT, &result);
     Ok(result)
 }
 
-fn refresh_tray(app: &AppHandle, store: &Store) {
+pub fn refresh_tray(app: &AppHandle, store: &Store) {
     let recording = app
         .try_state::<std::sync::Arc<crate::jobs::Recorder>>()
         .is_some_and(|r| r.recording_state().is_some());
@@ -227,7 +253,7 @@ pub fn restore(app: &AppHandle, store: &Store) {
     }
     drop(actual);
     if let Ok(result) = state(app, store) {
-        let _ = app.emit("shortcut://registration", result);
+        let _ = app.emit(REGISTRATION_EVENT, result);
     }
 }
 
@@ -235,28 +261,6 @@ pub fn unregister(app: &AppHandle) {
     if let Some(registration) = app.try_state::<Registration>() {
         let mut actual = registration.0.lock().unwrap_or_else(|e| e.into_inner());
         let _ = replace(app, &mut actual, None);
-    }
-}
-
-pub fn pressed(
-    app: &AppHandle,
-    shortcut: &Shortcut,
-    event: tauri_plugin_global_shortcut::ShortcutEvent,
-) {
-    if event.state != ShortcutState::Pressed {
-        return;
-    }
-    let Some(active) = active(app) else { return };
-    if Shortcut::from_str(&active).ok() != Some(*shortcut) {
-        return;
-    }
-    let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() else {
-        return;
-    };
-    if recorder.recording_state().is_some() {
-        crate::shell::tray::stop(app, None);
-    } else {
-        let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
     }
 }
 
@@ -291,6 +295,18 @@ mod tests {
         .is_err());
         assert_eq!(actual.active.as_deref(), Some("old"));
         assert!(replace_with(&mut actual, None, |_| Ok(()), |_| Ok(())).is_ok());
+        assert_eq!(actual.active, None);
+    }
+
+    #[test]
+    fn failed_cleanup_does_not_claim_a_single_active_chord() {
+        let mut actual = Actual {
+            active: Some("old".into()),
+            ..Default::default()
+        };
+        assert!(
+            replace_with(&mut actual, Some("new"), |_| Ok(()), |_| Err("busy".into())).is_err()
+        );
         assert_eq!(actual.active, None);
     }
 

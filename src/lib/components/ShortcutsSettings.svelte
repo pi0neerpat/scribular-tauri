@@ -9,6 +9,9 @@
   let capturing = $state(false);
   let held = $state('');
   let busy = $state(false);
+  let captureRequest: Promise<ShortcutRegistrationState> | null = null;
+  let focused = false;
+  let mounted = true;
 
   const labels: Record<string, [string, string]> = {
     'shell-new-recording': ['Recording', 'New Recording'], 'shell-record': ['Recording', 'Start/Stop Recording'],
@@ -31,9 +34,19 @@
 
   onMount(() => {
     let eventSeen = false;
-    const listener = onShortcutRegistration((current) => { eventSeen = true; if (!capturing && !busy) shortcutState = current; });
-    void Promise.all([shortcutRegistrationState(), getShortcutBindings()]).then(([current, fixed]) => { if (!eventSeen) shortcutState = current; bindings = fixed; }).catch((e) => error = String(e));
-    return () => { void listener.then((off) => off()); if (capturing) void setShortcutCapture(false); };
+    let off: (() => void) | undefined;
+    void (async () => {
+      try {
+        const unsubscribe = await onShortcutRegistration((current) => { eventSeen = true; if (mounted && !capturing && !busy) shortcutState = current; });
+        if (!mounted) { unsubscribe(); return; }
+        off = unsubscribe;
+        const [current, fixed] = await Promise.all([shortcutRegistrationState(), getShortcutBindings()]);
+        if (!mounted) return;
+        if (!eventSeen) shortcutState = current;
+        bindings = fixed;
+      } catch (e) { if (mounted) error = String(e); }
+    })();
+    return () => { mounted = false; focused = false; off?.(); if (!captureRequest && capturing) void setShortcutCapture(false); };
   });
 
   async function change(enabled: boolean, chord = shortcutState?.settings.toggleRecording ?? null) {
@@ -50,12 +63,20 @@
   }
 
   async function beginCapture() {
-    if (!shortcutState || busy || capturing) return;
-    try { shortcutState = await setShortcutCapture(true); capturing = true; error = ''; }
-    catch (e) { error = String(e); }
+    if (!shortcutState || busy || capturing || captureRequest) return;
+    focused = true;
+    try {
+      captureRequest = setShortcutCapture(true);
+      const current = await captureRequest;
+      if (!focused || !mounted) { await setShortcutCapture(false); return; }
+      shortcutState = current; capturing = true; error = '';
+    } catch (e) { if (mounted) error = String(e); }
+    finally { captureRequest = null; }
   }
 
   async function endCapture() {
+    focused = false;
+    if (captureRequest) return;
     if (!capturing) return;
     capturing = false;
     held = '';
@@ -67,7 +88,7 @@
     if (!capturing || busy) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.key === 'Escape') { void endCapture(); return; }
+    if (event.key === 'Escape' || (event.metaKey && event.code === 'Period')) { void endCapture(); return; }
     if (event.key === 'Backspace' || event.key === 'Delete') { void change(shortcutState!.settings.globalShortcutsEnabled, null); return; }
     held = `${event.ctrlKey ? '⌃' : ''}${event.altKey ? '⌥' : ''}${event.shiftKey ? '⇧' : ''}${event.metaKey ? '⌘' : ''}`;
     if (/^(Control|Alt|Shift|Meta)$/.test(event.key)) return;
