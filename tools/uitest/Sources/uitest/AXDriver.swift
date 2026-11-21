@@ -132,7 +132,7 @@ final class AXDriver: Driver {
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
         case .handleKeychain:
-            _ = waitUntil(timeout: 5) { keychainWindow() != nil }
+            guard waitUntil(timeout: 5, { keychainWindow() != nil }) else { return "no prompt" }
             try answerKeychainPrompt()
             return nil
         case .labels:

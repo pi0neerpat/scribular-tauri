@@ -26,7 +26,10 @@ public struct UITestOptions {
         var index = 1
         while index < arguments.count {
             let flag = arguments[index]
-            if flag == "--no-trust", !noTrust { noTrust = true; index += 1; continue }
+            if flag == "--no-trust" {
+                guard !noTrust else { throw UITestOptionsError("unexpected or duplicate option: \(flag)") }
+                noTrust = true; index += 1; continue
+            }
             guard index + 1 < arguments.count else { throw UITestOptionsError("missing value for \(flag)") }
             let value = arguments[index + 1]
             switch flag {

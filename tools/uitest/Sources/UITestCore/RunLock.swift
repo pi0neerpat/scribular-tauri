@@ -12,9 +12,9 @@ public final class RunLock {
             .appendingPathComponent("Library/Caches/scribular-uitest", isDirectory: true)
             .appendingPathComponent("uitest.lock")
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let descriptor = open(url.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        let descriptor = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
         guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var lastHolder: String?
         while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
             guard errno == EWOULDBLOCK else {
@@ -27,13 +27,13 @@ public final class RunLock {
             let pid = count > 0
                 ? trimmedRunLockPID(String(decoding: buffer.prefix(Int(count)).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self))
                 : "unknown"
-            if timeout == 0 || Date() >= deadline {
+            if timeout == 0 || ProcessInfo.processInfo.systemUptime >= deadline {
                 close(descriptor)
                 let message = timeout == 0 ? "another uitest run is active (pid \(pid))" : "uitest lock timeout after \(label): held by pid \(pid)"
                 throw NSError(domain: "uitest.lock", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
             }
             if pid != lastHolder { out("waiting for uitest run pid \(pid)"); lastHolder = pid }
-            Thread.sleep(forTimeInterval: max(0, min(2, deadline.timeIntervalSinceNow)))
+            Thread.sleep(forTimeInterval: max(0, min(2, deadline - ProcessInfo.processInfo.systemUptime)))
         }
         _ = ftruncate(descriptor, 0)
         _ = lseek(descriptor, 0, SEEK_SET)

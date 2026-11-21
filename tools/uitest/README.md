@@ -41,7 +41,7 @@ Recorded runs default to 2.5 seconds of pacing after UI actions. `--pace 2s` ove
 
 Generate a local throwaway updater key with `npm run tauri signer generate -- -w <path>` and use its private key value for `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
 
-The bundle is at `$CARGO_TARGET_DIR/<debug|release>/bundle/macos/Scribular.app` (under cwf, the target directory is per clone). Pass the path printed by your build with `--app`. `launch` reports the app path and executable modification time so stale builds are visible. Trust output is saved in `runs/<timestamp>/trust-build.log`. For prompt tests only, `--no-trust` skips trust-build.
+The bundle is at `$CARGO_TARGET_DIR/<debug|release>/bundle/macos/Scribular.app` when `CARGO_TARGET_DIR` is set (under cwf, the target directory is per clone), or `src-tauri/target/<debug|release>/bundle/macos/Scribular.app` otherwise. Pass the path printed by your build with `--app`. `launch` reports the app path and executable modification time so stale builds are visible. Trust output is saved in `runs/<timestamp>/trust-build.log`. For prompt tests only, `--no-trust` skips trust-build.
 
 Other scenarios:
 
