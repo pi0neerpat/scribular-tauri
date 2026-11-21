@@ -153,6 +153,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     SessionSegments::export_all(cfg)?;
     TranscriptWaiting::export_all(cfg)?;
     RecordingState::export_all(cfg)?;
+    crate::jobs::AppAudioStatus::export_all(cfg)?;
     SessionLevel::export_all(cfg)?;
     RecordingControlError::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;

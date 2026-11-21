@@ -190,7 +190,7 @@ describe('AS2 Help and usage-data consent', () => {
     completed = true;
     consent = 'on';
     launch();
-    await vi.waitFor(() => expect(calls('get_onboarding_state').length).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(2));
     expect(dialog()).toBeNull();
     reopenFromHelp();
     await vi.waitFor(() => expect(checkbox().checked && !next().disabled).toBe(true));
@@ -204,7 +204,7 @@ describe('AS2 Help and usage-data consent', () => {
     completed = true;
     consent = 'off';
     launch();
-    await vi.waitFor(() => expect(calls('get_onboarding_state').length).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(2));
     fail = 'get_telemetry_setting';
     reopenFromHelp();
     await vi.waitFor(() => expect(dialog()?.querySelector('[role=alert]')?.textContent).toContain('Could not read'));

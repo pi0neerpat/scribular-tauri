@@ -27,6 +27,7 @@ const stopRecording = vi.fn();
 const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
 const onSummaryAvailability = vi.fn(async () => () => {});
 let emitProgress: ((progress: SessionProgress) => void) | undefined;
+let emitRecordingState: ((state: { sessionId: string; status: 'running'; activeElapsedMs: number; targetApp: string; appAudioStatus: 'denied' | 'capturing' }) => void) | undefined;
 let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
   accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy, getRecordingSettings, getSession,
@@ -58,6 +59,7 @@ beforeEach(() => {
   openPrivacySettings.mockResolvedValue(undefined);
   recordingState.mockResolvedValue(null);
   onRecordingState.mockResolvedValue(() => {});
+  emitRecordingState = undefined;
   onSessionLevels.mockResolvedValue(() => {});
   listAudioApps.mockResolvedValue([{ name: 'Playing Other App', icon: null }]);
   setRecordingSource.mockResolvedValue(undefined);
@@ -112,6 +114,8 @@ describe('recording speaker-count prompt', () => {
     call.click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="Choose a call app"]')).not.toBeNull());
     expect(target.querySelector('[aria-label="App audio access"]')).toBeNull();
+    expect(call.checked).toBe(true);
+    expect([...target.querySelectorAll('button')].find((button) => button.textContent === 'Start recording')?.disabled).toBe(true);
     expect(startRecording).not.toHaveBeenCalled();
     unmount(app);
     target.remove();
@@ -144,6 +148,32 @@ describe('recording speaker-count prompt', () => {
     target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
     await vi.waitFor(() => expect(target.textContent).toContain('App audio access: Granted'));
     expect(startRecording).not.toHaveBeenCalled();
+    unmount(app);
+    target.remove();
+  });
+  it('clears a transient permission-status read error on retry', async () => {
+    systemAudioPermissionStatus.mockRejectedValueOnce(new Error('status unavailable'));
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect((target.querySelector('input[type="radio"]') as HTMLInputElement).disabled).toBe(false));
+    target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
+    await vi.waitFor(() => expect(target.textContent).toContain('status unavailable'));
+    await clickButton(target, 'Retry');
+    await vi.waitFor(() => expect(target.textContent).not.toContain('status unavailable'));
+    unmount(app);
+    target.remove();
+  });
+  it('shows an asynchronous app-audio denial and clears it when capture attaches', async () => {
+    getRecordingSource.mockResolvedValue({ location: 'onCall', targetApp: 'Zoom' });
+    onRecordingState.mockImplementation(async (handler) => { emitRecordingState = handler; return () => {}; });
+    const { target, app } = await renderRecordView();
+    await vi.waitFor(() => expect(target.textContent).toContain('App: Zoom'));
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    expect(target.textContent).not.toContain('Retry app audio');
+    emitRecordingState!({ sessionId: recording.id, status: 'running', activeElapsedMs: 0, targetApp: 'Zoom', appAudioStatus: 'denied' });
+    await vi.waitFor(() => expect(target.textContent).toContain('Retry app audio'));
+    emitRecordingState!({ sessionId: recording.id, status: 'running', activeElapsedMs: 0, targetApp: 'Zoom', appAudioStatus: 'capturing' });
+    await vi.waitFor(() => expect(target.textContent).not.toContain('Retry app audio'));
     unmount(app);
     target.remove();
   });

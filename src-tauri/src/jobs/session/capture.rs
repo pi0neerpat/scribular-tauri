@@ -14,7 +14,9 @@ use std::{
 use super::{lock, Inner, RecordError, Transcription};
 use crate::{
     audio::{chunk_writer, ring, AudioError, Capture, Format},
-    jobs::{HearingState, JobEvents, RecordingState, RecordingStatus, SessionLevel},
+    jobs::{
+        AppAudioStatus, HearingState, JobEvents, RecordingState, RecordingStatus, SessionLevel,
+    },
     store::{self, AudioSource, SessionStatus},
     stt::{stream::SILENCE_RMS, SAMPLE_RATE},
 };
@@ -289,6 +291,17 @@ impl Recording {
             },
             active_elapsed_ms: self.elapsed_ms(),
             target_app: self.target_app.clone(),
+            app_audio_status: self.target_app.as_ref().map(|_| {
+                if self.system.span.is_some() {
+                    AppAudioStatus::Capturing
+                } else if self.last_attach_error == Some("app_audio_permission_denied") {
+                    AppAudioStatus::Denied
+                } else if self.last_attach_error.is_some() {
+                    AppAudioStatus::Unavailable
+                } else {
+                    AppAudioStatus::Pending
+                }
+            }),
         }
     }
 
@@ -522,9 +535,13 @@ impl Inner {
                 let Some(recording) = current.as_mut().filter(|r| r.session_id == id) else {
                     return;
                 };
+                let before = recording.snapshot().app_audio_status;
                 if let Err(error) = recording.tick(self) {
                     self.interrupt(current.take().expect("active recording"), error);
                     return;
+                }
+                if recording.snapshot().app_audio_status != before {
+                    self.events.recording_state(Some(recording.snapshot()));
                 }
             }
             if !matches!(

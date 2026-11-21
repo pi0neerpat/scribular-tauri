@@ -141,6 +141,7 @@
   let onboardingReady = $state(false);
   let explainerError = $state<string | null>(null);
   let permissionStatus = $state<SystemAudioPermissionStatus>('unknown');
+  let statusError = $state<string | null>(null);
   let apps = $state<string[]>([]);
   let level = $state<Partial<Record<'mic' | 'system', SessionLevel>>>({});
   let capture = $state<RecordingState | null>(null);
@@ -203,6 +204,8 @@
   }
 
   let recording = $derived(status === 'recording');
+  let appAudioDenied = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'denied');
+  let callPermissionStatus = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'capturing' ? 'granted' : appAudioDenied ? 'denied' : permissionStatus);
   let working = $derived(isWorking(status));
   let elapsedMs = $derived(capture?.sessionId === sessionId
     ? (capture.status === 'paused' ? capture.activeElapsedMs : (level.mic?.activeElapsedMs ?? capture.activeElapsedMs))
@@ -237,6 +240,7 @@
           }
         }).catch(() => {});
       }
+      if (p.state === 'recording') firstCall = false;
       progress = p;
       status = p.state;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
@@ -254,6 +258,7 @@
     });
     const unlistenState = onRecordingState((state) => {
       capture = state;
+      if (state?.appAudioStatus === 'capturing' && denied === 'systemAudio') denied = null;
       if (state?.sessionId === sessionId) status = 'recording';
     });
     const unlistenLevels = onSessionLevels((next) => {
@@ -320,8 +325,8 @@
       if (document.visibilityState !== 'visible') return;
       try {
         const status = await systemAudioPermissionStatus();
-        if (current) permissionStatus = status;
-      } catch (e) { if (current) explainerError = String(e); }
+        if (current) { permissionStatus = status; statusError = null; }
+      } catch (e) { if (current) statusError = String(e); }
     };
     void refresh();
     const timer = setInterval(refresh, 2000);
@@ -336,7 +341,7 @@
 
   async function notNow() {
     await chooseLocation('inRoom');
-    if (source.location === 'inRoom') { firstCall = false; denied = error = null; }
+    if (source.location === 'inRoom') { firstCall = pickerOpen = false; denied = error = null; }
   }
 
   async function start() {
@@ -373,7 +378,6 @@
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
-      if (chosenSource.location === 'onCall') permissionStatus = 'granted';
       startedAt = Date.now();
       level = {};
       capture = await recordingState().catch(() => null);
@@ -446,7 +450,7 @@
 
   async function chooseLocation(location: RecordingSource['location']) {
     if (location === 'onCall' && !explainerShown) { source = { ...source, location }; await showCallExplainer(); return; }
-    if (location === 'onCall' && !source.targetApp) { await openPicker(); return; }
+    if (location === 'onCall' && !source.targetApp) { source = { ...source, location }; await openPicker(); return; }
     const next = { ...source, location };
     try { await setRecordingSource(next); source = next; error = null; }
     catch (e) { error = String(e); }
@@ -578,9 +582,11 @@
     <LiveTranscript {sessionId} {labeled} activeElapsedMs={elapsedMs} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
 
-  {#if denied}
-    <PermissionNotice pane={denied} />
-    {#if denied === 'systemAudio'}<button onclick={showCallExplainer}>Retry app audio</button>{/if}
+  {#if denied || appAudioDenied}
+    <PermissionNotice pane={denied ?? 'systemAudio'} />
+    {#if denied === 'systemAudio' || appAudioDenied}<button onclick={showCallExplainer}>Retry app audio</button>{/if}
+  {:else if capture?.sessionId === sessionId && capture?.appAudioStatus === 'unavailable'}
+    <p role="status">App audio is unavailable. Your microphone is still recording. <button onclick={showCallExplainer}>Retry app audio</button></p>
   {:else if error}
     <p role="alert">{error}</p>
   {/if}
@@ -600,12 +606,12 @@
 {#if firstCall}
   <dialog bind:this={callDialog} aria-label="App audio access" oncancel={(event) => { event.preventDefault(); void notNow(); }}>
     <p>On a call records your microphone and one selected app. To include app audio, allow Scribular in macOS Screen &amp; System Audio Recording.</p>
-    <p role="status">App audio access: {permissionStatus === 'granted' ? 'Granted' : permissionStatus === 'denied' ? 'Denied' : 'Unknown — check System Settings or try recording.'}</p>
-    {#if explainerError}<p role="alert">{explainerError} <button onclick={explainerShown ? openCallSettings : showCallExplainer}>Retry</button></p>{/if}
+    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : callPermissionStatus === 'denied' ? 'Denied' : 'Unknown — check System Settings or try recording.'}</p>
+    {#if explainerError || statusError}<p role="alert">{explainerError ?? statusError} <button onclick={explainerError ? (explainerShown ? openCallSettings : showCallExplainer) : () => systemAudioPermissionStatus().then((status) => { permissionStatus = status; statusError = null; }).catch((e) => { statusError = String(e); })}>Retry</button></p>{/if}
     <button onclick={openCallSettings}>Open System Settings</button>
     {#if source.targetApp}
-      <button disabled={!explainerShown} onclick={async () => { await chooseLocation('onCall'); if (source.location === 'onCall') { firstCall = false; if (permissionStatus !== 'granted') await start(); } }}>
-        {permissionStatus === 'granted' ? 'Continue with selected app' : 'Try recording'}
+      <button disabled={!explainerShown} onclick={async () => { await chooseLocation('onCall'); if (source.location === 'onCall') { firstCall = false; if (!recording && callPermissionStatus !== 'granted') await start(); } }}>
+        {callPermissionStatus === 'granted' ? 'Continue with selected app' : 'Try recording'}
       </button>
     {:else}
       <button disabled={!explainerShown} onclick={() => { firstCall = false; void openPicker(); }}>Choose an app to try recording</button>
