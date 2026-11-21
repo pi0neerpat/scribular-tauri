@@ -25,8 +25,9 @@ use crate::models::{
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
-    now_ms, AppSettings, DiarizationState, InputMode, KeptAudio, Prompt, RecordingSettings,
-    RecordingSource, Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
+    now_ms, Accent, AppSettings, Appearance, Background, DiarizationState, InputMode, KeptAudio,
+    Mode, MyTheme, Preset, Prompt, RecordingSettings, RecordingSource, Selection, Session,
+    SessionListItem, SessionPatch, Store, ThemeValues, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -37,6 +38,7 @@ pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
     APP_SETTINGS_CHANGED_EVENT,
+    APPEARANCE_CHANGED_EVENT,
     MODELS_PROGRESS_EVENT,
     SUMMARY_MODEL_CHANGED_EVENT,
     SUMMARY_AVAILABILITY_EVENT,
@@ -64,6 +66,7 @@ pub const EVENTS: &[&str] = &[
 /// rollover (spec 04 R12).
 pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 pub const APP_SETTINGS_CHANGED_EVENT: &str = "app-settings://changed";
+pub const APPEARANCE_CHANGED_EVENT: &str = "appearance://changed";
 
 pub const UPDATE_STATE_EVENT: &str = "update://state";
 pub const TRAY_START_RECORDING_EVENT: &str = "tray-start-recording";
@@ -116,6 +119,14 @@ pub struct OnboardingState {
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
     AppSettings::export_all(cfg)?;
+    Appearance::export_all(cfg)?;
+    Accent::export_all(cfg)?;
+    Background::export_all(cfg)?;
+    Mode::export_all(cfg)?;
+    MyTheme::export_all(cfg)?;
+    Preset::export_all(cfg)?;
+    Selection::export_all(cfg)?;
+    ThemeValues::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
     OnboardingState::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
@@ -1417,6 +1428,24 @@ pub async fn resume_recording(
 #[tauri::command]
 pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String> {
     store.app_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_appearance(store: State<Arc<Store>>) -> Result<Appearance, String> {
+    store.appearance().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_appearance(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    appearance: Appearance,
+) -> Result<Appearance, String> {
+    let saved = store
+        .set_appearance(&appearance)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit(APPEARANCE_CHANGED_EVENT, &saved);
+    Ok(saved)
 }
 
 #[tauri::command]

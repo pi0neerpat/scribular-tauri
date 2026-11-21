@@ -28,6 +28,7 @@
     triggerTestPanic,
   } from '../api';
   import { appSettings } from '../app-settings';
+  import { startAppearance } from '../appearance-store';
   import LicenseSettings from './LicenseSettings.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
   import type { AppSettings } from '../types/AppSettings';
@@ -40,6 +41,12 @@
   import { navigationLockedBy } from '../navigation';
 
   let { navigationLocked: lockedProp = false }: { navigationLocked?: boolean } = $props();
+  onMount(() => {
+    let stop: (() => void) | undefined;
+    let disposed = false;
+    void startAppearance().then((cleanup) => { if (disposed) cleanup(); else stop = cleanup; });
+    return () => { disposed = true; stop?.(); };
+  });
   // The Settings webview has no App.svelte, so it tracks model work itself.
   let models = $state<Record<string, ModelProgress>>({});
   let navigationLocked = $derived(lockedProp || navigationLockedBy(Object.values(models)));

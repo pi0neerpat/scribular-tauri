@@ -204,6 +204,8 @@ pub fn run() {
             commands::set_recording_source,
             commands::get_app_settings,
             commands::set_app_settings,
+            commands::get_appearance,
+            commands::set_appearance,
             commands::request_notification_permission,
             commands::confirm_quit,
             commands::notify_tray_start_failure,
