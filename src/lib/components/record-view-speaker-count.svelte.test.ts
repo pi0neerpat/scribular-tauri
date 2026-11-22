@@ -102,10 +102,9 @@ describe('recording speaker-count prompt', () => {
     call.click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
     expect(markAppAudioExplainerShown).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio'));
+    expect(openPrivacySettings).not.toHaveBeenCalled();
     expect(target.textContent).toContain('Permission unconfirmed');
-    await clickButton(target, 'Open System Settings');
-    expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio');
+    expect([...target.querySelectorAll('button')].some((button) => button.textContent === 'Open System Settings')).toBe(false);
     await clickButton(target, 'Not Now');
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'inRoom', targetApp: null });
@@ -128,7 +127,8 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(first.target.textContent).toContain('store unavailable'));
     expect(openPrivacySettings).not.toHaveBeenCalled();
     await clickButton(first.target, 'Retry');
-    await vi.waitFor(() => expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio'));
+    await vi.waitFor(() => expect(markAppAudioExplainerShown).toHaveBeenCalledTimes(2));
+    expect(openPrivacySettings).not.toHaveBeenCalled();
     unmount(first.app);
     first.target.remove();
 
@@ -265,6 +265,9 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(target.textContent).toContain('Retry app audio'));
     await clickButton(target, 'Retry app audio');
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
+    expect(openPrivacySettings).not.toHaveBeenCalled();
+    await clickButton(target, 'Open System Settings');
+    expect(openPrivacySettings).toHaveBeenCalledWith('systemAudio');
     unmount(app);
     target.remove();
   });

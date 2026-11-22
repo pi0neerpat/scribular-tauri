@@ -141,6 +141,7 @@
   let onboardingReady = $state(false);
   let explainerError = $state<string | null>(null);
   let permissionStatus = $state<SystemAudioPermissionStatus>('unknown');
+  let callAttempted = $state(false);
   let statusError = $state<string | null>(null);
   let apps = $state<string[]>([]);
   let level = $state<Partial<Record<'mic' | 'system', SessionLevel>>>({});
@@ -307,6 +308,7 @@
 
   async function showCallExplainer() {
     firstCall = true;
+    callAttempted = explainerShown;
     permissionStatus = 'unknown';
     if (!explainerShown) {
       try {
@@ -315,7 +317,6 @@
         explainerError = null;
       } catch (e) { explainerError = String(e); return; }
     }
-    await openCallSettings();
   }
 
   $effect(() => {
@@ -606,9 +607,9 @@
 {#if firstCall}
   <dialog bind:this={callDialog} aria-label="App audio access" oncancel={(event) => { event.preventDefault(); void notNow(); }}>
     <p>On a call records your microphone and one selected app. To include app audio, allow Scribular in macOS Screen &amp; System Audio Recording.</p>
-    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : 'Permission unconfirmed — check System Settings or try recording.'}</p>
+    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : callAttempted ? 'Permission unconfirmed — check System Settings or try recording.' : 'Permission unconfirmed — try recording to request access.'}</p>
     {#if explainerError || statusError}<p role="alert">{explainerError ?? statusError} <button onclick={explainerError ? (explainerShown ? openCallSettings : showCallExplainer) : () => systemAudioPermissionStatus().then((status) => { permissionStatus = status; statusError = null; }).catch((e) => { statusError = String(e); })}>Retry</button></p>{/if}
-    <button onclick={openCallSettings}>Open System Settings</button>
+    {#if callAttempted}<button onclick={openCallSettings}>Open System Settings</button>{/if}
     {#if source.targetApp}
       <button disabled={!explainerShown} onclick={async () => { await chooseLocation('onCall'); if (source.location === 'onCall') { firstCall = false; if (!recording && callPermissionStatus !== 'granted') await start(); } }}>
         {callPermissionStatus === 'granted' ? 'Continue with selected app' : 'Try recording'}
