@@ -212,6 +212,8 @@ pub fn run() {
             commands::set_shortcut_settings,
             commands::shortcut_registration_state,
             commands::set_shortcut_capture,
+            commands::get_appearance,
+            commands::set_appearance,
             commands::request_notification_permission,
             commands::confirm_quit,
             commands::notify_tray_start_failure,
