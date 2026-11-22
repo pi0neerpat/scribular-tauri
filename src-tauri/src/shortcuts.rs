@@ -26,8 +26,15 @@ pub struct Registration(Mutex<Actual>);
 #[derive(Default)]
 struct Actual {
     active: Option<String>,
+    pending: Vec<String>,
     error: Option<String>,
     capturing: bool,
+}
+
+impl Actual {
+    fn known_active(&self) -> Option<String> {
+        self.active.clone().filter(|_| self.pending.is_empty())
+    }
 }
 
 pub fn validate(chord: &str) -> Result<String, String> {
@@ -90,14 +97,14 @@ pub fn state(app: &AppHandle, store: &Store) -> Result<ShortcutRegistrationState
     let actual = actual.0.lock().unwrap_or_else(|e| e.into_inner());
     Ok(ShortcutRegistrationState {
         settings,
-        active_chord: actual.active.clone(),
+        active_chord: actual.known_active(),
         error: actual.error.clone(),
     })
 }
 
 pub fn active(app: &AppHandle) -> Option<String> {
     app.try_state::<Registration>()
-        .and_then(|state| state.0.try_lock().ok().and_then(|s| s.active.clone()))
+        .and_then(|state| state.0.try_lock().ok().and_then(|s| s.known_active()))
 }
 
 fn replace(app: &AppHandle, actual: &mut Actual, next: Option<&str>) -> Result<(), String> {
@@ -123,6 +130,10 @@ fn replace_with(
     mut register: impl FnMut(&str) -> Result<(), String>,
     mut unregister: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<(), String> {
+    actual.pending.retain(|chord| unregister(chord).is_err());
+    if !actual.pending.is_empty() {
+        return Err("Could not release the previous shortcut. Try again.".into());
+    }
     if actual.active.as_deref() == next {
         return Ok(());
     }
@@ -133,7 +144,7 @@ fn replace_with(
         if unregister(old).is_err() {
             if let Some(chord) = next {
                 if unregister(chord).is_err() {
-                    actual.active = None;
+                    actual.pending.push(chord.to_owned());
                 }
             }
             return Err("Could not release the previous shortcut. Try again.".into());
@@ -167,26 +178,20 @@ pub fn set(
     let next = desired(&settings, false);
     if let Err(error) = replace(app, &mut actual, next) {
         actual.error = Some(error.clone());
+        drop(actual);
+        if let Ok(result) = state(app, store) {
+            let _ = app.emit(REGISTRATION_EVENT, result);
+        }
+        refresh_tray(app, store);
         return Err(error);
     }
     if let Err(error) = store.set_shortcut_settings(&settings) {
         let previous = desired(&current, false);
         let message = match replace(app, &mut actual, previous) {
             Ok(()) => error.to_string(),
-            Err(rollback) => {
-                let failed = next.is_some_and(|chord| app.global_shortcut().is_registered(chord));
-                let old = previous.is_some_and(|chord| app.global_shortcut().is_registered(chord));
-                actual.active = if failed && old {
-                    None
-                } else if failed {
-                    next.map(str::to_owned)
-                } else if old {
-                    previous.map(str::to_owned)
-                } else {
-                    None
-                };
-                format!("Could not save shortcut: {error}; could not restore previous shortcut: {rollback}")
-            }
+            Err(rollback) => format!(
+                "Could not save shortcut: {error}; could not restore previous shortcut: {rollback}"
+            ),
         };
         actual.error = Some(message.clone());
         drop(actual);
@@ -307,6 +312,70 @@ mod tests {
         assert!(
             replace_with(&mut actual, Some("new"), |_| Ok(()), |_| Err("busy".into())).is_err()
         );
+        assert_eq!(actual.active.as_deref(), Some("old"));
+        assert_eq!(actual.pending, vec!["new"]);
+        assert_eq!(actual.known_active(), None);
+    }
+
+    #[test]
+    fn dual_unregister_failure_retries_both_chords() {
+        let mut actual = Actual {
+            active: Some("old".into()),
+            ..Default::default()
+        };
+        let registered = std::cell::RefCell::new(
+            ["old".to_string()]
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>(),
+        );
+        let mut attempts = Vec::new();
+        assert!(replace_with(
+            &mut actual,
+            Some("new"),
+            |chord| {
+                registered.borrow_mut().insert(chord.into());
+                Ok(())
+            },
+            |chord| {
+                attempts.push(chord.to_string());
+                Err("busy".into())
+            },
+        )
+        .is_err());
+        assert_eq!(actual.active.as_deref(), Some("old"));
+        assert_eq!(actual.pending, vec!["new"]);
+        assert_eq!(attempts, ["old", "new"]);
+
+        attempts.clear();
+        assert!(replace_with(
+            &mut actual,
+            None,
+            |_| Ok(()),
+            |chord| {
+                attempts.push(chord.to_string());
+                Err("busy".into())
+            },
+        )
+        .is_err());
+        assert_eq!(attempts, ["new"]);
+        assert_eq!(actual.pending, vec!["new"]);
+        assert_eq!(actual.active.as_deref(), Some("old"));
+
+        attempts.clear();
+        assert!(replace_with(
+            &mut actual,
+            None,
+            |_| Ok(()),
+            |chord| {
+                attempts.push(chord.to_string());
+                registered.borrow_mut().remove(chord);
+                Ok(())
+            },
+        )
+        .is_ok());
+        assert_eq!(attempts, ["new", "old"]);
+        assert!(registered.borrow().is_empty());
+        assert!(actual.pending.is_empty());
         assert_eq!(actual.active, None);
     }
 
