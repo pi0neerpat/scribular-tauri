@@ -104,7 +104,8 @@ describe('recording speaker-count prompt', () => {
     expect(markAppAudioExplainerShown).toHaveBeenCalledOnce();
     expect(openPrivacySettings).not.toHaveBeenCalled();
     expect(target.textContent).toContain('Permission unconfirmed');
-    expect([...target.querySelectorAll('button')].some((button) => button.textContent === 'Open System Settings')).toBe(false);
+    await clickButton(target, 'Open System Settings');
+    expect(openPrivacySettings).toHaveBeenCalledExactlyOnceWith('systemAudio');
     await clickButton(target, 'Not Now');
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'inRoom', targetApp: null });
