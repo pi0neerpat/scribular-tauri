@@ -552,10 +552,10 @@ impl Store {
                      previous_summary = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN summary ELSE previous_summary END,
                      previous_prompt_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN prompt_id ELSE previous_prompt_id END,
                      previous_model_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN model_id ELSE previous_model_id END,
-                     redo_summary = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_summary END,
-                     redo_prompt_id = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_prompt_id END,
-                     redo_model_id = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE redo_model_id END,
-                     copied_at = CASE WHEN ?4 IS NOT NULL THEN NULL ELSE copied_at END,
+                     redo_summary = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN NULL ELSE redo_summary END,
+                     redo_prompt_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN NULL ELSE redo_prompt_id END,
+                     redo_model_id = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN NULL ELSE redo_model_id END,
+                     copied_at = CASE WHEN ?4 IS NOT NULL AND ?4 <> summary THEN NULL ELSE copied_at END,
                      summary    = COALESCE(?4, summary)
                  WHERE id = ?1",
                 params![id, patch.title, patch.transcript, patch.summary],
@@ -1352,11 +1352,30 @@ mod coach_accept_tests {
             store.undo_summary(&original.id).unwrap().summary,
             "Original note"
         );
+        store
+            .mark_note_copied(&original.id, "Original note")
+            .unwrap();
+        let copied_at = store.get_session(&original.id).unwrap().unwrap().copied_at;
+        assert!(copied_at.is_some());
+        let unchanged = store
+            .update_session(
+                &original.id,
+                &SessionPatch {
+                    summary: Some("Original note".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!((unchanged.can_redo, unchanged.copied_at), (true, copied_at));
         assert_eq!(
             store.redo_summary(&original.id).unwrap().summary,
             "Revised note"
         );
+        store.undo_summary(&original.id).unwrap();
         store
+            .mark_note_copied(&original.id, "Original note")
+            .unwrap();
+        let edited = store
             .update_session(
                 &original.id,
                 &SessionPatch {
@@ -1365,12 +1384,9 @@ mod coach_accept_tests {
                 },
             )
             .unwrap();
+        assert_eq!((edited.can_redo, edited.copied_at), (false, None));
         assert!(matches!(
-            store.accept_coach_candidate(
-                &original.id,
-                ("Revised note", Some("style-a"), Some("model-a")),
-                "Stale"
-            ),
+            store.accept_coach_candidate(&original.id, base, "Stale"),
             Err(StoreError::StaleCandidate)
         ));
         assert_eq!(
@@ -1384,7 +1400,7 @@ mod coach_accept_tests {
                 .unwrap()
                 .previous_summary
                 .as_deref(),
-            Some("Revised note")
+            Some("Original note")
         );
         store
             .with(|c| {
