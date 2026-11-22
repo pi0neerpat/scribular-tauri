@@ -22,7 +22,7 @@ function session(state: Session['diarizationState'], name = 'Alice', summary = '
     promptId: null, modelId: null, transcript: 'Alice: hello', plainTranscript: 'hello',
     rawTranscript: 'SPEAKER_0: hello', speakerMap: { SPEAKER_0: name }, diarizationState: state,
     summary, durationMs: 1000, timings: null, hasAudio: false, isSample: false, audioExpiresAt: null,
-    previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false,
+    previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null,
   } as Session;
 }
 

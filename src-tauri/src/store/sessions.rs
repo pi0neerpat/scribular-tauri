@@ -154,6 +154,9 @@ pub struct Session {
     pub previous_prompt_id: Option<String>,
     pub previous_model_id: Option<String>,
     pub can_redo: bool,
+    /// Milliseconds since the Unix epoch when the saved note was copied.
+    #[ts(type = "number | null")]
+    pub copied_at: Option<i64>,
     pub is_sample: bool,
 }
 
@@ -292,6 +295,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Session> {
         previous_prompt_id: row.get(17)?,
         previous_model_id: row.get(18)?,
         can_redo: row.get(21)?,
+        copied_at: row.get(22)?,
         is_sample,
     })
 }
@@ -527,7 +531,7 @@ impl Store {
     pub fn get_session(&self, id: &str) -> Result<Option<Session>> {
         self.with(|c| {
             Ok(c.query_row(
-                &format!("SELECT {COLUMNS}, {HAS_AUDIO}, (redo_summary IS NOT NULL) FROM sessions WHERE id = ?1"),
+                &format!("SELECT {COLUMNS}, {HAS_AUDIO}, (redo_summary IS NOT NULL), copied_at FROM sessions WHERE id = ?1"),
                 [id],
                 from_row,
             )
@@ -743,6 +747,18 @@ impl Store {
             )?)
         })?;
         if changed == 0 {
+            let Some(session) = self.get_session(id)? else {
+                return Err(session_not_found(id));
+            };
+            if matches!(
+                session.status,
+                SessionStatus::Recording
+                    | SessionStatus::Finalizing
+                    | SessionStatus::AwaitingModel
+                    | SessionStatus::Summarizing
+            ) {
+                return Err(StoreError::Busy);
+            }
             return Err(StoreError::NotFound(format!(
                 "redo summary for session {id}"
             )));
@@ -883,7 +899,15 @@ impl Store {
     ) -> Result<()> {
         let map = serde_json::to_string(map)?;
         let changed = self.with(|c| Ok(c.execute(
-            "UPDATE sessions SET transcript = ?2, speaker_map = ?3, diarization_state = ?4, summary = COALESCE(?5, summary) WHERE id = ?1",
+            "UPDATE sessions SET transcript = ?2, speaker_map = ?3, diarization_state = ?4,
+             previous_summary = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN summary ELSE previous_summary END,
+             previous_prompt_id = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN prompt_id ELSE previous_prompt_id END,
+             previous_model_id = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN model_id ELSE previous_model_id END,
+             redo_summary = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN NULL ELSE redo_summary END,
+             redo_prompt_id = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN NULL ELSE redo_prompt_id END,
+             redo_model_id = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN NULL ELSE redo_model_id END,
+             copied_at = CASE WHEN ?5 IS NOT NULL AND ?5 <> summary THEN NULL ELSE copied_at END,
+             summary = COALESCE(?5, summary) WHERE id = ?1",
             params![id, transcript, map, state.as_str(), summary],
         )?))?;
         if changed == 0 {
@@ -1294,6 +1318,12 @@ mod coach_accept_tests {
         store
             .mark_note_copied(&original.id, "Original note")
             .unwrap();
+        assert!(store
+            .get_session(&original.id)
+            .unwrap()
+            .unwrap()
+            .copied_at
+            .is_some());
         let accepted = store
             .accept_coach_candidate(&original.id, base, "Revised note")
             .unwrap();
@@ -1310,6 +1340,7 @@ mod coach_accept_tests {
             })
             .unwrap();
         assert_eq!(copied, None);
+        assert_eq!(accepted.copied_at, None);
         assert!(matches!(
             store.accept_coach_candidate(&original.id, base, "Stale"),
             Err(StoreError::StaleCandidate)
@@ -1431,6 +1462,87 @@ mod coach_accept_tests {
         for suffix in ["", "-wal", "-shm"] {
             let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
         }
+    }
+
+    #[test]
+    fn speaker_change_preserves_undo_and_clears_redo_only_when_note_changes() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        super::super::migrations::migrate(&mut conn).unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        let session = store
+            .create_session(&NewSession {
+                title: "Fixture".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store
+            .update_session(
+                &session.id,
+                &SessionPatch {
+                    summary: Some("Alex spoke".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .set_status(&session.id, SessionStatus::Done, None)
+            .unwrap();
+        store
+            .accept_coach_candidate(&session.id, ("Alex spoke", None, None), "Alex agreed")
+            .unwrap();
+        store.undo_summary(&session.id).unwrap();
+        assert!(store.get_session(&session.id).unwrap().unwrap().can_redo);
+        store
+            .update_diarization(
+                &session.id,
+                "transcript",
+                &BTreeMap::new(),
+                DiarizationState::Confirmed,
+                Some("Alex spoke"),
+            )
+            .unwrap();
+        assert!(store.get_session(&session.id).unwrap().unwrap().can_redo);
+        store
+            .update_diarization(
+                &session.id,
+                "transcript",
+                &BTreeMap::new(),
+                DiarizationState::Confirmed,
+                Some("Pat spoke"),
+            )
+            .unwrap();
+        let changed = store.get_session(&session.id).unwrap().unwrap();
+        assert_eq!(changed.previous_summary.as_deref(), Some("Alex spoke"));
+        assert!(!changed.can_redo);
+        assert_eq!(
+            store.undo_summary(&session.id).unwrap().summary,
+            "Alex spoke"
+        );
+    }
+
+    #[test]
+    fn redo_reports_busy_before_missing_redo() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        super::super::migrations::migrate(&mut conn).unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        let session = store
+            .create_session(&NewSession {
+                title: "Fixture".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            store.redo_summary(&session.id),
+            Err(StoreError::Busy)
+        ));
     }
 }
 

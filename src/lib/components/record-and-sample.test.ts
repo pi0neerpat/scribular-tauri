@@ -13,7 +13,7 @@ const session = {
   status: 'awaitingModel' as const, error: null, promptId: null, modelId: null,
   transcript: 'A saved transcript', summary: '', durationMs: 1000, timings: null,
   plainTranscript: null, rawTranscript: null, speakerMap: null, diarizationState: 'none' as const,
-  hasAudio: false, isSample: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false,
+  hasAudio: false, isSample: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null,
 };
 
 describe('recording and sample components', () => {

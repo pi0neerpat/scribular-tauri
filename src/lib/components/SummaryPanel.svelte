@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, markNoteCopied, onSummaryDelta, openSettings, redoSummary, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
@@ -46,6 +46,7 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const sessionId = $derived(session.id);
   const savedSummary = $derived(session.summary);
+  let copiedSummary = '';
   const working = $derived(['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(session.status));
   const provenance = $derived(byline || [
     session.promptId && prompts
@@ -66,7 +67,7 @@
   $effect(() => {
     sessionId;
     preview = '';
-    copied = false;
+    copied = untrack(() => Boolean(session.copiedAt));
     error = null;
     busy = false;
     confirmDelete = false;
@@ -77,6 +78,14 @@
   $effect(() => {
     savedSummary;
     if (!working) preview = '';
+  });
+
+  $effect(() => {
+    if (savedSummary !== copiedSummary) {
+      copiedSummary = savedSummary;
+      copied = Boolean(session.copiedAt);
+      clearTimeout(copyTimer);
+    }
   });
 
   onMount(() => {

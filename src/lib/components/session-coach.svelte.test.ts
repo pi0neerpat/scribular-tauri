@@ -124,3 +124,58 @@ it('shows stale acceptance and the shared availability reason', async () => {
   expect(ui.button('Try Again')).toBeDefined();
   unmount(ui.app);
 });
+
+it('stops a job whose start response arrives after Stop', async () => {
+  let finish!: (value: { jobId: string; unlisten: () => void }) => void;
+  const unlisten = vi.fn();
+  api.sessionCoachStart.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  const ui = setup();
+  ui.send('Shorten Plan');
+  flushSync();
+  ui.target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  finish({ jobId: 'late-job', unlisten });
+  await vi.waitFor(() => expect(api.sessionCoachStop).toHaveBeenCalledWith('late-job'));
+  expect(unlisten).toHaveBeenCalledOnce();
+  unmount(ui.app);
+});
+
+it('keeps candidate actions disabled while acceptance is pending', async () => {
+  let result!: (value: unknown) => void;
+  let finish!: (value: Session) => void;
+  api.sessionCoachStart.mockImplementation(async (_id, _request, onResult) => {
+    result = onResult;
+    return { jobId: 'job', unlisten: vi.fn() };
+  });
+  api.sessionCoachAccept.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+  const ui = setup();
+  ui.send('Shorten Plan');
+  await vi.waitFor(() => expect(result).toBeDefined());
+  result({ jobId: 'job', sessionId: 'one', outcome: { kind: 'candidate', candidateId: 'a', note: 'New note' } });
+  flushSync();
+  ui.button('Use This').click();
+  flushSync();
+  expect(ui.button('Use This').disabled).toBe(true);
+  expect(ui.button('Keep the Old One').disabled).toBe(true);
+  finish({ ...saved, summary: 'New note' });
+  await vi.waitFor(() => expect(ui.target.textContent).toContain('Revision saved.'));
+  unmount(ui.app);
+});
+
+it('shows moved and repeated lines in their actual order', async () => {
+  let result!: (value: unknown) => void;
+  api.sessionCoachStart.mockImplementation(async (_id, _request, onResult) => {
+    result = onResult;
+    return { jobId: 'job', unlisten: vi.fn() };
+  });
+  const ui = setup();
+  ui.state.session = { ...saved, summary: 'A\nB\nA' };
+  ui.send('Reorder');
+  await vi.waitFor(() => expect(result).toBeDefined());
+  result({ jobId: 'job', sessionId: 'one', outcome: { kind: 'candidate', candidateId: 'a', note: 'A\nA\nB' } });
+  flushSync();
+  const rows = [...ui.target.querySelectorAll('[aria-label="Note changes"] > *')];
+  expect(rows.map((row) => [row.tagName, row.textContent])).toEqual([
+    ['SPAN', 'A'], ['DEL', 'B'], ['SPAN', 'A'], ['INS', 'B'],
+  ]);
+  unmount(ui.app);
+});

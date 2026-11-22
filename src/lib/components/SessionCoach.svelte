@@ -14,10 +14,26 @@
   let candidate = $state<{ id: string; note: string; base: string } | null>(null);
   let job = $state<string | null>(null);
   let pending = $state(false);
+  let accepting = $state(false);
   let notice = $state('');
   let view = $state<'Changes' | 'Before' | 'After'>('Changes');
   const beforeLines = $derived(session.summary.split('\n'));
   const afterLines = $derived(candidate?.note.split('\n') ?? []);
+  const changes = $derived.by(() => {
+    const before = beforeLines, after = afterLines;
+    const lengths = Array.from({ length: before.length + 1 }, () => Array<number>(after.length + 1).fill(0));
+    for (let i = before.length - 1; i >= 0; i--)
+      for (let j = after.length - 1; j >= 0; j--)
+        lengths[i][j] = before[i] === after[j] ? lengths[i + 1][j + 1] + 1 : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
+    const rows: { kind: 'same' | 'removed' | 'added'; line: string }[] = [];
+    let i = 0, j = 0;
+    while (i < before.length || j < after.length) {
+      if (i < before.length && j < after.length && before[i] === after[j]) rows.push({ kind: 'same', line: before[i++] }), j++;
+      else if (i < before.length && (j === after.length || lengths[i + 1][j] >= lengths[i][j + 1])) rows.push({ kind: 'removed', line: before[i++] });
+      else rows.push({ kind: 'added', line: after[j++] });
+    }
+    return rows;
+  });
   let unlisten: (() => void) | null = null;
   let sequence = 0;
   const blocked = $derived(!availability || availability.reason !== null);
@@ -65,7 +81,10 @@
         unlisten?.(); unlisten = null;
       }, requests, candidate?.id ?? null);
       if (current === sequence && pending) { job = started.jobId; unlisten = started.unlisten; }
-      else started.unlisten();
+      else {
+        started.unlisten();
+        if (current !== sequence) void sessionCoachStop(started.jobId).catch((error) => (notice = String(error)));
+      }
     } catch (error) {
       if (current === sequence) { pending = false; job = null; notice = String(error); input = request; }
     }
@@ -82,7 +101,8 @@
   }
 
   async function accept() {
-    if (!candidate) return;
+    if (!candidate || accepting) return;
+    accepting = true;
     try {
       const updated = await sessionCoachAccept(session.id, candidate.id);
       candidate = null;
@@ -91,6 +111,8 @@
     } catch (error) {
       notice = String(error);
       if (notice.includes('changed') || notice.includes('no longer')) candidate = null;
+    } finally {
+      accepting = false;
     }
   }
 </script>
@@ -112,14 +134,15 @@
       {:else if view === 'After'}<pre>{candidate.note}</pre>
       {:else}
         <div class="diff" aria-label="Note changes">
-          {#each beforeLines.filter((line) => line.trim() && !afterLines.includes(line)) as line}<del>{line}</del>{/each}
-          {#each afterLines as line}
-            {#if line.trim() && !beforeLines.includes(line)}<ins>{line}</ins>{:else}<span>{line || ' '}</span>{/if}
+          {#each changes as change}
+            {#if change.kind === 'removed'}<del>{change.line || ' '}</del>
+            {:else if change.kind === 'added'}<ins>{change.line || ' '}</ins>
+            {:else}<span>{change.line || ' '}</span>{/if}
           {/each}
         </div>
       {/if}
-      <button disabled={pending || blocked} onclick={accept}>Use This</button>
-      <button disabled={pending} onclick={() => { candidate = null; notice = 'Kept the old note.'; }}>Keep the Old One</button>
+      <button disabled={pending || blocked || accepting} onclick={accept}>Use This</button>
+      <button disabled={pending || accepting} onclick={() => { candidate = null; notice = 'Kept the old note.'; }}>Keep the Old One</button>
     </section>
   {/if}
   {#if notice}<p role="status">{notice}</p>{/if}

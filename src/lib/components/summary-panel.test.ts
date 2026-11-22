@@ -23,11 +23,26 @@ const session: Session = {
   id: 'session-1', title: 'Session', createdAt: 1, inputMode: 'mic', status: 'done', error: null,
   promptId: 'prompt-1', modelId: null, transcript: 'transcript text', plainTranscript: null, rawTranscript: null,
   speakerMap: null, diarizationState: 'none', summary: 'saved summary', durationMs: 1000, timings: null,
-  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, isSample: false,
+  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null, isSample: false,
 };
 const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, showInStyleMenu: true, styleSpec: null }], activeId: 'prompt-1', createdId: null };
 
 afterEach(() => accessState.set(null));
+
+it('restores the saved copy marker and clears it when the note changes', () => {
+  api.listSummaryModels.mockResolvedValue([]);
+  const current = writable<Session>({ ...session, copiedAt: 123 });
+  const state = fromStore(current);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { get session() { return state.current; }, management: true, prompts, models: [] } });
+  const copyButton = () => [...target.querySelectorAll('button')].find((button) => button.textContent === 'Copied' || button.textContent === 'Copy Note');
+  flushSync();
+  expect(copyButton()?.textContent).toBe('Copied');
+  current.set({ ...session, summary: 'Revised note', copiedAt: null });
+  flushSync();
+  expect(copyButton()?.textContent).toBe('Copy Note');
+  unmount(app);
+});
 
 it('keeps copy and delete available but disables regeneration for a lapsed licence', async () => {
   accessState.set({ kind: 'licenseLapsed' });
