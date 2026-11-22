@@ -46,6 +46,17 @@ it('restores registration after cancel and saves a physical key or clear', async
   await vi.waitFor(() => expect(setShortcutSettings).toHaveBeenCalledWith({ globalShortcutsEnabled: true, toggleRecording: null }));
 });
 
+it('starts capture when clicked without native button focus', async () => {
+  target = document.body.appendChild(document.createElement('div'));
+  app = mount(ShortcutsSettings, { target });
+  const field = await vi.waitFor(() => { const element = target.querySelector<HTMLButtonElement>('#toggle-recording-shortcut'); expect(element).not.toBeNull(); return element!; });
+  field.click();
+  await vi.waitFor(() => expect(setShortcutCapture).toHaveBeenCalledWith(true));
+  expect(field).toBe(document.activeElement);
+  await vi.waitFor(() => expect(field.textContent).toContain('Press a shortcut…'));
+  expect(field.getAttribute('aria-label')).toBe('Press a shortcut…');
+});
+
 it('restores the saved chord when capture loses focus', async () => {
   target = document.body.appendChild(document.createElement('div'));
   app = mount(ShortcutsSettings, { target });

@@ -109,7 +109,7 @@
   {#if shortcutState}
     <label><input type="checkbox" checked={shortcutState.settings.globalShortcutsEnabled} disabled={busy} onchange={(e) => change(e.currentTarget.checked)} /> Enable background shortcut</label>
     <label for="toggle-recording-shortcut">Start/stop recording</label>
-    <button id="toggle-recording-shortcut" class="capture" disabled={busy} onfocus={beginCapture} onkeydown={keydown} onkeyup={keyup} onblur={endCapture}>
+    <button id="toggle-recording-shortcut" class="capture" aria-label={capturing ? (held || 'Press a shortcut…') : 'Start/stop recording'} disabled={busy} onfocus={beginCapture} onclick={(event) => event.currentTarget.focus()} onkeydown={keydown} onkeyup={keyup} onblur={endCapture}>
       {capturing ? (held || 'Press a shortcut…') : display(shortcutState.settings.toggleRecording)}
     </button>
     <button disabled={busy} onclick={() => change(shortcutState!.settings.globalShortcutsEnabled, 'Ctrl+Alt+Super+R')}>Restore Defaults</button>
