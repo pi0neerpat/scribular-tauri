@@ -987,4 +987,14 @@ fn ipc_types_serialize_camel_case() {
     assert!(json.get("createdAt").is_some());
     let item = serde_json::to_value(&store.list_sessions().unwrap()[0]).unwrap();
     assert!(item.get("durationMs").is_some());
+    store
+        .set_summary(&s.id, "Saved note", &Timings::default())
+        .unwrap();
+    store.mark_note_copied(&s.id, "Saved note").unwrap();
+    let copied = serde_json::to_value(&store.list_sessions().unwrap()[0]).unwrap();
+    assert!(copied["copiedAt"].as_i64().is_some());
+    assert_eq!(
+        copied["copiedAt"],
+        serde_json::to_value(&store.get_session(&s.id).unwrap().unwrap()).unwrap()["copiedAt"]
+    );
 }

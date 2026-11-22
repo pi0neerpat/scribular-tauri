@@ -354,6 +354,7 @@
         active={view === 'record'}
         onEnterLicense={openLicense}
         onResultNote={(hasNote) => (recordHasNote = hasNote)}
+        onSessionChanged={() => history?.refreshSessions()}
       />
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}

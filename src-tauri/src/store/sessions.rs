@@ -122,6 +122,8 @@ pub struct SessionListItem {
     pub snippet: String,
     pub interrupted: bool,
     pub is_sample: bool,
+    #[ts(type = "number | null")]
+    pub copied_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -482,7 +484,7 @@ impl Store {
                          WHEN length(COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''))) > 100
                          THEN substr(COALESCE(NULLIF(summary, ''), NULLIF(transcript, '')), 1, 100) || '…'
                          ELSE COALESCE(NULLIF(summary, ''), NULLIF(transcript, ''), 'No summary available') END,
-                    (status = 'failed' AND error = 'interrupted'), is_sample
+                    (status = 'failed' AND error = 'interrupted'), is_sample, copied_at
                  FROM sessions
                      ORDER BY created_at DESC, rowid DESC"
             ))?;
@@ -497,6 +499,7 @@ impl Store {
                     snippet: r.get(6)?,
                     interrupted: r.get(7)?,
                     is_sample: r.get(8)?,
+                    copied_at: r.get(9)?,
                 })
             })?;
             Ok(rows.collect::<rusqlite::Result<_>>()?)
