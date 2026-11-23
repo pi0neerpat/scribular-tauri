@@ -3,7 +3,7 @@
 
 use rusqlite::{Connection, Transaction};
 
-use super::{prompts, settings, Result, StoreError};
+use super::{prompts, samples, settings, Result, StoreError};
 
 type Migration = fn(&Transaction) -> Result<()>;
 
@@ -18,6 +18,7 @@ const MIGRATIONS: &[Migration] = &[
     v7_summary_undo,
     v8_style_spec,
     v9_note_redo,
+    samples::refresh_legacy_sample,
 ];
 
 fn v9_note_redo(tx: &Transaction) -> Result<()> {

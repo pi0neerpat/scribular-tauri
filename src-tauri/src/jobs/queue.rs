@@ -131,6 +131,7 @@ struct State {
     running_practice: Option<Arc<AtomicBool>>,
     session_coach: Option<SessionCoachJob>,
     running_session_coach: Option<Arc<AtomicBool>>,
+    completing_session_coach: bool,
     /// Load the model now, ahead of the job a finishing recording queues.
     preload: bool,
     /// A Whisper load reserved the queue from starting a summary.
@@ -141,10 +142,9 @@ struct State {
 impl State {
     fn has_active_session_coach(&self) -> bool {
         self.session_coach.is_some()
-            || self
-                .running_session_coach
-                .as_ref()
-                .is_some_and(|cancel| !cancel.load(Ordering::Relaxed))
+            || self.running_session_coach.as_ref().is_some_and(|cancel| {
+                !self.completing_session_coach && !cancel.load(Ordering::Relaxed)
+            })
     }
 }
 
@@ -782,12 +782,23 @@ fn run_session_coach(
     }
     let shutdown = {
         let mut state = shared.lock();
-        state.running_session_coach = None;
+        // Coach actions can resume when the result arrives, but idle checks must wait for delivery.
+        state.completing_session_coach = true;
         state.shutdown
     };
-    if !job.cancel.load(Ordering::Relaxed) && !shutdown {
-        (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
+    if !job.cancel.load(Ordering::Relaxed)
+        && !shutdown
+        && crate::diag::panic::catch_unwind(|| {
+            (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
+        })
+        .is_err()
+    {
+        crate::diag::log::log("ERROR", "jobs", "session coach completion panicked");
     }
+    let mut state = shared.lock();
+    state.running_session_coach = None;
+    state.completing_session_coach = false;
+    drop(state);
     shared.events.summary_queue_changed();
     shared.changed.notify_all();
 }

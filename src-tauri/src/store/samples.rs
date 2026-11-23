@@ -3,6 +3,7 @@ use rusqlite::{params, Transaction};
 use super::{settings, Result, Store};
 
 const SAMPLE_TRANSCRIPT: &str = "Therapist: How have things been since our last session? Client: It's been pretty stressful actually. I've been working a lot of overtime and I feel like I can't keep up. Therapist: That sounds really challenging. Can you tell me more about what's been happening? Client: Well, my boss keeps giving me more projects and I don't know how to say no. I'm worried about my job if I push back. Therapist: I understand that concern. Let's talk about some ways you might approach this conversation...";
+const LEGACY_SUMMARY: &str = "Client discussed ongoing challenges with work-life balance and expressed feeling overwhelmed by recent deadlines. Explored coping strategies including time management techniques and boundary setting. Client identified a need to communicate more effectively with their supervisor about workload capacity. Client set the goal to implement a daily planning routine and schedule a conversation with their supervisor within the next week.";
 const SAMPLE_SUMMARY: &str = concat!(
     "Data:\nClient reported working overtime and feeling unable to keep up.\n\n",
     "Assessment:\nClient described difficulty saying no to new projects. ",
@@ -12,6 +13,24 @@ const SAMPLE_SUMMARY: &str = concat!(
 );
 const SAMPLE_DURATION_MS: u32 = 1_245_000;
 const DAY_MS: i64 = 86_400_000;
+
+pub(super) fn refresh_legacy_sample(tx: &Transaction<'_>) -> Result<()> {
+    tx.execute(
+        "UPDATE sessions SET summary = ?1
+         WHERE is_sample = 1 AND title = 'Sample session' AND input_mode = 'mic' AND status = 'done'
+           AND transcript = ?2 AND summary = ?3 AND duration_ms = ?4
+           AND prompt_id IS NULL AND model_id IS NULL AND copied_at IS NULL
+           AND previous_summary IS NULL AND redo_summary IS NULL
+           AND NOT EXISTS (SELECT 1 FROM summary_queue WHERE session_id = sessions.id)",
+        params![
+            SAMPLE_SUMMARY,
+            SAMPLE_TRANSCRIPT,
+            LEGACY_SUMMARY,
+            SAMPLE_DURATION_MS
+        ],
+    )?;
+    Ok(())
+}
 
 fn insert_sample(tx: &Transaction<'_>) -> Result<String> {
     let id = tx.query_row(
@@ -62,8 +81,8 @@ impl Store {
 mod tests {
     use super::super::{migrations, Store};
     use super::super::{InputMode, SessionStatus};
-    use super::SAMPLE_DURATION_MS;
-    use rusqlite::Connection;
+    use super::{LEGACY_SUMMARY, SAMPLE_DURATION_MS, SAMPLE_SUMMARY};
+    use rusqlite::{params, Connection};
     use std::sync::Mutex;
 
     fn store() -> Store {
@@ -97,8 +116,54 @@ mod tests {
         store.seed_samples_if_needed().unwrap();
         let sample = store.list_sessions().unwrap().remove(0);
         store.delete_session(&sample.id).unwrap();
+        upgrade_from_v9(&store);
         store.seed_samples_if_needed().unwrap();
         assert!(store.list_sessions().unwrap().is_empty());
+    }
+
+    fn upgrade_from_v9(store: &Store) {
+        let mut conn = store.conn.lock().unwrap();
+        // The sample refresh changes data only, so v9 uses the same schema.
+        conn.pragma_update(None, "user_version", 9).unwrap();
+        migrations::migrate(&mut conn).unwrap();
+    }
+
+    #[test]
+    fn upgrade_only_refreshes_the_untouched_legacy_sample() {
+        for (edit, expected) in [
+            ("", SAMPLE_SUMMARY),
+            ("UPDATE sessions SET summary = 'Edited note'", "Edited note"),
+            (
+                "UPDATE sessions SET title = 'Renamed sample'",
+                LEGACY_SUMMARY,
+            ),
+            (
+                "UPDATE sessions SET previous_summary = 'Undo note'",
+                LEGACY_SUMMARY,
+            ),
+            (
+                "UPDATE sessions SET redo_summary = 'Redo note'",
+                LEGACY_SUMMARY,
+            ),
+            ("UPDATE sessions SET copied_at = 123", LEGACY_SUMMARY),
+            ("UPDATE sessions SET is_sample = 0", LEGACY_SUMMARY),
+        ] {
+            let store = store();
+            store.seed_samples_if_needed().unwrap();
+            let sample = store.list_sessions().unwrap().remove(0);
+            {
+                let conn = store.conn.lock().unwrap();
+                conn.execute("UPDATE sessions SET summary = ?1", params![LEGACY_SUMMARY])
+                    .unwrap();
+                conn.execute_batch(edit).unwrap();
+            }
+            upgrade_from_v9(&store);
+            store.seed_samples_if_needed().unwrap();
+            assert_eq!(store.list_sessions().unwrap().len(), 1);
+            let upgraded = store.get_session(&sample.id).unwrap().unwrap();
+            assert_eq!(upgraded.summary, expected, "{edit}");
+            assert_eq!(upgraded.created_at, sample.created_at);
+        }
     }
 
     #[test]
