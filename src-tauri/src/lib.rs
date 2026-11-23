@@ -135,7 +135,13 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    shortcuts::toggle_on_press(app, shortcut, event.state)
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(QuitConfirmed(AtomicBool::new(false)))
         .manage(shortcuts::Registration::default())

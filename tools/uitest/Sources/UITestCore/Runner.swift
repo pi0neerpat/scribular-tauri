@@ -156,7 +156,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let completedAt = Date()
         options.onStep?(step, completedAt)
         let changed = switch step.command {
-        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .dockClick: true
+        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .statusItemMouseClick, .dockClick: true
         default: false
         }
         if changed {

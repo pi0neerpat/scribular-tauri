@@ -146,6 +146,10 @@ final class AXDriver: Driver {
             guard let item = statusItem(help) else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
             guard AXUIElementPerformAction(item, "AXPress" as CFString) == .success else { throw .fatal("could not press status item \"\(help)\"") }
             return nil
+        case .statusItemMouseClick(let help):
+            guard let item = statusItem(help), let rect = frame(of: item) else { throw .retryable("status item \"\(help)\" not found") }
+            try click(at: CGPoint(x: rect.midX, y: rect.midY))
+            return nil
         case .expectNotification(let text):
             guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }
             return nil

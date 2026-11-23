@@ -156,6 +156,11 @@ import Testing
     #expect(throws: ScriptError(line: 3, message: #"usage: dock click "title""#)) { try parseScript("quit\nquit\ndock press \"Scribular\"") }
 }
 
+@Test func parsesStatusItemMouseClick() throws {
+    #expect(try parseScript("status-item-mouse-click \"Scribular\"").map(\.command) == [.statusItemMouseClick("Scribular")])
+    #expect(throws: ScriptError.self) { try parseScript("status-item-mouse-click Scribular") }
+}
+
 @Test func doctorReportFormatsResultsWithoutSecrets() {
     let passed = DoctorReport(checks: [
         DoctorCheck(name: "Accessibility", fix: "System Settings", passed: true),

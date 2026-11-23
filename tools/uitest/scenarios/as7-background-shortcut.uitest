@@ -1,0 +1,75 @@
+# AS7a: the registered chord toggles recording while hidden and after relaunch.
+# On a call captures the afplay fixture; the current source also includes the microphone.
+launch
+click "Continue"
+expect "Settings" timeout 60s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app"
+click "afplay" timeout 60s
+click "Settings"
+expect "Keyboard Shortcuts" timeout 60s
+click "Keyboard Shortcuts"
+expect "When enabled, this shortcut works in every app. Start recording only with client consent."
+click "Enable background shortcut" index 1
+expect "Active: ⌃⌥⌘R" timeout 30s
+key cmd+w
+expect-not "Scribular Settings"
+close-window
+expect-not "Search sessions"
+key ctrl+option+cmd+r
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Stop Recording" timeout 30s
+key escape
+expect-not "Search sessions"
+key ctrl+option+cmd+r
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Start Recording" timeout 30s
+key escape
+quit
+launch --keep-data
+expect "Settings" timeout 60s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+key ctrl+option+cmd+r
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Show Scribular"
+expect "Stop Recording" timeout 30s
+key escape
+key ctrl+option+cmd+r
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Show Scribular"
+expect-not "Stop Recording" timeout 30s
+expect "Start Recording" timeout 30s
+key escape
+click "Settings"
+expect "Keyboard Shortcuts" timeout 60s
+click "Keyboard Shortcuts"
+click "Start/stop recording" index 3
+expect "Press a shortcut…"
+key ctrl+option+cmd+t
+expect "Active: ⌃⌥⌘T" timeout 30s
+key cmd+w
+expect-not "Scribular Settings"
+close-window
+expect-not "Search sessions"
+key ctrl+option+cmd+r
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Start Recording" timeout 30s
+key escape
+key ctrl+option+cmd+t
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Stop Recording" timeout 30s
+key escape
+key ctrl+option+cmd+t
+wait 2s
+status-item-mouse-click "Scribular"
+expect "Start Recording" timeout 30s
+key escape
+stop-audio
+quit

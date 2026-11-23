@@ -33,6 +33,7 @@ public enum Command: Equatable {
     case screenshotScreen(name: String?)
     case expectStatusItem(String)
     case statusItemClick(String)
+    case statusItemMouseClick(String)
     case expectNotification(String)
     case dockClick(String)
     case play(path: String, loop: Bool)
@@ -149,6 +150,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: status-item click \"help\"")
             }
             command = .statusItemClick(label)
+        case "status-item-mouse-click":
+            guard args.count == 1, let label = quoted(args[0]), !label.isEmpty else {
+                throw fail("usage: status-item-mouse-click \"help\"")
+            }
+            command = .statusItemMouseClick(label)
         case "dock":
             guard args.count == 2, args[0].text == "click", let title = quoted(args[1]), !title.isEmpty else {
                 throw fail("usage: dock click \"title\"")

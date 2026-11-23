@@ -1,8 +1,12 @@
-use std::{str::FromStr, sync::Mutex};
+use std::{
+    str::FromStr,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use ts_rs::TS;
 
 use crate::{
@@ -29,11 +33,39 @@ struct Actual {
     pending: Vec<String>,
     error: Option<String>,
     capturing: bool,
+    press: PressGuard,
+}
+
+#[derive(Default)]
+struct PressGuard {
+    held: bool,
+    last: Option<Instant>,
+}
+
+impl PressGuard {
+    fn accepts(&mut self, state: ShortcutState, now: Instant) -> bool {
+        if state == ShortcutState::Released {
+            self.held = false;
+            return false;
+        }
+        if self.held {
+            return false;
+        }
+        self.held = true;
+        if self
+            .last
+            .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+        {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
 }
 
 impl Actual {
-    fn known_active(&self) -> Option<String> {
-        self.active.clone().filter(|_| self.pending.is_empty())
+    fn known_active(&self) -> Option<&str> {
+        self.active.as_deref().filter(|_| self.pending.is_empty())
     }
 }
 
@@ -97,14 +129,40 @@ pub fn state(app: &AppHandle, store: &Store) -> Result<ShortcutRegistrationState
     let actual = actual.0.lock().unwrap_or_else(|e| e.into_inner());
     Ok(ShortcutRegistrationState {
         settings,
-        active_chord: actual.known_active(),
+        active_chord: actual.known_active().map(str::to_owned),
         error: actual.error.clone(),
     })
 }
 
 pub fn active(app: &AppHandle) -> Option<String> {
-    app.try_state::<Registration>()
-        .and_then(|state| state.0.try_lock().ok().and_then(|s| s.known_active()))
+    let registration = app.try_state::<Registration>()?;
+    let actual = registration.0.try_lock().ok()?;
+    actual.known_active().map(str::to_owned)
+}
+
+pub fn toggle_on_press(app: &AppHandle, shortcut: &Shortcut, state: ShortcutState) {
+    let Some(registration) = app.try_state::<Registration>() else {
+        return;
+    };
+    // Registration changes can hold this lock while waiting for the main thread.
+    let Ok(mut actual) = registration.0.try_lock() else {
+        return;
+    };
+    if actual.known_active() != Some(shortcut.to_string().as_str()) {
+        return;
+    }
+    if !actual.press.accepts(state, Instant::now()) {
+        return;
+    }
+    drop(actual);
+    let recording = app
+        .try_state::<std::sync::Arc<crate::jobs::Recorder>>()
+        .is_some_and(|recorder| recorder.recording_state().is_some());
+    if recording {
+        crate::shell::tray::stop(app, None);
+    } else {
+        let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
+    }
 }
 
 fn replace(app: &AppHandle, actual: &mut Actual, next: Option<&str>) -> Result<(), String> {
@@ -151,6 +209,7 @@ fn replace_with(
         }
     }
     actual.active = next.map(str::to_owned);
+    actual.press = PressGuard::default();
     Ok(())
 }
 
@@ -278,6 +337,12 @@ mod tests {
             validate("Ctrl+Alt+Super+R").unwrap(),
             "control+alt+super+KeyR"
         );
+        assert_eq!(
+            Shortcut::from_str("control+alt+super+KeyR")
+                .unwrap()
+                .to_string(),
+            "control+alt+super+KeyR"
+        );
         assert!(validate("Super+R").is_err());
         assert!(validate("Alt+Super+R").is_err());
         assert!(validate("Ctrl+Alt+Up").is_err());
@@ -388,5 +453,17 @@ mod tests {
         assert_eq!(desired(&settings, true), None);
         settings.toggle_recording = None;
         assert_eq!(desired(&settings, false), None);
+    }
+
+    #[test]
+    fn press_guard_ignores_repeat_release_and_rapid_second_press() {
+        let now = Instant::now();
+        let mut guard = PressGuard::default();
+        assert!(guard.accepts(ShortcutState::Pressed, now));
+        assert!(!guard.accepts(ShortcutState::Pressed, now));
+        assert!(!guard.accepts(ShortcutState::Released, now));
+        assert!(!guard.accepts(ShortcutState::Pressed, now + Duration::from_millis(500)));
+        assert!(!guard.accepts(ShortcutState::Released, now));
+        assert!(guard.accepts(ShortcutState::Pressed, now + Duration::from_secs(1)));
     }
 }
