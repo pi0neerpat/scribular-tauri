@@ -28,7 +28,11 @@ function setup() {
   return { target, state, app, button, send };
 }
 
-afterEach(() => { api.sessionCoachStart.mockReset(); api.sessionCoachAccept.mockReset(); });
+afterEach(() => {
+  api.sessionCoachStart.mockReset();
+  api.sessionCoachAccept.mockReset();
+  api.sessionCoachStop.mockReset().mockResolvedValue(undefined);
+});
 
 it('keeps the saved note, replaces a candidate after follow-up, and drops chat on leave', async () => {
   const callbacks: ((result: unknown) => void)[] = [];
@@ -58,6 +62,9 @@ it('keeps the saved note, replaces a candidate after follow-up, and drops chat o
 
 it('disables candidate actions during follow-up and ignores a stopped late result', async () => {
   const callbacks: ((result: unknown) => void)[] = [];
+  let finishStop!: () => void;
+  api.sessionCoachStop.mockReturnValue(new Promise<void>((resolve) => { finishStop = resolve; }));
+  api.sessionCoachAccept.mockResolvedValue({ ...saved, summary: 'First note' });
   api.sessionCoachStart.mockImplementation(async (_id, _request, onResult) => {
     callbacks.push(onResult);
     return { jobId: `job-${callbacks.length}`, unlisten: vi.fn() };
@@ -68,19 +75,25 @@ it('disables candidate actions during follow-up and ignores a stopped late resul
   callbacks[0]({ jobId: 'job-1', sessionId: 'one', outcome: { kind: 'candidate', candidateId: 'a', note: 'First note' } });
   flushSync();
   ui.send('Add bullets');
-  await vi.waitFor(() => expect(ui.button('Stop')).toBeDefined());
+  await vi.waitFor(() => expect(callbacks).toHaveLength(2));
   expect(ui.button('Use This').disabled).toBe(true);
   ui.target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   flushSync();
-  expect(ui.button('Use This').disabled).toBe(false);
+  expect(ui.button('Use This').disabled).toBe(true);
   callbacks[1]({ jobId: 'job-2', sessionId: 'one', outcome: { kind: 'candidate', candidateId: 'b', note: 'Late note' } });
   flushSync();
   expect(ui.target.textContent).not.toContain('Late note');
   expect(ui.state.session.summary).toBe('Saved note');
+  expect(api.sessionCoachStop).toHaveBeenCalledWith('job-2');
+  finishStop();
+  await vi.waitFor(() => expect(ui.button('Use This').disabled).toBe(false));
+  ui.button('Use This').click();
+  expect(api.sessionCoachAccept).toHaveBeenCalledWith('one', 'a');
+  await vi.waitFor(() => expect(ui.target.textContent).toContain('Revision saved.'));
   unmount(ui.app);
 });
 
-it('restores the earlier candidate when a follow-up fails', async () => {
+it('restores a candidate after failure and compares a successful follow-up to the saved note', async () => {
   const callbacks: ((result: unknown) => void)[] = [];
   api.sessionCoachStart.mockImplementation(async (_id, _request, onResult) => {
     callbacks.push(onResult);
@@ -99,6 +112,15 @@ it('restores the earlier candidate when a follow-up fails', async () => {
   expect(ui.target.textContent).toContain('First note');
   expect(ui.target.textContent).toContain('Try again.');
   expect(ui.state.session.summary).toBe('Saved note');
+
+  ui.send('Use bullet points');
+  await vi.waitFor(() => expect(callbacks).toHaveLength(3));
+  expect(api.sessionCoachStart.mock.lastCall?.slice(4)).toEqual([['Shorten Plan'], 'a']);
+  callbacks[2]({ jobId: 'job-3', sessionId: 'one', outcome: { kind: 'candidate', candidateId: 'b', note: 'Combined note' } });
+  flushSync();
+  expect(ui.target.querySelector('del')?.textContent).toBe('Saved note');
+  expect(ui.target.querySelector('ins')?.textContent).toBe('Combined note');
+  expect(ui.button('Use This').disabled).toBe(false);
   unmount(ui.app);
 });
 

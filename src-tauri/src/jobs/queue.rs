@@ -138,6 +138,16 @@ struct State {
     shutdown: bool,
 }
 
+impl State {
+    fn has_active_session_coach(&self) -> bool {
+        self.session_coach.is_some()
+            || self
+                .running_session_coach
+                .as_ref()
+                .is_some_and(|cancel| !cancel.load(Ordering::Relaxed))
+    }
+}
+
 pub(super) struct Shared {
     pub store: Arc<Store>,
     pub loader: Arc<dyn SummarizerLoader>,
@@ -311,8 +321,7 @@ impl JobQueue {
         }
         if state.practice.is_some()
             || state.running_practice.is_some()
-            || state.session_coach.is_some()
-            || state.running_session_coach.is_some()
+            || state.has_active_session_coach()
         {
             return Err("The coach is still working. Try again.");
         }
@@ -357,6 +366,11 @@ impl JobQueue {
             || state.running.is_some()
             || state.session_coach.is_some()
             || state.running_session_coach.is_some()
+    }
+
+    pub(crate) fn coach_busy(&self) -> bool {
+        let state = self.shared.lock();
+        !state.pending.is_empty() || state.running.is_some() || state.has_active_session_coach()
     }
 
     pub(crate) fn while_real_idle<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
@@ -766,11 +780,14 @@ fn run_session_coach(
     if result.is_err() {
         *llm = None;
     }
-    let shutdown = shared.lock().shutdown;
+    let shutdown = {
+        let mut state = shared.lock();
+        state.running_session_coach = None;
+        state.shutdown
+    };
     if !job.cancel.load(Ordering::Relaxed) && !shutdown {
         (job.complete)(result.unwrap_or(Err("The coach couldn’t revise the note. Try again.")));
     }
-    shared.lock().running_session_coach = None;
     shared.events.summary_queue_changed();
     shared.changed.notify_all();
 }

@@ -14,6 +14,7 @@
   let candidate = $state<{ id: string; note: string; base: string } | null>(null);
   let job = $state<string | null>(null);
   let pending = $state(false);
+  let stopping = $state(false);
   let accepting = $state(false);
   let notice = $state('');
   let view = $state<'Changes' | 'Before' | 'After'>('Changes');
@@ -35,6 +36,7 @@
     return rows;
   });
   let unlisten: (() => void) | null = null;
+  let starting: ReturnType<typeof sessionCoachStart> | null = null;
   let sequence = 0;
   const blocked = $derived(!availability || availability.reason !== null);
   const reason = $derived(availability?.sessionMessage ?? 'Checking whether the coach is available…');
@@ -50,19 +52,26 @@
     }
   });
 
-  $effect(() => () => { sequence++; unlisten?.(); if (job) void sessionCoachStop(job); });
+  $effect(() => () => {
+    sequence++;
+    unlisten?.();
+    if (stopping) return;
+    if (job) void sessionCoachStop(job).catch(() => {});
+    else void starting?.then(({ jobId }) => sessionCoachStop(jobId)).catch(() => {});
+  });
 
   async function send() {
     const request = input.trim();
-    if (!request || pending || blocked) return;
+    if (!request || pending || stopping || accepting || blocked) return;
     const base = session.summary;
+    const priorRequests = candidate ? requests : [];
     const current = ++sequence;
     pending = true;
     notice = '';
     input = '';
     messages = [...messages, { request }];
     try {
-      const started = await sessionCoachStart(session.id, request, (result) => {
+      starting = sessionCoachStart(session.id, request, (result) => {
         if (current !== sequence || result.sessionId !== session.id || (job && job !== result.jobId)) return;
         pending = false;
         job = null;
@@ -70,7 +79,7 @@
         if (result.outcome.kind === 'candidate') {
           candidate = { id: result.outcome.candidateId, note: result.outcome.note, base };
           view = 'Changes';
-          requests = [...requests, request];
+          requests = [...priorRequests, request].slice(-10);
         } else {
           const reply = result.outcome.message;
           messages = messages.map((message, index) => index === messages.length - 1 ? { ...message, reply } : message);
@@ -79,29 +88,39 @@
         if (current !== sequence || stopped.sessionId !== session.id || (job && job !== stopped.jobId)) return;
         pending = false; job = null; notice = 'Stopped.';
         unlisten?.(); unlisten = null;
-      }, requests, candidate?.id ?? null);
+      }, priorRequests, candidate?.id ?? null);
+      const started = await starting;
       if (current === sequence && pending) { job = started.jobId; unlisten = started.unlisten; }
-      else {
-        started.unlisten();
-        if (current !== sequence) void sessionCoachStop(started.jobId).catch((error) => (notice = String(error)));
-      }
+      else started.unlisten();
     } catch (error) {
       if (current === sequence) { pending = false; job = null; notice = String(error); input = request; }
+    } finally {
+      starting = null;
     }
   }
 
   async function stop() {
+    if (stopping) return;
     const id = job;
+    const start = starting;
     sequence++;
+    stopping = true;
     pending = false;
     job = null;
     unlisten?.(); unlisten = null;
-    notice = 'Stopped.';
-    if (id) try { await sessionCoachStop(id); } catch (error) { notice = String(error); }
+    try {
+      const jobId = id ?? (await start)?.jobId;
+      if (jobId) await sessionCoachStop(jobId);
+      notice = 'Stopped.';
+    } catch (error) {
+      notice = String(error);
+    } finally {
+      stopping = false;
+    }
   }
 
   async function accept() {
-    if (!candidate || accepting) return;
+    if (!candidate || pending || stopping || blocked || accepting) return;
     accepting = true;
     try {
       const updated = await sessionCoachAccept(session.id, candidate.id);
@@ -141,8 +160,8 @@
           {/each}
         </div>
       {/if}
-      <button disabled={pending || blocked || accepting} onclick={accept}>Use This</button>
-      <button disabled={pending || accepting} onclick={() => { candidate = null; notice = 'Kept the old note.'; }}>Keep the Old One</button>
+      <button disabled={pending || stopping || blocked || accepting} onclick={accept}>Use This</button>
+      <button disabled={pending || stopping || accepting} onclick={() => { candidate = null; notice = 'Kept the old note.'; }}>Keep the Old One</button>
     </section>
   {/if}
   {#if notice}<p role="status">{notice}</p>{/if}
@@ -152,7 +171,7 @@
     <label for="coach-request">Ask Coach to change the note</label>
     <textarea id="coach-request" value={blocked ? '' : input} oninput={(event) => (input = event.currentTarget.value)}
       disabled={blocked} placeholder={blocked ? reason : undefined} aria-describedby={blocked ? 'coach-reason' : undefined}></textarea>
-    <button disabled={!pending && (blocked || !input.trim())}>{pending ? 'Stop' : 'Send'}</button>
+    <button disabled={stopping || accepting || (!pending && (blocked || !input.trim()))}>{pending || stopping ? 'Stop' : 'Send'}</button>
   </form>
 </section>
 

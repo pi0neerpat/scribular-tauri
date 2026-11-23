@@ -46,7 +46,7 @@ pub(super) fn available(app: &AppHandle) -> CoachAvailability {
     CoachAvailability::current(
         false,
         licensing.require_access().is_ok(),
-        jobs.is_busy(),
+        jobs.coach_busy(),
         models.summary_availability(),
     )
 }

@@ -54,15 +54,25 @@ pub struct SessionCoach(Mutex<State>);
 struct State {
     active: Option<(String, String, Arc<AtomicBool>)>,
     candidate: Option<Candidate>,
+    previous_candidate: Option<Candidate>,
 }
 
 struct Candidate {
     session_id: String,
     id: String,
+    job_id: String,
     note: String,
     base: String,
     prompt_id: Option<String>,
     model_id: Option<String>,
+}
+
+impl State {
+    fn restore_after_stop(&mut self, job_id: &str) {
+        if self.candidate.as_ref().is_some_and(|candidate| candidate.job_id == job_id) {
+            self.candidate = self.previous_candidate.take();
+        }
+    }
 }
 
 fn words(text: &str) -> Vec<String> {
@@ -154,7 +164,7 @@ pub fn session_coach_start(
         if state.active.is_some() {
             return Err("The coach is still working. Try again.");
         }
-        let prior = match prior_candidate_id {
+        let prior = match prior_candidate_id.as_deref() {
             Some(id) => Some(state.candidate.as_ref()
                 .filter(|candidate| candidate.session_id == session_id && candidate.id == id)
                 .ok_or("That revision is no longer available. Try again.")?.note.clone()),
@@ -174,9 +184,16 @@ pub fn session_coach_start(
             return Ok(job_id);
         }
         let candidate_id = commands::opaque_id()?;
+        let draft_context = match &prior {
+            Some(draft) => format!(
+                "Saved note (source):\n{}\n\nEarlier requests:\n{}\n\nDraft to edit:\n{draft}",
+                session.summary, prior_requests.join("\n")
+            ),
+            None => format!("Saved note (draft to edit):\n{}", session.summary),
+        };
         let prompt = format!(
-            "Revise the saved clinical note for writing form only. Preserve every clinical fact and attribution. Use only source spans from the saved note or transcript; do not recombine claims. Return the full revised note, no preamble. End with {END_NOTE}.\nSaved note:\n{}\nTranscript:\n{}\nEarlier requests:\n{}\nEarlier candidate:\n{}\nCurrent request:\n{}",
-            session.summary, session.transcript, prior_requests.join("\n"), prior.unwrap_or_default(), request
+            "Edit the draft clinical note to fulfill the current request. Keep earlier edits. If the request names a section, copy the other sections unchanged, including formatting. Use complete source sentences from the saved note or transcript. Keep their facts and speaker attribution intact. When asked to shorten, keep the most important sentences and omit less important details. For a shortening request on a multi-sentence section, remove at least one sentence. Return the full edited note with its headings and no preamble, then {END_NOTE}.\n\nTranscript:\n{}\n\n{draft_context}\n\nCurrent request:\n{request}",
+            session.transcript
         );
         let cancel = Arc::new(AtomicBool::new(false));
         let app_for_result = app.clone();
@@ -194,14 +211,22 @@ pub fn session_coach_start(
                 return;
             }
             state.active = None;
-            let outcome = match result {
-                Ok(text) if complete_note(&text).is_some_and(|text| grounded(&note, &transcript, text)) => {
-                    let text = complete_note(&text).unwrap().to_string();
-                    state.candidate = Some(Candidate {
+            let revised = result.as_deref().ok().and_then(complete_note).filter(|text| {
+                *text != prior.as_deref().unwrap_or(&note).trim_end()
+                    && *text != note.trim_end()
+                    && grounded(&note, &transcript, text)
+            });
+            let outcome = match revised {
+                Some(text) => {
+                    let text = text.to_string();
+                    let replaced = state.candidate.replace(Candidate {
                         session_id: session_for_result.clone(), id: candidate_id.clone(),
+                        job_id: job_for_result.clone(),
                         note: text.clone(), base: note.clone(),
                         prompt_id, model_id,
                     });
+                    state.previous_candidate =
+                        replaced.filter(|candidate| Some(&candidate.id) == prior_candidate_id.as_ref());
                     SessionCoachOutcome::Candidate { candidate_id, note: text }
                 }
                 _ => SessionCoachOutcome::Reply { message: FAILED },
@@ -213,6 +238,7 @@ pub fn session_coach_start(
         };
         let jobs = app.try_state::<Arc<JobQueue>>().ok_or(FAILED)?;
         jobs.enqueue_session_coach(SessionCoachJob { prompt, cancel: Arc::clone(&cancel), complete: Box::new(completion) })?;
+        state.previous_candidate = None;
         state.active = Some((job_id.clone(), session_id, cancel));
         Ok(job_id)
     }).ok_or(super::CoachBlock::Recording.message())?
@@ -242,19 +268,24 @@ pub fn session_coach_accept(
                 })
                 .ok_or("That revision is no longer available. Ask for a new one.")?;
             let store = app.try_state::<Arc<Store>>().ok_or(FAILED)?;
-            let result = store
-                .accept_coach_candidate(
-                    &session_id,
-                    (
-                        &candidate.base,
-                        candidate.prompt_id.as_deref(),
-                        candidate.model_id.as_deref(),
-                    ),
-                    &candidate.note,
-                )
+            let jobs = app.try_state::<Arc<JobQueue>>().ok_or(FAILED)?;
+            let result = jobs
+                .while_real_idle(|| {
+                    store.accept_coach_candidate(
+                        &session_id,
+                        (
+                            &candidate.base,
+                            candidate.prompt_id.as_deref(),
+                            candidate.model_id.as_deref(),
+                        ),
+                        &candidate.note,
+                    )
+                })
+                .ok_or(super::CoachBlock::Busy.message())?
                 .map_err(|e| e.to_string());
             if result.is_ok() {
                 state.candidate = None;
+                state.previous_candidate = None;
             }
             result
         })
@@ -267,6 +298,8 @@ pub fn session_coach_stop(window: WebviewWindow, job_id: String) -> Result<(), &
     let coach = app.try_state::<Arc<SessionCoach>>().ok_or(FAILED)?;
     let mut state = coach.0.lock().unwrap_or_else(|p| p.into_inner());
     let Some((id, session_id, cancel)) = state.active.take() else {
+        // A result may have reached the backend before the user saw it.
+        state.restore_after_stop(&job_id);
         return Ok(());
     };
     if id != job_id {
@@ -278,6 +311,7 @@ pub fn session_coach_stop(window: WebviewWindow, job_id: String) -> Result<(), &
         .ok_or(FAILED)?
         .cancel_session_coach();
     drop(state);
+    commands::signal(app);
     let _ = app.emit_to(
         "main",
         STOPPED_EVENT,
@@ -307,6 +341,29 @@ pub fn cancel_for_gate(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_restores_previous_candidate_if_the_follow_up_has_already_finished() {
+        let candidate = |id: &str| Candidate {
+            session_id: "session".into(),
+            id: id.into(),
+            job_id: id.into(),
+            note: "Revised note".into(),
+            base: "Saved note".into(),
+            prompt_id: None,
+            model_id: None,
+        };
+        let mut state = State {
+            candidate: Some(candidate("second")),
+            previous_candidate: Some(candidate("first")),
+            ..State::default()
+        };
+        state.restore_after_stop("unrelated");
+        assert_eq!(state.candidate.as_ref().unwrap().id, "second");
+        state.restore_after_stop("second");
+        state.restore_after_stop("second");
+        assert_eq!(state.candidate.unwrap().id, "first");
+    }
 
     #[test]
     fn grounding_rejects_new_facts() {
