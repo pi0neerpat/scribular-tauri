@@ -100,7 +100,7 @@ it('copies the saved note while a candidate stays pending', async () => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   const coach: CoachContext = {
     availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
-    open: vi.fn(), firstNoteTip: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+    open: vi.fn(), firstNoteTip: () => false, tipSaving: () => false, tipSaveFailed: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
   };
   const target = document.createElement('div');
   const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] }, context: new Map([[COACH_CONTEXT, coach]]) });
@@ -125,7 +125,7 @@ it('streams regeneration on the record panel after the first summary arrives in 
   const state = fromStore(current);
   const coach: CoachContext = {
     availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
-    open: vi.fn(), firstNoteTip: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+    open: vi.fn(), firstNoteTip: () => false, tipSaving: () => false, tipSaveFailed: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
   };
   const target = document.createElement('div');
   const app = mount(SummaryPanel, { target, props: { get session() { return state.current; } }, context: new Map([[COACH_CONTEXT, coach]]) });

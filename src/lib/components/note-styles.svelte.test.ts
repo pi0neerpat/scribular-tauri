@@ -27,7 +27,7 @@ const coach: CoachContext = {
   open: openCoach,
   styles: () => null,
   updateStyles: vi.fn(),
-  firstNoteTip: () => false,
+  firstNoteTip: () => false, tipSaving: () => false, tipSaveFailed: () => false,
   dismissTip: vi.fn(),
 };
 
@@ -87,6 +87,52 @@ it('shares coach availability and only offers retry for recoverable failures', (
   flushSync();
   button('New Style from Example Note…').click();
   expect(openCoach).toHaveBeenCalled();
+});
+
+it('AS7 offers both coach entry points until a hand-made style is saved', async () => {
+  unmount(app);
+  const builtIns = { ...list, prompts: [prompt('a', 'Alpha', true)] };
+  getPromptList.mockResolvedValue(builtIns);
+  app = mount(NoteStyles, { target, context: new Map([[COACH_CONTEXT, coach]]) });
+  const invitation = () => target.querySelector('aside');
+  await vi.waitFor(() => expect(invitation()?.textContent).toContain('Make notes that look like yours'));
+  expect(invitation()?.textContent).toContain('Your example stays on this Mac.');
+  const example = button('New Style from Example Note…');
+  const sample = button('Use a Sample Note');
+  expect(invitation()?.contains(example)).toBe(true);
+  expect(invitation()?.contains(sample)).toBe(true);
+  for (const [reason, message] of [
+    ['recording', 'Finish recording first.'],
+    ['busy', 'Wait for your queued notes.'],
+    ['accessDenied', 'Enter a license to use the coach.'],
+  ] as const) {
+    availability.set({ ...ready, reason, message });
+    flushSync();
+    for (const action of [example, sample]) {
+      expect(action.getAttribute('aria-disabled')).toBe('true');
+      const description = action.getAttribute('aria-describedby');
+      expect(target.querySelector(`[id="${description}"]`)?.textContent).toBe(message);
+      action.click();
+    }
+    expect(openCoach).not.toHaveBeenCalled();
+  }
+  availability.set(ready);
+  flushSync();
+  example.click();
+  sample.click();
+  expect(openCoach.mock.calls).toEqual([[{}, example], [{ samples: true }, sample]]);
+
+  createPrompt.mockResolvedValueOnce({ ...builtIns, createdId: 'b', prompts: [...builtIns.prompts, prompt('b', 'By hand')] });
+  button('New style').click();
+  flushSync();
+  const text = target.querySelector('textarea')!;
+  text.value = 'Hand-written instructions';
+  text.dispatchEvent(new Event('input'));
+  flushSync();
+  button('Save').click();
+  await vi.waitFor(() => expect(button('By hand')).toBeDefined());
+  expect(invitation()).toBeNull();
+  expect(button('Use a Sample Note')).toBeUndefined();
 });
 
 it('clears a coach retry error on the next attempt and when availability changes', async () => {

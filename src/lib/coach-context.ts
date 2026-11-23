@@ -11,6 +11,8 @@ export interface CoachContext {
   availability: () => CoachAvailability | null;
   open: (target: CoachTarget, opener: HTMLElement, onOpen?: () => void) => void;
   firstNoteTip: (id: string) => boolean;
+  tipSaving: () => boolean;
+  tipSaveFailed: () => boolean;
   dismissTip: () => void;
   styles: () => PromptList | null;
   updateStyles: (styles: PromptList) => void;

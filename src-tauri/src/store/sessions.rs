@@ -633,7 +633,9 @@ impl Store {
 
     pub fn first_note_tip_session(&self) -> Result<Option<String>> {
         self.with(|c| {
-            if super::settings::select(c, "first_note_tip_dismissed")?.is_some() {
+            if super::settings::select(c, super::settings::FIRST_NOTE_TIP_DISMISSED)?.as_deref()
+                == Some("1")
+            {
                 return Ok(None);
             }
             if let Some(id) = super::settings::select(c, "first_note_tip_session")? {
@@ -667,7 +669,14 @@ impl Store {
                 .unwrap_or(false);
             // Keep the tip attached to the first real note even if other sessions finish out of order.
             let track_first_note =
-                super::settings::select(&tx, "first_note_tip_dismissed")?.is_none();
+                super::settings::select(&tx, super::settings::FIRST_NOTE_TIP_DISMISSED)?.as_deref()
+                    != Some("1")
+                    && super::settings::select(&tx, "first_note_tip_session")?.is_none();
+            let existing_note = if track_first_note {
+                first_completed_note(&tx)?
+            } else {
+                None
+            };
             let changed = tx.execute(
                 "UPDATE sessions SET
                      previous_summary = CASE WHEN summary <> '' THEN summary ELSE NULL END,
@@ -690,7 +699,7 @@ impl Store {
                 return Err(session_not_found(id));
             }
             if track_first_note {
-                if let Some(first) = first_completed_note(&tx)? {
+                if let Some(first) = existing_note.or(first_completed_note(&tx)?) {
                     super::settings::insert(&tx, "first_note_tip_session", &first)?;
                 }
             }

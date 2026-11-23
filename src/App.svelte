@@ -65,6 +65,10 @@
   let pendingCoachInterruption = false;
   let firstNoteTipId = $state<string | null>(null);
   let tipDismissed = false;
+  let tipSaving = $state(false);
+  let tipSaveFailed = $state(false);
+  let tipLoadFailed = $state(false);
+  let tipRequest = 0;
   let sharedStyles = $state<PromptList | null>(null);
   let coachOpener: HTMLElement | null = null;
   let coachDraftId: string | null = null;
@@ -75,23 +79,42 @@
     availability: () => coachAvailability,
     open: openCoach,
     firstNoteTip: (id) => firstNoteTipId === id,
-    dismissTip: dismissTip,
+    tipSaving: () => tipSaving,
+    tipSaveFailed: () => tipSaveFailed,
+    dismissTip,
     styles: () => sharedStyles,
     updateStyles: (styles) => (sharedStyles = styles),
   });
 
   async function loadFirstNoteTip() {
-    if (tipDismissed || firstNoteTipId) return;
+    if (tipDismissed) return;
+    const request = ++tipRequest;
     try {
       const id = await getFirstNoteTipSession();
-      if (!tipDismissed) firstNoteTipId = id;
-    } catch {}
+      if (!tipDismissed && request === tipRequest) {
+        if (id !== firstNoteTipId) tipSaveFailed = false;
+        firstNoteTipId = id;
+        tipLoadFailed = false;
+      }
+    } catch {
+      if (!tipDismissed && request === tipRequest) tipLoadFailed = true;
+    }
   }
 
-  function dismissTip() {
-    tipDismissed = true;
-    firstNoteTipId = null;
-    void dismissFirstNoteTip().catch(() => { tipDismissed = false; void loadFirstNoteTip(); });
+  async function dismissTip() {
+    if (tipSaving || tipDismissed) return;
+    tipSaving = true;
+    tipSaveFailed = false;
+    try {
+      await dismissFirstNoteTip();
+      tipDismissed = true;
+      firstNoteTipId = null;
+      tipLoadFailed = false;
+    } catch {
+      tipSaveFailed = true;
+    } finally {
+      tipSaving = false;
+    }
   }
 
   function openCoach(target: CoachTarget, opener?: HTMLElement, onOpen?: () => void) {
@@ -162,6 +185,7 @@
   function sessionsChanged() {
     void refreshInterrupted().catch(() => {});
     void recordView?.refreshAfterDeletion().catch((e) => (error = String(e)));
+    void loadFirstNoteTip();
   }
 
   function modalOpen() {
@@ -368,6 +392,9 @@
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}
   </SessionHistory>
   <WelcomeSheet bind:this={welcome} bind:open={welcomeOpen} suspended={!!quitIntent} />
+  {#if tipLoadFailed}
+    <p role="alert">Couldn’t check whether to show the first-note tip. <button onclick={loadFirstNoteTip}>Retry</button></p>
+  {/if}
   <p>Heartbeat: {beats}</p>
   {#if error && version}<p role="alert">{error}</p>{/if}
 </main>

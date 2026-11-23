@@ -218,9 +218,11 @@ fn successful_regeneration_keeps_one_undo_snapshot_and_undo_restores_provenance(
 }
 
 #[test]
-fn first_note_tip_tracks_earliest_completed_note_and_repairs_on_delete() {
+fn first_note_tip_ignores_samples_tracks_first_completion_and_persists_dismissal() {
     let db = TempDb::new();
     let store = db.open();
+    store.seed_samples_if_needed().unwrap();
+    assert_eq!(store.first_note_tip_session().unwrap(), None);
     let older = store.create_session(&new_session("older")).unwrap();
     let newer = store.create_session(&new_session("newer")).unwrap();
     let timings = Timings::default();
@@ -237,16 +239,21 @@ fn first_note_tip_tracks_earliest_completed_note_and_repairs_on_delete() {
         .unwrap();
     assert_eq!(
         store.first_note_tip_session().unwrap().as_deref(),
-        Some(older.id.as_str())
-    );
-
-    store.delete_session(&older.id).unwrap();
-    assert_eq!(
-        store.first_note_tip_session().unwrap().as_deref(),
         Some(newer.id.as_str())
     );
+
     store.delete_session(&newer.id).unwrap();
+    assert_eq!(
+        store.first_note_tip_session().unwrap().as_deref(),
+        Some(older.id.as_str())
+    );
+    store.dismiss_first_note_tip().unwrap();
+    store.dismiss_first_note_tip().unwrap();
+    drop(store);
+    let store = db.open();
+    assert!(store.first_note_tip_dismissed().unwrap());
     assert_eq!(store.first_note_tip_session().unwrap(), None);
+    assert!(store.get_session(&older.id).unwrap().is_some());
 }
 
 #[test]

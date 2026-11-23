@@ -263,6 +263,10 @@ fn api_root() -> Option<String> {
 }
 
 pub fn report(store: Arc<Store>, code: &'static str) {
+    report_with_sender(store, code, send_pending);
+}
+
+fn report_with_sender(store: Arc<Store>, code: &'static str, send: impl FnOnce(Arc<Store>)) {
     if !send_allowed(&store) {
         return;
     }
@@ -307,7 +311,7 @@ pub fn report(store: Arc<Store>, code: &'static str) {
     };
     let _ = store.set_setting(PENDING, &body.to_string());
     drop(_guard);
-    send_pending(store);
+    send(store);
 }
 
 fn error_payload(code: &'static str, device_id: String) -> ErrorPayload<'static> {
@@ -450,6 +454,92 @@ mod tests {
         assert!(usage(&store).is_none());
         assert_eq!(store.get_setting(INSTALL_ID).unwrap(), None);
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn as10_onboarding_failures_leave_session_content_private_with_telemetry_off() {
+        use crate::commands::{read_onboarding_state, system_audio_permission_status};
+        use crate::store::{AudioSource, InputMode, NewSession, SessionPatch};
+
+        let _log_guard = super::super::log::TEST_LOG_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let (store, dir) = store();
+        super::super::log::init(&dir).unwrap();
+        set_enabled(&store, false).unwrap();
+        let transcript = "PRIVATE-TRANSCRIPT-17121";
+        let note = "PRIVATE-NOTE-18122";
+        let audio = [19123, -20124];
+        let session = store
+            .create_session(&NewSession {
+                title: "Fixture".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store
+            .update_session(
+                &session.id,
+                &SessionPatch {
+                    title: None,
+                    transcript: Some(transcript.into()),
+                    summary: Some(note.into()),
+                },
+            )
+            .unwrap();
+        store
+            .append_audio_chunk(&session.id, AudioSource::Mic, 0, &audio)
+            .unwrap();
+
+        let state = serde_json::to_string(&read_onboarding_state(&store).unwrap()).unwrap();
+        let permission = serde_json::to_string(&system_audio_permission_status()).unwrap();
+        let conn = rusqlite::Connection::open(dir.join("db")).unwrap();
+        crate::store::key::apply_key(&conn, &[7; 32]).unwrap();
+        conn.execute_batch("ALTER TABLE settings RENAME TO unavailable_settings")
+            .unwrap();
+        let errors = [
+            read_onboarding_state(&store).unwrap_err(),
+            store.first_note_tip_session().unwrap_err().to_string(),
+            store.dismiss_first_note_tip().unwrap_err().to_string(),
+        ];
+        report_with_sender(Arc::clone(&store), "unhandled", |_| {
+            panic!("sent while settings were unavailable")
+        });
+        conn.execute_batch("ALTER TABLE unavailable_settings RENAME TO settings")
+            .unwrap();
+
+        report_with_sender(Arc::clone(&store), "unhandled", |_| {
+            panic!("sent with telemetry off")
+        });
+        record_launch(Arc::clone(&store));
+        record_session(Arc::clone(&store), 60_000);
+        assert!(usage(&store).is_none());
+        assert_eq!(store.get_setting(PENDING).unwrap(), None);
+        for key in [LAUNCHES, SESSIONS, SECONDS] {
+            assert_eq!(store.get_setting(key).unwrap().as_deref(), Some("0"));
+        }
+        assert!(!store.first_note_tip_dismissed().unwrap());
+        let logs = std::fs::read_to_string(dir.join("scribular.log")).unwrap();
+        let error_payload =
+            serde_json::to_string(&error_payload("unhandled", "test-id".into())).unwrap();
+        for value in [state, permission, logs, error_payload]
+            .iter()
+            .chain(&errors)
+        {
+            for sentinel in [transcript, note, "19123", "-20124"] {
+                assert!(!value.contains(sentinel));
+            }
+        }
+        let saved = store.get_session(&session.id).unwrap().unwrap();
+        assert_eq!(saved.transcript, transcript);
+        assert_eq!(saved.summary, note);
+        assert_eq!(
+            store.audio_samples(&session.id, AudioSource::Mic).unwrap(),
+            audio
+        );
+        super::super::log::reset_for_tests();
         std::fs::remove_dir_all(dir).unwrap();
     }
 
