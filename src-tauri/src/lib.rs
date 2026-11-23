@@ -429,12 +429,8 @@ pub fn run() {
                 Some(Arc::clone(&store)),
             );
             app.manage(recorder);
-            let shortcut_app = app.handle().clone();
-            let shortcut_store = Arc::clone(&store);
-            std::thread::spawn(move || {
-                shortcuts::restore(&shortcut_app, &shortcut_store);
-                shortcuts::refresh_tray(&shortcut_app, &shortcut_store);
-            });
+            shortcuts::restore(app.handle(), &store);
+            shortcuts::refresh_tray(app.handle(), &store);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut state = None;

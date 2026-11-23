@@ -1,6 +1,8 @@
 # AS7a: the registered chord toggles recording while hidden and after relaunch.
 # On a call captures the afplay fixture; the current source also includes the microphone.
 launch
+expect "Welcome to Scribular"
+key escape
 click "Continue"
 expect "Settings" timeout 60s
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
@@ -32,6 +34,9 @@ key escape
 quit
 launch --keep-data
 expect "Settings" timeout 60s
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 60s
+expect-not "Verifying the speech model" timeout 60s
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
 key ctrl+option+cmd+r
 wait 2s
