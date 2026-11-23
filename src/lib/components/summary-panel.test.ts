@@ -6,7 +6,8 @@ import { COACH_CONTEXT, type CoachContext } from '../coach-context';
 import type { Session } from '../types/Session';
 
 const api = vi.hoisted(() => ({
-  cancelJob: vi.fn(), copyText: vi.fn(), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
+  cancelJob: vi.fn(), copyText: vi.fn(), markNoteCopied: vi.fn().mockResolvedValue(undefined), getPromptList: vi.fn(), listSummaryModels: vi.fn(),
+  sessionCoachStart: vi.fn(), sessionCoachStop: vi.fn(), sessionCoachAccept: vi.fn(), retrySummaryModel: vi.fn(),
   getSummaryAvailability: vi.fn().mockResolvedValue('ready'), onSummaryAvailability: vi.fn(async () => () => {}),
   subscribeSummaryAvailability: vi.fn(async (callback: (state: string) => void, _onError: (error: unknown) => void) => { callback(await api.getSummaryAvailability()); return () => {}; }),
   onSummaryDelta: vi.fn(), openSettings: vi.fn(), openExternalLink: vi.fn(), regenerateSummary: vi.fn(), undoSummary: vi.fn(), delta: undefined as ((d: unknown) => void) | undefined,
@@ -22,11 +23,26 @@ const session: Session = {
   id: 'session-1', title: 'Session', createdAt: 1, inputMode: 'mic', status: 'done', error: null,
   promptId: 'prompt-1', modelId: null, transcript: 'transcript text', plainTranscript: null, rawTranscript: null,
   speakerMap: null, diarizationState: 'none', summary: 'saved summary', durationMs: 1000, timings: null,
-  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, isSample: false,
+  hasAudio: false, audioExpiresAt: null, previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null, isSample: false,
 };
 const prompts = { prompts: [{ id: 'prompt-1', name: 'Style', description: '', text: '', isDefault: false, showInStyleMenu: true, styleSpec: null }], activeId: 'prompt-1', createdId: null };
 
 afterEach(() => accessState.set(null));
+
+it('restores the saved copy marker and clears it when the note changes', () => {
+  api.listSummaryModels.mockResolvedValue([]);
+  const current = writable<Session>({ ...session, copiedAt: 123 });
+  const state = fromStore(current);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { get session() { return state.current; }, management: true, prompts, models: [] } });
+  const copyButton = () => [...target.querySelectorAll('button')].find((button) => button.textContent === 'Copied' || button.textContent === 'Copy Note');
+  flushSync();
+  expect(copyButton()?.textContent).toBe('Copied');
+  current.set({ ...session, summary: 'Revised note', copiedAt: null });
+  flushSync();
+  expect(copyButton()?.textContent).toBe('Copy Note');
+  unmount(app);
+});
 
 it('keeps copy and delete available but disables regeneration for a lapsed licence', async () => {
   accessState.set({ kind: 'licenseLapsed' });
@@ -35,7 +51,7 @@ it('keeps copy and delete available but disables regeneration for a lapsed licen
   const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [], onDelete: vi.fn() } });
   await vi.waitFor(() => expect(target.textContent).toContain('Your existing notes are still available.'));
   const named = (label: string) => [...target.querySelectorAll('button')].find((b) => b.textContent === label)!;
-  expect(named('Copy').disabled).toBe(false);
+  expect(named('Copy Note').disabled).toBe(false);
   expect(named('Regenerate').disabled).toBe(true);
   expect(named('Delete').disabled).toBe(false);
   unmount(app);
@@ -50,6 +66,7 @@ it('copies the saved summary, reports success, and keeps streamed regeneration t
   const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] } });
   target.querySelector('button')!.click();
   await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('saved summary'));
+  await vi.waitFor(() => expect(api.markNoteCopied).toHaveBeenCalledWith('session-1', 'saved summary'));
   await vi.waitFor(() => expect(target.textContent).toContain('Copied'));
   target.querySelectorAll('button')[1].click();
   await vi.waitFor(() => expect(api.regenerateSummary).toHaveBeenCalledWith('session-1', 'prompt-1'));
@@ -57,6 +74,47 @@ it('copies the saved summary, reports success, and keeps streamed regeneration t
   flushSync();
   expect(target.textContent).toContain('saved summary');
   expect(target.textContent).toContain('new preview');
+  unmount(app);
+});
+
+it('does not mark a failed clipboard copy as copied', async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'));
+  api.markNoteCopied.mockClear();
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] } });
+  await app.copy();
+  expect(api.markNoteCopied).not.toHaveBeenCalled();
+  expect(target.textContent).toContain('clipboard denied');
+  expect(target.textContent).not.toContain('Copied');
+  unmount(app);
+});
+
+it('copies the saved note while a candidate stays pending', async () => {
+  let result!: (value: unknown) => void;
+  api.sessionCoachStart.mockImplementation(async (_id, _request, onResult) => {
+    result = onResult;
+    return { jobId: 'job', unlisten: vi.fn() };
+  });
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const coach: CoachContext = {
+    availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
+    open: vi.fn(), firstNoteTip: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+  };
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] }, context: new Map([[COACH_CONTEXT, coach]]) });
+  const input = target.querySelector('textarea')!;
+  input.value = 'Shorten Plan';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(result).toBeDefined());
+  result({ jobId: 'job', sessionId: 'session-1', outcome: { kind: 'candidate', candidateId: 'candidate', note: 'Revised note' } });
+  flushSync();
+  await app.copy();
+  expect(writeText).toHaveBeenCalledWith('saved summary');
+  expect(target.textContent).toContain('Revised note');
+  expect(target.textContent).toContain('Use This');
   unmount(app);
 });
 
@@ -122,11 +180,11 @@ it('disables Copy when both summary and transcript are empty', () => {
   const app = mount(SummaryPanel, { target, props: {
     session: { ...session, summary: '', transcript: '' }, management: true, prompts, models: [],
   } });
-  expect([...target.querySelectorAll('button')].find((b) => b.textContent === 'Copy')?.disabled).toBe(true);
+  expect([...target.querySelectorAll('button')].find((b) => b.textContent === 'Copy Note')?.disabled).toBe(true);
   unmount(app);
 });
 
-it('copies the transcript when the saved summary is empty', async () => {
+it('does not copy a transcript as a note when the saved note is empty', async () => {
   api.listSummaryModels.mockResolvedValue([]);
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -134,8 +192,8 @@ it('copies the transcript when the saved summary is empty', async () => {
   const app = mount(SummaryPanel, { target, props: {
     session: { ...session, summary: '' }, management: true, prompts, models: [],
   } });
-  target.querySelector('button')!.click();
-  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('transcript text'));
+  expect([...target.querySelectorAll('button')].find((b) => b.textContent === 'Copy Note')?.disabled).toBe(true);
+  expect(writeText).not.toHaveBeenCalled();
   unmount(app);
 });
 

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, onSummaryDelta, openSettings, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
+  import { onMount, untrack } from 'svelte';
+  import { cancelJob, copyText, getPromptList, getSession, listSummaryModels, markNoteCopied, onSummaryDelta, openSettings, redoSummary, regenerateSummary, subscribeSummaryAvailability, undoSummary } from '../api';
   import type { PromptList } from '../types/PromptList';
   import type { SummaryModel } from '../types/SummaryModel';
   import type { SummaryAvailability } from '../types/SummaryAvailability';
@@ -13,6 +13,7 @@
   import { accessState, allows } from '../license';
   import { getCoachContext } from '../coach-context';
   import CoachEntry from './CoachEntry.svelte';
+  import SessionCoach from './SessionCoach.svelte';
 
   const coach = getCoachContext();
   const availability = $derived(coach?.availability() ?? null);
@@ -45,6 +46,7 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   const sessionId = $derived(session.id);
   const savedSummary = $derived(session.summary);
+  let copiedSummary = '';
   const working = $derived(['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(session.status));
   const provenance = $derived(byline || [
     session.promptId && prompts
@@ -65,7 +67,7 @@
   $effect(() => {
     sessionId;
     preview = '';
-    copied = false;
+    copied = untrack(() => Boolean(session.copiedAt));
     error = null;
     busy = false;
     confirmDelete = false;
@@ -76,6 +78,14 @@
   $effect(() => {
     savedSummary;
     if (!working) preview = '';
+  });
+
+  $effect(() => {
+    if (savedSummary !== copiedSummary) {
+      copiedSummary = savedSummary;
+      copied = Boolean(session.copiedAt);
+      clearTimeout(copyTimer);
+    }
   });
 
   onMount(() => {
@@ -119,11 +129,14 @@
   });
 
   export async function copy() {
-    const { id, summary, transcript } = session;
-    const text = summary || transcript;
+    const { id, summary } = session;
+    const text = summary;
+    if (!text) return;
+    copied = false;
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
       else await copyText(text);
+      await markNoteCopied(id, summary);
       copied = true;
       if (summary) onCopied?.(id);
       clearTimeout(copyTimer);
@@ -141,6 +154,11 @@
 
   async function undo() {
     try { const updated = await undoSummary(session.id); preview = ''; onUpdate?.(updated); }
+    catch (e) { error = String(e); }
+  }
+
+  async function redo() {
+    try { const updated = await redoSummary(session.id); onUpdate?.(updated); }
     catch (e) { error = String(e); }
   }
 
@@ -185,7 +203,9 @@
   {/if}
   {#if management}
     {#if provenance}<p>{provenance}</p>{/if}
-    <button onclick={copy} disabled={!session.summary && !session.transcript}>{copied ? 'Copied' : 'Copy'}</button>
+  {/if}
+  {#if management || session.summary}
+    <button onclick={copy} disabled={!session.summary}>{copied ? 'Copied' : 'Copy Note'}</button>
   {/if}
   {#if management || (session.summary && coach)}
     {#if prompts}
@@ -206,6 +226,7 @@
     {#if session.status === 'summarizing'}<button onclick={stop}>Stop</button>{/if}
     {#if session.status === 'awaitingModel'}<button onclick={stop}>Cancel</button>{/if}
     {#if session.previousSummary}<button onclick={undo} disabled={!allows($accessState)}>Undo</button>{/if}
+    {#if session.canRedo}<button onclick={redo} disabled={!allows($accessState)}>Redo</button>{/if}
     {#if onDelete}
       <button onclick={deleteClick}>{confirmDelete ? 'Confirm' : 'Delete'}</button>
     {/if}
@@ -215,6 +236,9 @@
   {#if session.summary}
     <h4>Summary{#if provenance && !management} · {provenance}{/if}</h4>
     <pre>{session.summary}</pre>
+  {/if}
+  {#if active && session.status === 'done' && session.summary}
+    {#key session.id}<SessionCoach {session} {availability} {onUpdate} />{/key}
   {/if}
   <SpeakersCard {session} {onUpdate} />
   <SessionAudio {session} {active} />

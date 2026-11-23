@@ -59,10 +59,11 @@
     active = true,
     onEnterLicense = () => {},
     onResultNote = () => {},
+    onSessionChanged = () => {},
     coachInterrupted = false,
     onStartFailed = () => {},
     onDismissCoachInterruption = () => {},
-  }: { speech?: ModelProgress; modelError?: boolean; preparingModels?: boolean; onRetryModels?: () => void; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
+  }: { speech?: ModelProgress; modelError?: boolean; preparingModels?: boolean; onRetryModels?: () => void; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; onSessionChanged?: () => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
 
   let speechReady = $derived(speech?.state === 'ready');
   let speechPercent = $derived(speech && speech.totalBytes > 0
@@ -595,7 +596,7 @@
     <SummaryPanel bind:this={summaryPanel} {session} {active} prompts={styles} byline={[
       styles?.prompts.find((p) => p.id === session.promptId)?.name,
       session.modelId && (modelNames[session.modelId] ?? session.modelId),
-    ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; }} />
+    ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; onSessionChanged(); }} onCopied={onSessionChanged} />
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>

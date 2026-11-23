@@ -40,6 +40,7 @@ pub enum StoreError {
     Json(serde_json::Error),
     NotFound(String),
     Busy,
+    StaleCandidate,
     /// The database was written by a newer build with more migrations.
     SchemaTooNew {
         found: u32,
@@ -65,6 +66,9 @@ impl fmt::Display for StoreError {
             Self::Json(e) => write!(f, "stored JSON is invalid: {e}"),
             Self::NotFound(what) => write!(f, "{what} not found"),
             Self::Busy => f.write_str("session is busy"),
+            Self::StaleCandidate => {
+                f.write_str("The note changed. Ask for a new revision to review.")
+            }
             Self::SchemaTooNew { found, known } => write!(
                 f,
                 "database schema version {found} is newer than this app supports ({known})"

@@ -135,6 +135,18 @@ final class AXDriver: Driver {
         case .expectNot(let label):
             guard !allElements().contains(where: { matches($0, substring: label) }) else { throw .retryable("still visible") }
             return nil
+        case .expectClipboardMatches(let prefix):
+            let texts = allElements().compactMap { element -> String? in
+                guard attribute(element, kAXRoleAttribute) as? String == kAXStaticTextRole,
+                      let text = attribute(element, kAXValueAttribute) as? String, text.hasPrefix(prefix) else { return nil }
+                return text
+            }
+            guard texts.count <= 1 else { throw .fatal("more than one text value starts with that prefix") }
+            guard let text = texts.first else { throw .retryable("no text starts with that prefix") }
+            guard let clipboard = NSPasteboard.general.string(forType: .string), clipboard.utf8.elementsEqual(text.utf8) else {
+                throw .retryable("clipboard differs from the full text")
+            }
+            return nil
         case .wait(let seconds):
             Thread.sleep(forTimeInterval: seconds)
             return nil

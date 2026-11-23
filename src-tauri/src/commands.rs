@@ -629,6 +629,27 @@ pub fn undo_summary(
 }
 
 #[tauri::command]
+pub fn redo_summary(
+    store: State<Arc<Store>>,
+    licensing: State<Arc<Licensing>>,
+    id: String,
+) -> Result<Session, String> {
+    licensing.require_access()?;
+    store.redo_summary(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn mark_note_copied(
+    store: State<Arc<Store>>,
+    id: String,
+    summary: String,
+) -> Result<(), String> {
+    store
+        .mark_note_copied(&id, &summary)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn copy_text(text: String) -> Result<(), String> {
     use std::io::Write;
     let mut child = std::process::Command::new("/usr/bin/pbcopy")
@@ -1845,6 +1866,7 @@ mod tests {
                 "restore_sample_sessions",
                 "update_session",
                 "undo_summary",
+                "redo_summary",
                 "create_prompt",
                 "duplicate_prompt",
                 "update_prompt",

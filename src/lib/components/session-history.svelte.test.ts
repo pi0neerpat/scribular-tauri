@@ -25,7 +25,22 @@ beforeEach(() => {
   api.listSummaryModels.mockResolvedValue([]);
 });
 
-const row = (id: string, status = 'done') => ({ id, title: id, createdAt: Date.now(), status, durationMs: null, hasAudio: true, snippet: '', interrupted: false, isSample: false });
+const row = (id: string, status = 'done') => ({ id, title: id, createdAt: Date.now(), status, durationMs: null, hasAudio: true, snippet: '', interrupted: false, isSample: false, copiedAt: null as number | null });
+
+it('shows the saved copy marker after reopening and clears it when the list changes', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Copied note'), copiedAt: 123 }]);
+  const target = document.createElement('div');
+  const first = mount(SessionHistory, { target });
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Copied"]')).not.toBeNull());
+  unmount(first);
+
+  const reopened = mount(SessionHistory, { target });
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Copied"]')).not.toBeNull());
+  api.listSessions.mockResolvedValue([row('Copied note')]);
+  reopened.refreshSessions();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Copied"]')).toBeNull());
+  unmount(reopened);
+});
 
 it('refreshes the list when a progress event names an unknown session', async () => {
   api.listSessions.mockResolvedValueOnce([]).mockResolvedValueOnce([row('new', 'failed')]);

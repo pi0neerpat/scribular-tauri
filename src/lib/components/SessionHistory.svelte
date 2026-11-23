@@ -25,8 +25,6 @@
   let sidebar: HTMLElement;
   let sidebarVisible = $state(true);
   let request = 0;
-  let copiedId = $state<string | null>(null);
-  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let deleteConfirmId = $state<string | null>(null);
   let summaryPanel = $state<{ copy: () => Promise<void>; requestDelete: () => void } | undefined>();
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
@@ -103,12 +101,6 @@
   }
   export function refreshSessions() { void refresh(); }
 
-  function markCopied(id: string) {
-    copiedId = id;
-    clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => (copiedId = null), 2000);
-  }
-
   async function applyProgress(p: SessionProgress) {
     progress[p.sessionId] = p;
     const index = sessions.findIndex((s) => s.id === p.sessionId);
@@ -128,7 +120,7 @@
     getPromptList().then((p) => (prompts = p)).catch(() => {});
     listSummaryModels().then((m) => (models = m)).catch(() => {});
     const unlisten = onSessionProgress((p) => { void applyProgress(p).catch((e) => (error = String(e))); });
-    return () => { window.removeEventListener('keydown', sidebarKeydown); unlisten.then((fn) => fn()); clearTimeout(deleteTimer); clearTimeout(copiedTimer); };
+    return () => { window.removeEventListener('keydown', sidebarKeydown); unlisten.then((fn) => fn()); clearTimeout(deleteTimer); };
   });
 
   async function recover(id: string) {
@@ -210,7 +202,7 @@
                     <span>{event?.message ?? item.status} {item.isSample ? 'Sample' : ''}</span>
                     {#if item.interrupted && item.hasAudio && item.status === 'failed'}<span>Recover</span>{/if}
                     {#if ['awaitingModel', 'summarizing'].includes(item.status)}<span>Writing…</span>{/if}
-                    {#if copiedId === item.id}<span aria-label="Copied">✓</span>{/if}
+                    {#if item.copiedAt !== null}<span aria-label="Copied">✓</span>{/if}
                   </button>
                   <details class="actions">
                     <summary aria-label="Actions for {item.title || 'session'}">•••</summary>
@@ -240,7 +232,7 @@
     <div hidden={view !== 'history'}>
       {#if selected}
         <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history'} management prompts={prompts} models={models}
-          onUpdate={(s) => { selected = s; void refresh(); }} onCopied={markCopied}
+          onUpdate={(s) => { selected = s; void refresh(); }} onCopied={() => { void refresh(); }}
           onDelete={['recording', 'finalizing'].includes(selected.status) ? undefined : () => remove(selected!.id)} />
       {:else}<p>Select a session or start a new recording.</p>{/if}
     </div>

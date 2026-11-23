@@ -1,4 +1,15 @@
 import Testing
+
+@Test func parseClipboardMatch() throws {
+    #expect(try parseScript(#"expect-clipboard-matches "Data:""#).first?.command == .expectClipboardMatches("Data:"))
+    #expect(throws: ScriptError.self) { try parseScript(#"expect-clipboard-matches """#) }
+}
+
+@Test func parsesClipboardMatchTimeout() throws {
+    let step = try #require(parseScript(#"expect-clipboard-matches "Data:" timeout 300s"#).first)
+    #expect(step.command == .expectClipboardMatches("Data:"))
+    #expect(step.timeout == 300)
+}
 @testable import UITestCore
 
 @Test func parsesAllCommands() throws {

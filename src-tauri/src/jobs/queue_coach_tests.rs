@@ -375,6 +375,44 @@ fn session_coach_completion_signals_availability() {
 }
 
 #[test]
+fn session_coach_completion_allows_follow_up_but_is_still_cancellable_and_running() {
+    let (_db, store) = TestStore::new();
+    let (engine, _, _) = engine(true);
+    let queue = JobQueue::new(store, Arc::new(Loader(engine)), Arc::new(Silent));
+    let (completing, started) = mpsc::channel();
+    let (release, finish) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: "Shorten the note".into(),
+            cancel: cancel.clone(),
+            complete: Box::new(move |_| {
+                completing.send(()).unwrap();
+                finish.recv_timeout(WAIT).unwrap();
+            }),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    assert!(!queue.coach_busy());
+    assert!(queue.is_busy());
+    assert!(!queue.wait_idle(Duration::ZERO));
+    queue.cancel_session_coach();
+    assert!(cancel.load(Ordering::Relaxed));
+
+    let (done, result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: "Keep shortening the note".into(),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| done.send(result).unwrap()),
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    assert_eq!(result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    assert!(queue.wait_idle(WAIT));
+}
+
+#[test]
 fn cancelled_session_coach_drops_late_result() {
     let (_db, store) = TestStore::new();
     let (engine, started, release) = engine(true);
@@ -391,17 +429,30 @@ fn cancelled_session_coach_drops_late_result() {
         })
         .unwrap();
     started.recv_timeout(WAIT).unwrap();
+    assert!(queue.coach_busy());
     queue.cancel_session_coach();
     assert!(cancel.load(Ordering::Relaxed));
+    assert!(!queue.coach_busy());
+    assert!(queue.while_real_idle(|| ()).is_some());
     assert!(queue.is_busy());
     assert!(queue.while_idle(|| ()).is_none());
     assert!(queue.enqueue_practice(fixture_job().0).is_err());
     assert!(!queue.wait_idle(Duration::from_millis(10)));
+    let (next_done, next_result) = mpsc::channel();
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: "Shorten the note".into(),
+            cancel: Arc::default(),
+            complete: Box::new(move |result| next_done.send(result).unwrap()),
+        })
+        .unwrap();
+    assert!(queue.coach_busy());
     release.send(()).unwrap();
     assert!(matches!(
         result.recv_timeout(WAIT),
         Err(mpsc::RecvTimeoutError::Disconnected)
     ));
+    assert_eq!(next_result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
     assert!(queue.wait_idle(WAIT));
 }
 
@@ -443,6 +494,8 @@ fn real_summary_preempts_running_session_coach() {
     started.recv_timeout(WAIT).unwrap();
     queue.regenerate(&session.id, STYLE).unwrap();
     assert!(cancel.load(Ordering::Relaxed));
+    assert!(queue.coach_busy());
+    assert!(queue.while_real_idle(|| ()).is_none());
     signal.recv_timeout(WAIT).unwrap();
     release.send(()).unwrap();
     assert!(matches!(
