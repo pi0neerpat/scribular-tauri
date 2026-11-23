@@ -36,3 +36,29 @@ Spec: `plans/2026-11-16-onboarding-spec.md`. PR1 covers AS1-AS3 only.
 - Sample badge/banner and Copy, and deleting the sample, need the session list/detail UI from spec 09; only backend and component tests cover them.
 - Only one sample, not the three Electron defined.
 - Start recording, model-download permission rows and launch-to-ready baseline were not verified on the final head (task handoff AS11).
+
+# On a call explainer and app-audio permission (onboarding PR2, #50)
+
+## What it does
+- The first time **On a call** is chosen, a modal sheet explains that app audio needs Scribular enabled in macOS Screen & System Audio Recording. Later selections go straight to the app picker.
+- The sheet shows `Granted` or "Permission unconfirmed". It offers Open System Settings, Choose an app / Try recording (Continue with selected app once granted), and Not Now.
+- **Not Now** (or Escape) switches the source back to In the room; no app audio is captured. The sheet closes after a successful start.
+- The "Retry app audio" button (permission required or app unavailable while recording) reopens the sheet; it does not auto-open after relaunch.
+
+## How it works
+- `RecordView.svelte` reads the flag with `getOnboardingState`, marks it on first display (`markAppAudioExplainerShown`), and polls `systemAudioPermissionStatus` every 2 s and on focus while the sheet is open and visible.
+- System Settings opens only when the user clicks Open System Settings (`openPrivacySettings('systemAudio')`), never automatically.
+- `system_audio_permission_status` (`commands.rs`) uses `CGPreflightScreenCaptureAccess`: it returns `granted` or `unknown`, never `denied`, because macOS cannot tell denied from unrequested. The UI claims a grant only from preflight or a live capture (`appAudioStatus === 'capturing'`).
+- `capture.rs` publishes `AppAudioStatus` (`pending`, `capturing`, `permissionRequired`, `unavailable`) on `RecordingState.appAudioStatus`.
+
+## Config and data
+- Setting `app_audio_explainer_shown` (`"1"`, `store/settings.rs`) is persisted once, idempotently, and exposed as `OnboardingState.appAudioExplainerShown`. No migration.
+- New commands: `mark_app_audio_explainer_shown`, `system_audio_permission_status`.
+
+## How to test
+- `npm test` (`record-view-speaker-count.svelte.test.ts`, `api.test.ts`) and `cargo test --lib --features fake-engines` plus `cargo test --test session_job` (flag idempotence and failed write keep data, AS8; mic or mic+app modes, AS5).
+- AS4 is manual only, on a fresh macOS permission state: choose Not Now, reopen via Retry app audio, grant in System Settings, and confirm the sheet flips to Granted without a click. Record states and screenshots.
+
+## Known limits
+- Denied cannot be shown distinctly; the sheet stays "unconfirmed" until preflight reports granted or a real capture succeeds.
+- AS4 has no automated coverage.
