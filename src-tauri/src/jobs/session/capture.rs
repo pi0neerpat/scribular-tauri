@@ -14,7 +14,9 @@ use std::{
 use super::{lock, Inner, RecordError, Transcription};
 use crate::{
     audio::{chunk_writer, ring, AudioError, Capture, Format},
-    jobs::{HearingState, JobEvents, RecordingState, RecordingStatus, SessionLevel},
+    jobs::{
+        AppAudioStatus, HearingState, JobEvents, RecordingState, RecordingStatus, SessionLevel,
+    },
     store::{self, AudioSource, SessionStatus},
     stt::{stream::SILENCE_RMS, SAMPLE_RATE},
 };
@@ -205,6 +207,27 @@ struct AppAttempt {
     first_block: Arc<OnceLock<(usize, usize)>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AttachFailure {
+    PermissionRequired,
+    SourceUnavailable,
+    AttachFailed,
+    WorkerFailed,
+    AudioWorkerFailed,
+}
+
+impl AttachFailure {
+    fn log_kind(self) -> &'static str {
+        match self {
+            Self::PermissionRequired => "app_audio_permission_denied",
+            Self::SourceUnavailable => "app_source_unavailable",
+            Self::AttachFailed => "app_attach_failed",
+            Self::WorkerFailed => "app_attach_worker_failed",
+            Self::AudioWorkerFailed => "app_audio_worker_failed",
+        }
+    }
+}
+
 pub(super) struct Recording {
     pub(super) session_id: String,
     pub(super) multi_speaker: bool,
@@ -217,7 +240,7 @@ pub(super) struct Recording {
     running_since: Option<Instant>,
     elapsed: Duration,
     last_call_heard_ms: u32,
-    last_attach_error: Option<&'static str>,
+    last_attach_error: Option<AttachFailure>,
     /// Dropped with the recording, which ends its watchdog.
     _watched: mpsc::Sender<()>,
 }
@@ -289,6 +312,17 @@ impl Recording {
             },
             active_elapsed_ms: self.elapsed_ms(),
             target_app: self.target_app.clone(),
+            app_audio_status: self.target_app.as_ref().map(|_| {
+                if self.system.span.is_some() {
+                    AppAudioStatus::Capturing
+                } else if self.last_attach_error == Some(AttachFailure::PermissionRequired) {
+                    AppAudioStatus::PermissionRequired
+                } else if self.last_attach_error.is_some() {
+                    AppAudioStatus::Unavailable
+                } else {
+                    AppAudioStatus::Pending
+                }
+            }),
         }
     }
 
@@ -369,18 +403,18 @@ impl Recording {
                         &self.transcription,
                     ) {
                         Ok(()) => self.last_attach_error = None,
-                        Err(_) => self.log_attach_failure("app_audio_worker_failed"),
+                        Err(_) => self.log_attach_failure(AttachFailure::AudioWorkerFailed),
                     }
                 }
                 Ok(Err(error)) if !closing => {
                     let kind = match error {
-                        AudioError::AppNotFound(_) => "app_source_unavailable",
-                        AudioError::PermissionDenied(_) => "app_audio_permission_denied",
-                        _ => "app_attach_failed",
+                        AudioError::AppNotFound(_) => AttachFailure::SourceUnavailable,
+                        AudioError::PermissionDenied(_) => AttachFailure::PermissionRequired,
+                        _ => AttachFailure::AttachFailed,
                     };
                     self.log_attach_failure(kind);
                 }
-                Err(_) if !closing => self.log_attach_failure("app_attach_worker_failed"),
+                Err(_) if !closing => self.log_attach_failure(AttachFailure::WorkerFailed),
                 _ => {}
             }
         }
@@ -427,15 +461,15 @@ impl Recording {
             }
             Err(_) => {
                 self.retry_at = Instant::now() + RETRY_INTERVAL;
-                self.log_attach_failure("app_attach_worker_failed");
+                self.log_attach_failure(AttachFailure::WorkerFailed);
             }
         }
     }
 
-    fn log_attach_failure(&mut self, kind: &'static str) {
+    fn log_attach_failure(&mut self, kind: AttachFailure) {
         if self.last_attach_error != Some(kind) {
             self.last_attach_error = Some(kind);
-            crate::diag::log::log("WARN", "recording", kind);
+            crate::diag::log::log("WARN", "recording", kind.log_kind());
         }
     }
 
@@ -522,9 +556,13 @@ impl Inner {
                 let Some(recording) = current.as_mut().filter(|r| r.session_id == id) else {
                     return;
                 };
+                let before = recording.snapshot().app_audio_status;
                 if let Err(error) = recording.tick(self) {
                     self.interrupt(current.take().expect("active recording"), error);
                     return;
+                }
+                if recording.snapshot().app_audio_status != before {
+                    self.events.recording_state(Some(recording.snapshot()));
                 }
             }
             if !matches!(
