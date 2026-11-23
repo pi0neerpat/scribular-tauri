@@ -62,3 +62,28 @@ Spec: `plans/2026-11-16-onboarding-spec.md`. PR1 covers AS1-AS3 only.
 ## Known limits
 - Denied cannot be shown distinctly; the sheet stays "unconfirmed" until preflight reports granted or a real capture succeeds.
 - AS4 has no automated coverage.
+
+# First-note tip, Note Styles card and telemetry-off privacy (onboarding PR3, #57)
+
+## What it does
+- After the first non-sample session completes a note, `src/lib/components/SummaryPanel.svelte` shows "Want notes that look like yours?" beside the StylePicker, with a coach entry (New Style from Example Note...) and Dismiss tip. Sample notes never trigger it.
+- The coach entry follows the shared coach availability gate; while recording it is disabled with its reason. Using the entry or dismissing the tip persists dismissal, and the tip never returns.
+- Note Styles shows the "Make notes that look like yours" card above built-ins while no custom style exists, with two entries into the note-style-coach route: New Style from Example Note... (Step 1) and Use a Sample Note (sample chooser open). The card is not dismissible and disappears once any custom style exists (`src/lib/components/note-styles.svelte.test.ts`).
+- If saving the dismissal fails, the tip stays and shows "Couldn't save the dismissal. Try Dismiss tip again."; if the tip check fails, `src/App.svelte` shows a Retry alert.
+
+## How it works
+- `App.svelte` owns tip state (`loadFirstNoteTip`, `dismissTip`, `tipSaving`, `tipSaveFailed`, `tipLoadFailed`), reloads it on `sessionsChanged`, ignores stale responses via `tipRequest`, and clears the tip only after `dismissFirstNoteTip` succeeds. It passes `tipSaving` and `tipSaveFailed` through `src/lib/coach-context.ts`.
+- AS6 store behavior (`src-tauri/src/store/sessions.rs`): `first_note_tip_session` returns nothing once the flag is `"1"`. The first completed real note is pinned in `first_note_tip_session` and kept even if other sessions finish out of order; `first_completed_note` is read before the update, so a note already completed earlier wins.
+- `commands.rs` `read_onboarding_state` is extracted so tests can call it directly.
+- AS10 (`src-tauri/src/diag/telemetry.rs`): `report` delegates to `report_with_sender`, so a test can inject a stub sender. `diag/log.rs` adds `TEST_LOG_LOCK` to serialize tests on the global logger.
+
+## Config and data
+- `first_note_tip_dismissed` (`"1"`, `store/settings.rs`) via `first_note_tip_dismissed()` and `dismiss_first_note_tip()`; `first_note_tip_session` holds the pinned session id. Exposed as `OnboardingState.firstNoteTipDismissed`. No migration.
+
+## How to test
+- `npm test` (`src/onboarding.svelte.test.ts`, `note-styles.svelte.test.ts`, `summary-panel.test.ts`): AS6 tip/sample/relaunch/recording, AS7 card with zero vs one style and the gate.
+- `cargo test --lib --features fake-engines` and `cargo test --test store`: AS6 first-note pinning and dismissal persistence; `as10_onboarding_failures_leave_session_content_private_with_telemetry_off` seeds sentinel transcript, note and audio, fails settings reads, and asserts no sentinel in state, logs, error payloads or errors, no report sent, no pending telemetry, and session rows intact.
+
+## Known limits
+- The tip sits next to the StylePicker because the note-first tabs (recording-and-session PR3) have not landed; move it when they do.
+- AS9 (first microphone prompt timing, and live-mic note generation showing the tip) is unverified. It needs a human on a Mac with fresh mic permission and a clean profile.
