@@ -4,9 +4,10 @@ launch
 click "Continue"
 expect "Settings" timeout 60s
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+wait 2s
 click "On a call" index 1
 click "Choose an app"
-click "afplay" timeout 60s
+pick-call-app "afplay" timeout 60s
 click "Settings"
 expect "Keyboard Shortcuts" timeout 60s
 click "Keyboard Shortcuts"

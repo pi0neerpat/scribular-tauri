@@ -18,6 +18,7 @@ public enum Command: Equatable {
     case launch(keepData: Bool)
     case click(label: String, index: Int?, within: String?)
     case pickApp(String)
+    case pickCallApp(String)
     case type(String)
     case key(KeyCombo)
     case expect(String)
@@ -125,6 +126,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "pick-app":
             guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-app \"app name\"") }
             command = .pickApp(app)
+        case "pick-call-app":
+            guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-call-app \"app name\"") }
+            command = .pickCallApp(app)
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
@@ -187,8 +191,8 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "pick-app", "expect", "expect-not", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, pick-app, expect, expect-not, expect-status-item, expect-notification and close-window")
+        if timeout != nil, !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, pick-app, pick-call-app, expect, expect-not, expect-status-item, expect-notification and close-window")
         }
         if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {
             throw fail("duplicate screenshot name: \(name)")
