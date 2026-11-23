@@ -124,9 +124,9 @@ fn section_body(note: &str, heading: &str) -> Option<Range<usize>> {
     });
     let body = sections.next()?;
     (sections.next().is_none()
-        && note[body.clone()]
-            .lines()
-            .all(|line| super::extract::split_heading(line).is_none()))
+        && note[body.clone()].lines().all(|line| {
+            super::extract::split_heading(line).is_none_or(|(_, inline)| !inline.is_empty())
+        }))
     .then_some(body)
 }
 
@@ -150,16 +150,13 @@ impl SectionEdit {
             .strip_suffix(" by removing one sentence")
             .unwrap_or(heading);
         let heading = heading.strip_suffix(" section").unwrap_or(heading);
-        if bullets {
-            return Some(Self::Bullets(heading.into()));
-        }
-        draft
-            .lines()
-            .any(|line| {
-                super::extract::split_heading(line)
-                    .is_some_and(|(name, _)| name.to_lowercase() == heading)
-            })
-            .then(|| Self::Shorten(heading.into()))
+        // Unsupported layouts (e.g. inline `Plan: text`) fall through to the general editor.
+        section_body(draft, heading)?;
+        Some(if bullets {
+            Self::Bullets(heading.into())
+        } else {
+            Self::Shorten(heading.into())
+        })
     }
 
     fn heading(&self) -> &str {
@@ -195,7 +192,8 @@ fn revise_section(draft: &str, edit: &SectionEdit, output: &str) -> Option<Strin
             }
         }
         SectionEdit::Shorten(_)
-            if replacement.len() >= body.len() || !grounded(body, "", replacement) =>
+            if spans(replacement).count() >= spans(body).count()
+                || !grounded(body, "", replacement) =>
         {
             return None;
         }
@@ -607,6 +605,32 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn targeted_edits_handle_colon_lines_inline_headings_and_punctuation_only_shortening() {
+        let draft = "Plan:\nMedication: none changed. Review the sleep diary.";
+        let edit = SectionEdit::from_request(draft, "Shorten Plan").unwrap();
+        assert_eq!(
+            revise_section(draft, &edit, "Plan:\nMedication: none changed."),
+            Some("Plan:\nMedication: none changed.".into())
+        );
+        assert_eq!(
+            revise_section(
+                draft,
+                &edit,
+                "Plan:\nMedication: none changed. Review the sleep diary"
+            ),
+            None
+        );
+        assert!(
+            SectionEdit::from_request("Plan: Review the sleep diary.", "Shorten Plan").is_none()
+        );
+        assert!(SectionEdit::from_request(
+            "Plan: Review the sleep diary.",
+            "Use bullet points in Plan"
+        )
+        .is_none());
     }
 
     #[test]
