@@ -78,7 +78,7 @@ Spec: `plans/2026-11-16-onboarding-spec.md`. PR1 covers AS1-AS3 only.
 - AS10 (`src-tauri/src/diag/telemetry.rs`): `report` delegates to `report_with_sender`, so a test can inject a stub sender. `diag/log.rs` adds `TEST_LOG_LOCK` to serialize tests on the global logger.
 
 ## Config and data
-- `first_note_tip_dismissed` (`"1"`, `store/settings.rs`) via `first_note_tip_dismissed()` and `dismiss_first_note_tip()`; `first_note_tip_session` holds the pinned session id. Exposed as `OnboardingState.firstNoteTipDismissed`. No migration, no new commands.
+- `first_note_tip_dismissed` (`"1"`, `store/settings.rs`) via `first_note_tip_dismissed()` and `dismiss_first_note_tip()`; `first_note_tip_session` holds the pinned session id. Exposed as `OnboardingState.firstNoteTipDismissed`. No migration.
 
 ## How to test
 - `npm test` (`src/onboarding.svelte.test.ts`, `note-styles.svelte.test.ts`, `summary-panel.test.ts`): AS6 tip/sample/relaunch/recording, AS7 card with zero vs one style and the gate.
