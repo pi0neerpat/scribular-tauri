@@ -153,6 +153,8 @@ pub fn run() {
             commands::set_main_window_visible,
             commands::get_onboarding_state,
             commands::complete_onboarding,
+            commands::mark_app_audio_explainer_shown,
+            commands::system_audio_permission_status,
             commands::get_first_note_tip_session,
             commands::dismiss_first_note_tip,
             commands::restore_sample_sessions,

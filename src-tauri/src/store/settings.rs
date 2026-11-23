@@ -18,6 +18,7 @@ pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
 pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
 pub const CHECK_FOR_UPDATES_AUTOMATICALLY: &str = "check_for_updates_automatically";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
+pub const APP_AUDIO_EXPLAINER_SHOWN: &str = "app_audio_explainer_shown";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
@@ -290,6 +291,14 @@ impl Store {
         Ok(self.get_setting(ONBOARDING_COMPLETED)?.as_deref() == Some("1"))
     }
 
+    pub fn app_audio_explainer_shown(&self) -> Result<bool> {
+        Ok(self.get_setting(APP_AUDIO_EXPLAINER_SHOWN)?.as_deref() == Some("1"))
+    }
+
+    pub fn mark_app_audio_explainer_shown(&self) -> Result<()> {
+        self.set_setting(APP_AUDIO_EXPLAINER_SHOWN, "1")
+    }
+
     /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {
@@ -386,7 +395,47 @@ mod shortcut_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{diag::telemetry, store::key::MemoryKeyStore};
+    use crate::{
+        diag::telemetry,
+        store::{key::MemoryKeyStore, NewSession},
+    };
+
+    #[test]
+    fn app_audio_flag_is_idempotent_and_failed_write_preserves_existing_data() {
+        let path =
+            std::env::temp_dir().join(format!("scribular-app-audio-{}.db", std::process::id()));
+        let keys = MemoryKeyStore::default();
+        let store = Store::open(&path, &keys).unwrap();
+        let session = store
+            .create_session(&NewSession {
+                title: "keep".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store.set_setting("keep_setting", "keep_value").unwrap();
+        assert!(!store.app_audio_explainer_shown().unwrap());
+        store.with(|conn| {
+            conn.execute_batch("CREATE TEMP TRIGGER reject_app_audio BEFORE INSERT ON settings
+                WHEN NEW.key = 'app_audio_explainer_shown' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;")?;
+            Ok(())
+        }).unwrap();
+        assert!(store.mark_app_audio_explainer_shown().is_err());
+        assert!(!store.app_audio_explainer_shown().unwrap());
+        drop(store);
+        let store = Store::open(&path, &keys).unwrap();
+        store.mark_app_audio_explainer_shown().unwrap();
+        store.mark_app_audio_explainer_shown().unwrap();
+        assert!(store.app_audio_explainer_shown().unwrap());
+        assert_eq!(
+            store.get_setting("keep_setting").unwrap().as_deref(),
+            Some("keep_value")
+        );
+        assert!(store.get_session(&session.id).unwrap().is_some());
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn failed_welcome_writes_leave_consent_off_and_welcome_unseen_on_reopen() {

@@ -26,6 +26,7 @@ import type { InputMode } from './types/InputMode';
 import type { LockReason } from './types/LockReason';
 import type { ModelProgress } from './types/ModelProgress';
 import type { OnboardingState } from './types/OnboardingState';
+import type { SystemAudioPermissionStatus } from './types/SystemAudioPermissionStatus';
 import type { ModelSpec } from './types/ModelSpec';
 import type { Privacy } from './types/Privacy';
 import type { Prompt } from './types/Prompt';
@@ -58,6 +59,14 @@ export function getOnboardingState(): Promise<OnboardingState> {
 
 export function completeOnboarding(): Promise<void> {
   return invoke<void>('complete_onboarding');
+}
+
+export function markAppAudioExplainerShown(): Promise<void> {
+  return invoke<void>('mark_app_audio_explainer_shown');
+}
+
+export function systemAudioPermissionStatus(): Promise<SystemAudioPermissionStatus> {
+  return invoke<SystemAudioPermissionStatus>('system_audio_permission_status');
 }
 
 export const getFirstNoteTipSession = () => invoke<string | null>('get_first_note_tip_session');

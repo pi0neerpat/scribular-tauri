@@ -20,8 +20,9 @@ use scribular_lib::engines::fake::{
     FakeTranscriberLoader,
 };
 use scribular_lib::jobs::{
-    HearingState, JobEvents, JobQueue, RecordError, Recorder, RecordingState, RecordingStatus,
-    SessionLevel, SessionProgress, SessionSegments, SummaryDelta, TranscriptWaiting,
+    AppAudioStatus, HearingState, JobEvents, JobQueue, RecordError, Recorder, RecordingState,
+    RecordingStatus, SessionLevel, SessionProgress, SessionSegments, SummaryDelta,
+    TranscriptWaiting,
 };
 use scribular_lib::llm::LlmError;
 use scribular_lib::store::key::MemoryKeyStore;
@@ -793,6 +794,17 @@ fn app_audio_attaches_late_and_reattaches_on_the_mic_timeline() {
 
     h.system.available.store(true, Ordering::Relaxed);
     wait_until("first app attachment", || h.system.is_open());
+    wait_until("app audio capture state", || {
+        h.events
+            .recording_states
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|state| {
+                state.as_ref().and_then(|state| state.app_audio_status)
+                    == Some(AppAudioStatus::Capturing)
+            })
+    });
     h.feed(3);
     wait_until("app meter hears audio", || {
         h.events.levels.lock().unwrap().iter().any(|e| {
@@ -1266,6 +1278,17 @@ fn refused_app_audio_leaves_capture_and_summary_available() {
         .unwrap()
         .id;
     assert!(h.mic.is_open());
+    wait_until("app audio denial state", || {
+        h.events
+            .recording_states
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|state| {
+                state.as_ref().and_then(|state| state.app_audio_status)
+                    == Some(AppAudioStatus::PermissionRequired)
+            })
+    });
     h.feed(3);
     assert_eq!(h.recorder.stop().unwrap(), id);
     h.events.wait_for(&id, SessionStatus::Done);
