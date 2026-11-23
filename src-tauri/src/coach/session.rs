@@ -72,7 +72,11 @@ struct Candidate {
 
 impl State {
     fn restore_after_stop(&mut self, job_id: &str) {
-        if self.candidate.as_ref().is_some_and(|candidate| candidate.job_id == job_id) {
+        if self
+            .candidate
+            .as_ref()
+            .is_some_and(|candidate| candidate.job_id == job_id)
+        {
             self.candidate = self.previous_candidate.take();
         }
     }
@@ -104,28 +108,111 @@ fn complete_note(text: &str) -> Option<&str> {
     text.trim_end().strip_suffix(END_NOTE).map(str::trim_end)
 }
 
-fn shortening_options(draft: &str, request: &str) -> Option<Vec<Range<usize>>> {
-    // shortcut: explicit heading and a single plain prose paragraph; use the general editor for other layouts.
-    let request = request.trim().trim_end_matches('.').to_lowercase();
-    let heading = request
-        .strip_prefix("also ")
-        .unwrap_or(&request)
-        .strip_prefix("shorten ")?;
+fn section_body(note: &str, heading: &str) -> Option<Range<usize>> {
+    // shortcut: blank lines delimit sections, upgrade when notes carry structured section boundaries.
     let mut offset = 0;
-    let mut sections = draft.split("\n\n").filter_map(|section| {
+    let mut sections = note.split("\n\n").filter_map(|section| {
         let start = offset;
         offset += section.len() + 2;
         let (title, body) = section.split_once('\n')?;
         let (name, inline) = super::extract::split_heading(title)?;
-        (inline.is_empty() && name.to_lowercase() == heading)
-            .then_some((start + title.len() + 1, body))
+        (inline.is_empty() && name.to_lowercase() == heading).then(|| {
+            let body = body.trim_end();
+            let body_start = start + title.len() + 1;
+            body_start..body_start + body.len()
+        })
     });
-    let (body_start, body) = sections.next()?;
-    let body = body.trim_end();
-    if sections.next().is_some()
-        || body.contains(['\n', '\r', '"', '“', '”', '‘'])
-        || !body.ends_with('.')
-    {
+    let body = sections.next()?;
+    (sections.next().is_none()
+        && note[body.clone()]
+            .lines()
+            .all(|line| super::extract::split_heading(line).is_none()))
+    .then_some(body)
+}
+
+enum SectionEdit {
+    Bullets(String),
+    Shorten(String),
+}
+
+impl SectionEdit {
+    fn from_request(draft: &str, request: &str) -> Option<Self> {
+        let request = request.to_lowercase();
+        let request = request.trim().trim_end_matches(['.', '!']);
+        let request = request.strip_prefix("also ").unwrap_or(request);
+        let (heading, bullets) = match request.strip_prefix("use bullet points in ") {
+            Some(heading) => (heading, true),
+            None => (request.strip_prefix("shorten ")?, false),
+        };
+        let heading = heading.strip_prefix("only ").unwrap_or(heading);
+        let heading = heading.strip_prefix("the ").unwrap_or(heading);
+        let heading = heading
+            .strip_suffix(" by removing one sentence")
+            .unwrap_or(heading);
+        let heading = heading.strip_suffix(" section").unwrap_or(heading);
+        if bullets {
+            return Some(Self::Bullets(heading.into()));
+        }
+        draft
+            .lines()
+            .any(|line| {
+                super::extract::split_heading(line)
+                    .is_some_and(|(name, _)| name.to_lowercase() == heading)
+            })
+            .then(|| Self::Shorten(heading.into()))
+    }
+
+    fn heading(&self) -> &str {
+        match self {
+            Self::Bullets(heading) | Self::Shorten(heading) => heading,
+        }
+    }
+}
+
+fn revise_section(draft: &str, edit: &SectionEdit, output: &str) -> Option<String> {
+    let original = section_body(draft, edit.heading())?;
+    let proposed = section_body(output, edit.heading())?;
+    let replacement = &output[proposed];
+    let body = &draft[original.clone()];
+    match edit {
+        SectionEdit::Bullets(_) => {
+            let mut bullets = Vec::new();
+            for line in replacement.lines() {
+                let line = line.trim();
+                let bullet = line
+                    .strip_prefix("* ")
+                    .or_else(|| line.strip_prefix("- "))
+                    .or_else(|| line.strip_prefix("• "))?;
+                bullets.push(bullet);
+            }
+            if bullets.is_empty()
+                || bullets
+                    .join(" ")
+                    .split_whitespace()
+                    .ne(body.split_whitespace())
+            {
+                return None;
+            }
+        }
+        SectionEdit::Shorten(_)
+            if replacement.len() >= body.len() || !grounded(body, "", replacement) =>
+        {
+            return None;
+        }
+        SectionEdit::Shorten(_) => {}
+    }
+    Some(format!(
+        "{}{replacement}{}",
+        &draft[..original.start],
+        &draft[original.end..]
+    ))
+}
+
+fn shortening_options(draft: &str, body_range: Range<usize>) -> Option<Vec<Range<usize>>> {
+    // shortcut: use numbered source sentences for plain prose, use the general editor for other layouts.
+    let body_start = body_range.start;
+    let body = &draft[body_range];
+    if body.contains(['\n', '\r', '"', '“', '”', '‘']) || !body.ends_with('.') {
         return None;
     }
     let mut offset = body_start;
@@ -156,6 +243,9 @@ fn shortening_options(draft: &str, request: &str) -> Option<Vec<Range<usize>>> {
 
 fn remove_sentence(draft: &str, options: &[Range<usize>], selection: &str) -> Option<String> {
     let index = selection
+        .trim()
+        .lines()
+        .next()?
         .trim()
         .trim_end_matches('.')
         .parse::<usize>()
@@ -249,14 +339,20 @@ pub fn session_coach_start(
         }
         let candidate_id = commands::opaque_id()?;
         let draft = prior.as_deref().unwrap_or(&session.summary);
-        let shortening = shortening_options(draft, &request);
+        let section_edit = SectionEdit::from_request(draft, &request);
+        let shortening = match &section_edit {
+            Some(SectionEdit::Shorten(heading)) => {
+                section_body(draft, heading).and_then(|body| shortening_options(draft, body))
+            }
+            _ => None,
+        };
         let prompt = if let Some(options) = &shortening {
             let choices = options.iter().enumerate()
                 .map(|(index, range)| format!("{}. {}", index + 1, draft[range.clone()].trim()))
                 .collect::<Vec<_>>().join("\n");
             format!(
                 "Choose the least important complete sentence to remove from this section of a clinical note. \
-                 Preserve any sentence needed to understand the others. Reply with only the number of the sentence to remove.\n\n\
+                 Preserve any sentence needed to understand the others. Start your reply with the number of the sentence to remove on its own line.\n\n\
                  Earlier requests:\n{}\n\nCurrent request:\n{request}\n\n{choices}",
                 prior_requests.join("\n")
             )
@@ -269,7 +365,7 @@ pub fn session_coach_start(
                 None => format!("Saved note (draft to edit):\n{}", session.summary),
             };
             format!(
-                "Edit the draft clinical note to fulfill the current request. Keep earlier edits. If the request names a section, copy the other sections unchanged, including formatting. Use complete source sentences from the saved note or transcript. Keep their facts and speaker attribution intact. When asked to shorten, keep the most important sentences and omit less important details. For a shortening request on a multi-sentence section, remove at least one sentence. Return the full edited note with its headings and no preamble, then {END_NOTE}.\n\nTranscript:\n{}\n\n{draft_context}\n\nCurrent request:\n{request}",
+                "Edit the draft clinical note to fulfill the current request. Keep earlier edits. If the request names a section, copy the other sections unchanged, including formatting. For a bullet formatting request, prefix each complete sentence with '* ' and preserve the original wording and order. Use complete source sentences from the saved note or transcript. Keep their facts and speaker attribution intact. When asked to shorten, keep the most important sentences and omit less important details. For a shortening request on a multi-sentence section, remove at least one sentence. Return the full edited note with its headings, separated by blank lines, and no preamble, then {END_NOTE}.\n\nTranscript:\n{}\n\n{draft_context}\n\nCurrent request:\n{request}",
                 session.transcript
             )
         };
@@ -290,9 +386,15 @@ pub fn session_coach_start(
             }
             state.active = None;
             let draft = prior.as_deref().unwrap_or(&note);
-            let revised = result.as_deref().ok().and_then(|output| match &shortening {
-                Some(options) => remove_sentence(draft, options, output),
-                None => complete_note(output).map(str::to_string),
+            let revised = result.as_deref().ok().and_then(|output| {
+                if let Some(options) = &shortening {
+                    return remove_sentence(draft, options, output);
+                }
+                let output = complete_note(output)?;
+                match &section_edit {
+                    Some(edit) => revise_section(draft, edit, output),
+                    None => Some(output.to_string()),
+                }
             }).filter(|text| {
                 text.trim_end() != draft.trim_end()
                     && text.trim_end() != note.trim_end()
@@ -426,25 +528,68 @@ mod tests {
     #[test]
     fn shortening_a_section_keeps_earlier_edits_and_removes_only_a_source_sentence() {
         let draft = "Assessment:\n* Client felt tired.\n\nPlan:\nReview the sleep diary. Try a consistent bedtime.\n\nFollow-Up:\nMeet again next week.";
-        let options = shortening_options(draft, "Also shorten Plan").unwrap();
+        let edit = SectionEdit::from_request(draft, "Also shorten Plan").unwrap();
+        let options =
+            shortening_options(draft, section_body(draft, edit.heading()).unwrap()).unwrap();
         let keep_first = draft.replace(" Try a consistent bedtime.", "");
         let keep_second = draft.replace("Review the sleep diary. ", "");
-        assert_eq!(remove_sentence(draft, &options, "2\n"), Some(keep_first));
+        assert_eq!(
+            remove_sentence(draft, &options, "2\n"),
+            Some(keep_first.clone())
+        );
+        assert_eq!(
+            remove_sentence(draft, &options, "2\nExplanation."),
+            Some(keep_first)
+        );
         assert_eq!(remove_sentence(draft, &options, "1."), Some(keep_second));
         assert_eq!(remove_sentence(draft, &options, "3"), None);
         assert_eq!(remove_sentence(draft, &options, "Try a diary."), None);
-        assert!(shortening_options(
-            "Plan:\nClient said “I will try.” Check in next week.",
-            "Shorten Plan"
+        for body in [
+            "Client said “I will try.” Check in next week.",
+            "Follow up with Dr. Moreno about sleep quality.",
+            "Meet again next week.",
+        ] {
+            assert!(shortening_options(body, 0..body.len()).is_none());
+        }
+        let explicit = SectionEdit::from_request(
+            draft,
+            "Shorten only the Plan section by removing one sentence",
         )
-        .is_none());
-        assert!(shortening_options(
-            "Plan:\nFollow up with Dr. Moreno about sleep quality.",
-            "Shorten Plan"
-        )
-        .is_none());
-        assert!(shortening_options(draft, "Shorten Follow-Up").is_none());
-        assert!(shortening_options(draft, "Shorten").is_none());
+        .unwrap();
+        assert_eq!(explicit.heading(), "plan");
+        assert!(SectionEdit::from_request(draft, "Shorten the note").is_none());
+    }
+
+    #[test]
+    fn a_replacement_bullets_only_the_requested_section_of_the_current_draft() {
+        let saved = "Data:\nClient reported working overtime.\n\nAssessment:\nClient felt tired.\n\nPlan:\nReview the sleep diary. Try a consistent bedtime.";
+        let previous = saved.replace("Client felt tired.", "* Client felt tired.");
+        let model_output = previous
+            .replace(
+                "Client reported working overtime.",
+                "* Client reported working overtime.",
+            )
+            .replace(
+                "Review the sleep diary. Try",
+                "* Review the sleep diary.\n* Try",
+            );
+        let request = "Use bullet points in Plan";
+        for draft in [saved, &previous] {
+            let edit = SectionEdit::from_request(draft, request).unwrap();
+            let expected = draft.replace(
+                "Review the sleep diary. Try",
+                "* Review the sleep diary.\n* Try",
+            );
+            assert_eq!(revise_section(draft, &edit, &model_output), Some(expected));
+            assert_eq!(
+                revise_section(draft, &edit, "Plan:\n* Review the sleep diary."),
+                None
+            );
+            assert_eq!(
+                revise_section(draft, &edit, "Data:\n* Client reported working overtime."),
+                None
+            );
+        }
     }
 
     #[test]
