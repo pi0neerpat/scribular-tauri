@@ -66,7 +66,7 @@ beforeEach(() => {
   invoke.mockImplementation(async (command, args) => {
     if (command === fail) throw new Error('IPC failed');
     switch (command) {
-      case 'get_onboarding_state': return { completed };
+      case 'get_onboarding_state': return { completed, appAudioExplainerShown: false, firstNoteTipDismissed: false };
       case 'complete_onboarding': completed = true; return;
       case 'get_telemetry_setting': return consent;
       case 'set_telemetry_setting':
@@ -190,7 +190,7 @@ describe('AS2 Help and usage-data consent', () => {
     completed = true;
     consent = 'on';
     launch();
-    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(1));
+    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(2));
     expect(dialog()).toBeNull();
     reopenFromHelp();
     await vi.waitFor(() => expect(checkbox().checked && !next().disabled).toBe(true));
@@ -204,7 +204,7 @@ describe('AS2 Help and usage-data consent', () => {
     completed = true;
     consent = 'off';
     launch();
-    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(1));
+    await vi.waitFor(() => expect(calls('get_onboarding_state')).toHaveLength(2));
     fail = 'get_telemetry_setting';
     reopenFromHelp();
     await vi.waitFor(() => expect(dialog()?.querySelector('[role=alert]')?.textContent).toContain('Could not read'));

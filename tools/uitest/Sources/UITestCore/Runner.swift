@@ -104,7 +104,10 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
             emit("✓ \(step.line) \(step.source)")
             continue
         }
-        var started: Date? = if case .pickApp = step.command { Date() } else { nil }
+        var started: Date? = switch step.command {
+        case .pickApp, .pickCallApp: Date()
+        default: nil
+        }
         var attempts = 0
         let limit = step.timeout ?? options.timeout
         let detail: String?
@@ -156,7 +159,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let completedAt = Date()
         options.onStep?(step, completedAt)
         let changed = switch step.command {
-        case .click, .pickApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .dockClick: true
+        case .click, .pickApp, .pickCallApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .statusItemMouseClick, .dockClick: true
         default: false
         }
         if changed {

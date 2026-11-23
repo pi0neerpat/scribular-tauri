@@ -10,6 +10,8 @@ const {
   appVersion,
   completeOnboarding,
   getOnboardingState,
+  markAppAudioExplainerShown,
+  systemAudioPermissionStatus,
   getTelemetrySetting,
   restoreSampleSessions,
   setTelemetrySetting,
@@ -39,18 +41,23 @@ describe('api', () => {
   });
 
   it('wraps onboarding, sample restore, and telemetry setting commands', async () => {
-    invoke.mockResolvedValueOnce({ completed: false })
+    invoke.mockResolvedValueOnce({ completed: false, appAudioExplainerShown: false, firstNoteTipDismissed: false })
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('unknown')
       .mockResolvedValueOnce('sample-id')
       .mockResolvedValueOnce('undecided')
       .mockResolvedValueOnce(undefined);
-    await expect(getOnboardingState()).resolves.toEqual({ completed: false });
+    await expect(getOnboardingState()).resolves.toEqual({ completed: false, appAudioExplainerShown: false, firstNoteTipDismissed: false });
     await completeOnboarding();
+    await markAppAudioExplainerShown();
+    await expect(systemAudioPermissionStatus()).resolves.toBe('unknown');
     await expect(restoreSampleSessions()).resolves.toBe('sample-id');
     await expect(getTelemetrySetting()).resolves.toBe('undecided');
     await setTelemetrySetting(false);
     expect(invoke.mock.calls.map(([name]) => name)).toEqual([
-      'get_onboarding_state', 'complete_onboarding', 'restore_sample_sessions',
+      'get_onboarding_state', 'complete_onboarding', 'mark_app_audio_explainer_shown',
+      'system_audio_permission_status', 'restore_sample_sessions',
       'get_telemetry_setting', 'set_telemetry_setting',
     ]);
     expect(invoke).toHaveBeenLastCalledWith('set_telemetry_setting', { enabled: false });

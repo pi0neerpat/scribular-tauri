@@ -11,6 +11,10 @@
     getRecordingSource,
     setRecordingSource,
     listAudioApps,
+    getOnboardingState,
+    markAppAudioExplainerShown,
+    systemAudioPermissionStatus,
+    openPrivacySettings,
     recordingState,
     onRecordingState,
     onSessionLevels,
@@ -33,6 +37,7 @@
   import type { SessionStatus } from '../types/SessionStatus';
   import type { RecordingSource } from '../types/RecordingSource';
   import type { RecordingState } from '../types/RecordingState';
+  import type { SystemAudioPermissionStatus } from '../types/SystemAudioPermissionStatus';
   import type { SessionLevel } from '../types/SessionLevel';
   import LiveTranscript from './LiveTranscript.svelte';
   import Timings from './Timings.svelte';
@@ -133,6 +138,11 @@
   let sourceReady = $state(false);
   let pickerOpen = $state(false);
   let firstCall = $state(false);
+  let explainerShown = $state(false);
+  let onboardingReady = $state(false);
+  let explainerError = $state<string | null>(null);
+  let permissionStatus = $state<SystemAudioPermissionStatus>('unknown');
+  let statusError = $state<string | null>(null);
   let apps = $state<string[]>([]);
   let level = $state<Partial<Record<'mic' | 'system', SessionLevel>>>({});
   let capture = $state<RecordingState | null>(null);
@@ -166,11 +176,18 @@
   }
   let stopButton = $state<HTMLButtonElement | undefined>();
   let speakerDialog = $state<HTMLDivElement | undefined>();
+  let callDialog = $state<HTMLDialogElement | undefined>();
   let returnFocus = $state<HTMLElement | null>(null);
 
   $effect(() => {
     if (askSpeakerCount) speakerDialog?.querySelector('button')?.focus();
     else returnFocus?.focus();
+  });
+
+  $effect(() => {
+    if (!firstCall || !callDialog) return;
+    callDialog.showModal();
+    return () => callDialog?.close();
   });
 
   function confineDialogFocus(event: KeyboardEvent) {
@@ -188,6 +205,8 @@
   }
 
   let recording = $derived(status === 'recording');
+  let appAudioPermissionRequired = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'permissionRequired');
+  let callPermissionStatus = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'capturing' ? 'granted' : permissionStatus);
   let working = $derived(isWorking(status));
   let elapsedMs = $derived(capture?.sessionId === sessionId
     ? (capture.status === 'paused' ? capture.activeElapsedMs : (level.mic?.activeElapsedMs ?? capture.activeElapsedMs))
@@ -204,6 +223,7 @@
 
   onMount(() => {
     getRecordingSource().then((saved) => { source = saved; sourceReady = true; }).catch((e) => (error = String(e)));
+    void loadOnboarding();
     const startFromTray = () => { if (trayStart || busy) return; trayStart = true; void start(); };
     window.addEventListener('tray-start-recording', startFromTray);
     const unlisten = onSessionProgress((p) => {
@@ -221,6 +241,7 @@
           }
         }).catch(() => {});
       }
+      if (p.state === 'recording') firstCall = false;
       progress = p;
       status = p.state;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
@@ -238,6 +259,7 @@
     });
     const unlistenState = onRecordingState((state) => {
       capture = state;
+      if (state?.appAudioStatus === 'capturing' && denied === 'systemAudio') denied = null;
       if (state?.sessionId === sessionId) status = 'recording';
     });
     const unlistenLevels = onSessionLevels((next) => {
@@ -276,6 +298,52 @@
     };
   });
 
+  async function loadOnboarding() {
+    try {
+      explainerShown = (await getOnboardingState()).appAudioExplainerShown;
+      onboardingReady = true;
+      explainerError = null;
+    } catch (e) { explainerError = String(e); }
+  }
+
+  async function showCallExplainer() {
+    firstCall = true;
+    permissionStatus = 'unknown';
+    if (!explainerShown) {
+      try {
+        await markAppAudioExplainerShown();
+        explainerShown = true;
+        explainerError = null;
+      } catch (e) { explainerError = String(e); return; }
+    }
+  }
+
+  $effect(() => {
+    if (!firstCall || !active) return;
+    let current = true;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const status = await systemAudioPermissionStatus();
+        if (current) { permissionStatus = status; statusError = null; }
+      } catch (e) { if (current) statusError = String(e); }
+    };
+    void refresh();
+    const timer = setInterval(refresh, 2000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { current = false; clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  });
+
+  async function openCallSettings() {
+    try { await openPrivacySettings('systemAudio'); explainerError = null; }
+    catch (e) { explainerError = String(e); }
+  }
+
+  async function notNow() {
+    await chooseLocation('inRoom');
+    if (source.location === 'inRoom') { firstCall = pickerOpen = false; denied = error = null; }
+  }
+
   async function start() {
     if (!speechReady) {
       onStartFailed();
@@ -307,6 +375,7 @@
       if (sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) sessionStorage.removeItem(IN_FLIGHT_START_KEY);
       resultFetch++;
       sessionId = session.id;
+      firstCall = false;
       remember(session.id);
       labeled = session.inputMode === 'micAndSystem';
       status = session.status;
@@ -381,7 +450,8 @@
   }
 
   async function chooseLocation(location: RecordingSource['location']) {
-    if (location === 'onCall' && !source.targetApp) { firstCall = true; return; }
+    if (location === 'onCall' && !explainerShown) { source = { ...source, location }; await showCallExplainer(); return; }
+    if (location === 'onCall' && !source.targetApp) { source = { ...source, location }; await openPicker(); return; }
     const next = { ...source, location };
     try { await setRecordingSource(next); source = next; error = null; }
     catch (e) { error = String(e); }
@@ -397,7 +467,7 @@
   async function chooseApp(name: string) {
     if (busy) return;
     const next = { location: 'onCall' as const, targetApp: name };
-    try { await setRecordingSource(next); source = next; pickerOpen = false; error = null; }
+    try { await setRecordingSource(next); source = next; pickerOpen = false; firstCall = false; error = null; }
     catch (e) { error = String(e); }
   }
 
@@ -434,21 +504,14 @@
     </p>
   {/if}
   {#if !recording}
-    <fieldset disabled={!sourceReady || busy}>
+    <fieldset disabled={!sourceReady || !onboardingReady || busy}>
       <legend>Recording source</legend>
-      <label><input type="radio" name="recording-source" checked={source.location === 'inRoom' && !firstCall} onclick={() => chooseLocation('inRoom')} /> In the room</label>
+      <label><input type="radio" name="recording-source" checked={source.location === 'inRoom'} onclick={() => chooseLocation('inRoom')} /> In the room</label>
       <label><input type="radio" name="recording-source" checked={source.location === 'onCall'} onclick={() => chooseLocation('onCall')} /> On a call</label>
     </fieldset>
     {#if source.location === 'onCall'}
       <button onclick={openPicker} disabled={busy}>App: {source.targetApp ?? 'Choose an app…'}</button>
       {#if /Chrome|Safari|Firefox|Edge|Brave/i.test(source.targetApp ?? '')}<p>Audio from all browser tabs will be recorded.</p>{/if}
-    {/if}
-    {#if firstCall}
-      <div role="dialog" aria-label="App audio access">
-        <p>On a call records your microphone and the selected app. macOS will ask for System Audio Recording access when capture starts.</p>
-        <button onclick={() => { firstCall = false; void openPicker(); }}>Choose an app</button>
-        <button onclick={() => { firstCall = false; void chooseLocation('inRoom'); }}>Not Now</button>
-      </div>
     {/if}
     {#if pickerOpen}
       <div role="dialog" aria-label="Choose a call app" tabindex="-1" onkeydown={(event) => { if (event.key === 'Escape') cancelDialog(); }}>
@@ -520,12 +583,13 @@
     <LiveTranscript {sessionId} {labeled} activeElapsedMs={elapsedMs} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
 
-  {#if denied}
-    <PermissionNotice pane={denied} />
-    {#if denied === 'systemAudio'}<button onclick={openPicker}>Retry app audio</button>{/if}
-  {:else if error}
-    <p role="alert">{error}</p>
+  {#if denied || appAudioPermissionRequired}
+    <PermissionNotice pane={denied ?? 'systemAudio'} />
+    {#if denied === 'systemAudio' || appAudioPermissionRequired}<button onclick={showCallExplainer}>Retry app audio</button>{/if}
+  {:else if capture?.sessionId === sessionId && capture?.appAudioStatus === 'unavailable'}
+    <p role="status">App audio is unavailable. Your microphone is still recording. <button onclick={showCallExplainer}>Retry app audio</button></p>
   {/if}
+  {#if error && !denied}<p role="alert">{error}</p>{/if}
 
   {#if result}
     {@const session = result}
@@ -536,6 +600,25 @@
     {#if session.timings}<Timings timings={session.timings} />{/if}
   {/if}
 </section>
+{#if !onboardingReady && explainerError}
+  <p role="alert">{explainerError} <button onclick={loadOnboarding}>Retry onboarding state</button></p>
+{/if}
+{#if firstCall}
+  <dialog bind:this={callDialog} aria-label="App audio access" oncancel={(event) => { event.preventDefault(); void notNow(); }}>
+    <p>On a call records your microphone and one selected app. To include app audio, allow Scribular in macOS Screen &amp; System Audio Recording.</p>
+    <p role="status">App audio access: {callPermissionStatus === 'granted' ? 'Granted' : 'Permission unconfirmed — check System Settings or try recording.'}</p>
+    {#if explainerError || statusError}<p role="alert">{explainerError ?? statusError} <button onclick={explainerError ? (explainerShown ? openCallSettings : showCallExplainer) : () => systemAudioPermissionStatus().then((status) => { permissionStatus = status; statusError = null; }).catch((e) => { statusError = String(e); })}>Retry</button></p>{/if}
+    <button disabled={!explainerShown} onclick={openCallSettings}>Open System Settings</button>
+    {#if source.targetApp}
+      <button disabled={!explainerShown} onclick={async () => { await chooseLocation('onCall'); if (source.location === 'onCall') { firstCall = false; if (!recording && callPermissionStatus !== 'granted') await start(); } }}>
+        {callPermissionStatus === 'granted' ? 'Continue with selected app' : 'Try recording'}
+      </button>
+    {:else}
+      <button disabled={!explainerShown} onclick={() => { firstCall = false; void openPicker(); }}>Choose an app to try recording</button>
+    {/if}
+    <button onclick={notNow}>Not Now</button>
+  </dialog>
+{/if}
 {#if askSpeakerCount}
   <div bind:this={speakerDialog} onkeydown={confineDialogFocus} role="dialog" aria-modal="true" aria-labelledby="speaker-count-title" tabindex="-1">
     <h3 id="speaker-count-title">How many people spoke?</h3>
@@ -547,6 +630,8 @@
 {/if}
 
 <style>
+  dialog[aria-label="App audio access"] { width: min(28rem, calc(100% - 2rem)); padding: 1.5rem; border: 1px solid GrayText; border-radius: 1rem; background: Canvas; color: CanvasText; box-shadow: 0 1rem 3rem #0004; }
+  dialog[aria-label="App audio access"]::backdrop { background: #0007; }
   .record-control { margin-block: .75rem; }
   .record-ring {
     display: inline-grid;

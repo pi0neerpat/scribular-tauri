@@ -6,6 +6,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
 import type { AppSettings } from './types/AppSettings';
+import type { ShortcutSettings } from './types/ShortcutSettings';
+import type { ShortcutRegistrationState } from './types/ShortcutRegistrationState';
+import type { Appearance } from './types/Appearance';
 import type { AppVersion } from './types/AppVersion';
 import type { AudioApp } from './types/AudioApp';
 import type { CoachAvailability } from './types/CoachAvailability';
@@ -23,6 +26,7 @@ import type { InputMode } from './types/InputMode';
 import type { LockReason } from './types/LockReason';
 import type { ModelProgress } from './types/ModelProgress';
 import type { OnboardingState } from './types/OnboardingState';
+import type { SystemAudioPermissionStatus } from './types/SystemAudioPermissionStatus';
 import type { ModelSpec } from './types/ModelSpec';
 import type { Privacy } from './types/Privacy';
 import type { Prompt } from './types/Prompt';
@@ -55,6 +59,14 @@ export function getOnboardingState(): Promise<OnboardingState> {
 
 export function completeOnboarding(): Promise<void> {
   return invoke<void>('complete_onboarding');
+}
+
+export function markAppAudioExplainerShown(): Promise<void> {
+  return invoke<void>('mark_app_audio_explainer_shown');
+}
+
+export function systemAudioPermissionStatus(): Promise<SystemAudioPermissionStatus> {
+  return invoke<SystemAudioPermissionStatus>('system_audio_permission_status');
 }
 
 export const getFirstNoteTipSession = () => invoke<string | null>('get_first_note_tip_session');
@@ -99,6 +111,9 @@ export function onSettingsPane(handler: (pane: string) => void): Promise<Unliste
 }
 export function onAppSettingsChanged(handler: (settings: AppSettings) => void): Promise<UnlistenFn> {
   return listen<AppSettings>('app-settings://changed', (event) => handler(event.payload));
+}
+export function onAppearanceChanged(handler: (appearance: Appearance) => void): Promise<UnlistenFn> {
+  return listen<Appearance>('appearance://changed', (event) => handler(event.payload));
 }
 
 export function listSessions(): Promise<SessionListItem[]> {
@@ -395,7 +410,15 @@ export function getRecordingSettings(): Promise<RecordingSettings> {
 }
 
 export function getAppSettings(): Promise<AppSettings> { return invoke<AppSettings>('get_app_settings'); }
+export function getShortcutSettings(): Promise<ShortcutSettings> { return invoke<ShortcutSettings>('get_shortcut_settings'); }
+export function getShortcutBindings(): Promise<[string, string][]> { return invoke<[string, string][]>('get_shortcut_bindings'); }
+export function shortcutRegistrationState(): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('shortcut_registration_state'); }
+export function onShortcutRegistration(handler: (state: ShortcutRegistrationState) => void): Promise<UnlistenFn> { return listen<ShortcutRegistrationState>('shortcut://registration', (event) => handler(event.payload)); }
+export function setShortcutSettings(settings: ShortcutSettings): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('set_shortcut_settings', { settings }); }
+export function setShortcutCapture(capturing: boolean): Promise<ShortcutRegistrationState> { return invoke<ShortcutRegistrationState>('set_shortcut_capture', { capturing }); }
 export function setAppSettings(settings: AppSettings): Promise<void> { return invoke<void>('set_app_settings', { settings }); }
+export function getAppearance(): Promise<Appearance> { return invoke<Appearance>('get_appearance'); }
+export function setAppearance(appearance: Appearance): Promise<Appearance> { return invoke<Appearance>('set_appearance', { appearance }); }
 export function requestNotificationPermission(): Promise<boolean> { return invoke<boolean>('request_notification_permission'); }
 
 export function setRecordingSettings(settings: RecordingSettings): Promise<void> {

@@ -25,8 +25,9 @@ use crate::models::{
 };
 use crate::store::key::{KeyStore, LockReason};
 use crate::store::{
-    now_ms, AppSettings, DiarizationState, InputMode, KeptAudio, Prompt, RecordingSettings,
-    RecordingSource, Session, SessionListItem, SessionPatch, Store, SUMMARY_MODEL_ID,
+    now_ms, Accent, AppSettings, Appearance, Background, DiarizationState, InputMode, KeptAudio,
+    Mode, MyTheme, Preset, Prompt, RecordingSettings, RecordingSource, Selection, Session,
+    SessionListItem, SessionPatch, Store, ThemeValues, SUMMARY_MODEL_ID,
 };
 use crate::stt::{read_wav, TranscriberLoader, TranscriptSegment};
 
@@ -37,6 +38,7 @@ pub const HEARTBEAT_EVENT: &str = "app://heartbeat";
 pub const EVENTS: &[&str] = &[
     HEARTBEAT_EVENT,
     APP_SETTINGS_CHANGED_EVENT,
+    APPEARANCE_CHANGED_EVENT,
     MODELS_PROGRESS_EVENT,
     SUMMARY_MODEL_CHANGED_EVENT,
     SUMMARY_AVAILABILITY_EVENT,
@@ -50,6 +52,7 @@ pub const EVENTS: &[&str] = &[
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
     TRAY_STOP_FAILED_EVENT,
+    crate::shortcuts::REGISTRATION_EVENT,
     QUIT_REQUESTED_EVENT,
     WINDOW_CLOSE_REQUESTED_EVENT,
     crate::coach::AVAILABILITY_EVENT,
@@ -64,6 +67,7 @@ pub const EVENTS: &[&str] = &[
 /// rollover (spec 04 R12).
 pub const LICENSE_CHANGED_EVENT: &str = "license://changed";
 pub const APP_SETTINGS_CHANGED_EVENT: &str = "app-settings://changed";
+pub const APPEARANCE_CHANGED_EVENT: &str = "appearance://changed";
 
 pub const UPDATE_STATE_EVENT: &str = "update://state";
 pub const TRAY_START_RECORDING_EVENT: &str = "tray-start-recording";
@@ -108,6 +112,16 @@ pub struct Heartbeat {
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingState {
     pub completed: bool,
+    pub app_audio_explainer_shown: bool,
+    pub first_note_tip_dismissed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SystemAudioPermissionStatus {
+    Unknown,
+    Denied,
+    Granted,
 }
 
 /// Exports every IPC root type, plus the types they reference, into
@@ -116,8 +130,19 @@ pub struct OnboardingState {
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
     AppSettings::export_all(cfg)?;
+    crate::store::ShortcutSettings::export_all(cfg)?;
+    crate::shortcuts::ShortcutRegistrationState::export_all(cfg)?;
+    Appearance::export_all(cfg)?;
+    Accent::export_all(cfg)?;
+    Background::export_all(cfg)?;
+    Mode::export_all(cfg)?;
+    MyTheme::export_all(cfg)?;
+    Preset::export_all(cfg)?;
+    Selection::export_all(cfg)?;
+    ThemeValues::export_all(cfg)?;
     Heartbeat::export_all(cfg)?;
     OnboardingState::export_all(cfg)?;
+    SystemAudioPermissionStatus::export_all(cfg)?;
     SessionListItem::export_all(cfg)?;
     Session::export_all(cfg)?;
     ClearSessionsResult::export_all(cfg)?;
@@ -142,6 +167,7 @@ pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportE
     SessionSegments::export_all(cfg)?;
     TranscriptWaiting::export_all(cfg)?;
     RecordingState::export_all(cfg)?;
+    crate::jobs::AppAudioStatus::export_all(cfg)?;
     SessionLevel::export_all(cfg)?;
     RecordingControlError::export_all(cfg)?;
     TranscriptSegment::export_all(cfg)?;
@@ -217,10 +243,40 @@ pub fn app_version() -> AppVersion {
 
 #[tauri::command]
 pub fn get_onboarding_state(store: State<Arc<Store>>) -> Result<OnboardingState, String> {
+    Ok(OnboardingState {
+        completed: store.onboarding_completed().map_err(|e| e.to_string())?,
+        app_audio_explainer_shown: store
+            .app_audio_explainer_shown()
+            .map_err(|e| e.to_string())?,
+        first_note_tip_dismissed: store
+            .get_setting("first_note_tip_dismissed")
+            .map_err(|e| e.to_string())?
+            .as_deref()
+            == Some("1"),
+    })
+}
+
+#[tauri::command]
+pub fn mark_app_audio_explainer_shown(store: State<Arc<Store>>) -> Result<(), String> {
     store
-        .onboarding_completed()
-        .map(|completed| OnboardingState { completed })
+        .mark_app_audio_explainer_shown()
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn system_audio_permission_status() -> SystemAudioPermissionStatus {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        if unsafe { CGPreflightScreenCaptureAccess() } {
+            return SystemAudioPermissionStatus::Granted;
+        }
+    }
+    // shortcut: preflight cannot distinguish denied from unrequested, upgrade if macOS exposes a richer read-only status API.
+    SystemAudioPermissionStatus::Unknown
 }
 
 #[tauri::command]
@@ -1440,6 +1496,62 @@ pub async fn resume_recording(
 #[tauri::command]
 pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String> {
     store.app_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_shortcut_settings(
+    store: State<Arc<Store>>,
+) -> Result<crate::store::ShortcutSettings, String> {
+    store.shortcut_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_shortcut_bindings() -> Vec<(&'static str, &'static str)> {
+    crate::shell::menu::BINDINGS.to_vec()
+}
+
+#[tauri::command]
+pub fn shortcut_registration_state(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::state(&app, &store)
+}
+
+#[tauri::command]
+pub fn set_shortcut_settings(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    settings: crate::store::ShortcutSettings,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::set(&app, &store, settings)
+}
+
+#[tauri::command]
+pub fn set_shortcut_capture(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    capturing: bool,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::capture(&app, &store, capturing)
+}
+
+#[tauri::command]
+pub fn get_appearance(store: State<Arc<Store>>) -> Result<Appearance, String> {
+    store.appearance().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_appearance(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    appearance: Appearance,
+) -> Result<Appearance, String> {
+    let saved = store
+        .set_appearance(&appearance)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit(APPEARANCE_CHANGED_EVENT, &saved);
+    Ok(saved)
 }
 
 #[tauri::command]

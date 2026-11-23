@@ -18,11 +18,15 @@ pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
 pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
 pub const CHECK_FOR_UPDATES_AUTOMATICALLY: &str = "check_for_updates_automatically";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
+pub const APP_AUDIO_EXPLAINER_SHOWN: &str = "app_audio_explainer_shown";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
 const TARGET_APP: &str = "target_app";
 const RECORD_LOCATION: &str = "record_location";
 const RECORD_TARGET_APP: &str = "record_target_app";
+const GLOBAL_SHORTCUTS_ENABLED: &str = "global_shortcuts_enabled";
+const TOGGLE_RECORDING_SHORTCUT: &str = "toggle_recording_shortcut";
+pub const DEFAULT_TOGGLE_RECORDING: &str = "control+alt+super+KeyR";
 /// Parity spec 01 R13: "Save session audio", off unless set to "1".
 pub(super) const KEEP_AUDIO: &str = "keep_audio";
 
@@ -55,6 +59,22 @@ pub struct RecordingSettings {
     /// Keep the audio (encrypted, 7 days) after the transcript is saved.
     pub keep_audio: bool,
     pub multi_speaker: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutSettings {
+    pub global_shortcuts_enabled: bool,
+    pub toggle_recording: Option<String>,
+}
+
+impl Default for ShortcutSettings {
+    fn default() -> Self {
+        Self {
+            global_shortcuts_enabled: false,
+            toggle_recording: Some(DEFAULT_TOGGLE_RECORDING.into()),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -152,6 +172,40 @@ pub(super) fn select(conn: &Connection, key: &str) -> Result<Option<String>> {
 }
 
 impl Store {
+    pub fn shortcut_settings(&self) -> Result<ShortcutSettings> {
+        self.with(|c| {
+            Ok(ShortcutSettings {
+                global_shortcuts_enabled: select(c, GLOBAL_SHORTCUTS_ENABLED)?.as_deref()
+                    == Some("1"),
+                toggle_recording: select(c, TOGGLE_RECORDING_SHORTCUT)?
+                    .map(|s| if s.is_empty() { None } else { Some(s) })
+                    .unwrap_or_else(|| Some(DEFAULT_TOGGLE_RECORDING.into())),
+            })
+        })
+    }
+
+    pub fn set_shortcut_settings(&self, settings: &ShortcutSettings) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            insert(
+                &tx,
+                GLOBAL_SHORTCUTS_ENABLED,
+                if settings.global_shortcuts_enabled {
+                    "1"
+                } else {
+                    "0"
+                },
+            )?;
+            insert(
+                &tx,
+                TOGGLE_RECORDING_SHORTCUT,
+                settings.toggle_recording.as_deref().unwrap_or(""),
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     pub fn recording_source(&self) -> Result<RecordingSource> {
         self.with(|c| recording_source(c))
     }
@@ -237,6 +291,14 @@ impl Store {
         Ok(self.get_setting(ONBOARDING_COMPLETED)?.as_deref() == Some("1"))
     }
 
+    pub fn app_audio_explainer_shown(&self) -> Result<bool> {
+        Ok(self.get_setting(APP_AUDIO_EXPLAINER_SHOWN)?.as_deref() == Some("1"))
+    }
+
+    pub fn mark_app_audio_explainer_shown(&self) -> Result<()> {
+        self.set_setting(APP_AUDIO_EXPLAINER_SHOWN, "1")
+    }
+
     /// Reads them all under one lock, so a concurrent save is seen whole.
     pub fn recording_settings(&self) -> Result<RecordingSettings> {
         self.with(|c| {
@@ -295,9 +357,85 @@ impl Store {
 }
 
 #[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[test]
+    fn shortcut_settings_round_trip_and_clear() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
+        let store = Store {
+            conn: Mutex::new(conn),
+        };
+        assert_eq!(
+            store.shortcut_settings().unwrap(),
+            ShortcutSettings::default()
+        );
+        let settings = ShortcutSettings {
+            global_shortcuts_enabled: true,
+            toggle_recording: None,
+        };
+        store.set_shortcut_settings(&settings).unwrap();
+        assert_eq!(store.shortcut_settings().unwrap(), settings);
+        store
+            .set_shortcut_settings(&ShortcutSettings::default())
+            .unwrap();
+        assert_eq!(
+            store.shortcut_settings().unwrap(),
+            ShortcutSettings::default()
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{diag::telemetry, store::key::MemoryKeyStore};
+    use crate::{
+        diag::telemetry,
+        store::{key::MemoryKeyStore, NewSession},
+    };
+
+    #[test]
+    fn app_audio_flag_is_idempotent_and_failed_write_preserves_existing_data() {
+        let path =
+            std::env::temp_dir().join(format!("scribular-app-audio-{}.db", std::process::id()));
+        let keys = MemoryKeyStore::default();
+        let store = Store::open(&path, &keys).unwrap();
+        let session = store
+            .create_session(&NewSession {
+                title: "keep".into(),
+                input_mode: InputMode::Mic,
+                prompt_id: None,
+                model_id: None,
+            })
+            .unwrap();
+        store.set_setting("keep_setting", "keep_value").unwrap();
+        assert!(!store.app_audio_explainer_shown().unwrap());
+        store.with(|conn| {
+            conn.execute_batch("CREATE TEMP TRIGGER reject_app_audio BEFORE INSERT ON settings
+                WHEN NEW.key = 'app_audio_explainer_shown' BEGIN SELECT RAISE(ABORT, 'test write failure'); END;")?;
+            Ok(())
+        }).unwrap();
+        assert!(store.mark_app_audio_explainer_shown().is_err());
+        assert!(!store.app_audio_explainer_shown().unwrap());
+        drop(store);
+        let store = Store::open(&path, &keys).unwrap();
+        store.mark_app_audio_explainer_shown().unwrap();
+        store.mark_app_audio_explainer_shown().unwrap();
+        assert!(store.app_audio_explainer_shown().unwrap());
+        assert_eq!(
+            store.get_setting("keep_setting").unwrap().as_deref(),
+            Some("keep_value")
+        );
+        assert!(store.get_session(&session.id).unwrap().is_some());
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn failed_welcome_writes_leave_consent_off_and_welcome_unseen_on_reopen() {

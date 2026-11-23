@@ -9,6 +9,7 @@
   import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
+  import { startAppearance } from './lib/appearance-store';
   import { navigation, navigationDisabled, navigationLockedBy, type AppView } from './lib/navigation';
   import { downloadModels, modelsStatus, onModelsProgress, setMainWindowVisible } from './lib/api';
   import { mergeSnapshot } from './lib/models';
@@ -23,6 +24,13 @@
   import NoteStyleCoach from './lib/components/NoteStyleCoach.svelte';
   import type { CoachAvailability } from './lib/types/CoachAvailability';
   import type { PromptList } from './lib/types/PromptList';
+
+  onMount(() => {
+    let stop: (() => void) | undefined;
+    let disposed = false;
+    void startAppearance().then((cleanup) => { if (disposed) cleanup(); else stop = cleanup; });
+    return () => { disposed = true; stop?.(); };
+  });
 
   // Asked before anything that needs the store mounts.
   let gate = $state<'loading' | 'open' | { locked: LockReason }>('loading');

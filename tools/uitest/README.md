@@ -88,6 +88,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `launch [--keep-data]` | Start the built app. By default, move its app data into the run folder first. |
 | `click "Label" [index N] [in "Scope"]` | Click the unique exact label; use a 1-based index or scope to disambiguate. |
 | `pick-app "afplay" timeout 60s` | Close any menu left open, refresh the App-audio list, wait 2.5 seconds, open the App picker, and wait for the menu to open and close as detected by the window server. Type-select the name, press Return, wait 1 second, verify the picker value, and retry if it differs. |
+| `pick-call-app "afplay" timeout 60s` | Click the named button in the Choose a call app dialog. If the app is missing and the source list timed out, click Refresh before retrying. |
 | `type "text"` | Type into the focused control. |
 | `key cmd+shift+s` | Press a key with optional `cmd`, `shift`, `option`, or `ctrl` modifiers. |
 | `expect "text"` | Wait until visible text contains the value. |
@@ -106,6 +107,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `quit` | Quit the app and stop `play` playback. |
 | `expect-status-item "Scribular"` | Wait for the app status item whose Accessibility help equals the text. |
 | `status-item click "Scribular"` | Press the matching app status item. Native menu items are not exposed to Accessibility. |
+| `status-item-mouse-click "Scribular"` | Mouse-click the status item whose Accessibility help matches. |
 | `screenshot-menubar ["name"]` | Capture the first 40 points of the main display to `menubar-<line>.png` or the named file. |
 | `screenshot-screen ["name"]` | Capture the whole main display to `screen-<line>.png` or the named file. |
 | `expect-notification "text"` | Wait until a Notification Center banner's text contains the value. |

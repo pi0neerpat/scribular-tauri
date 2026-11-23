@@ -167,6 +167,18 @@ import Testing
     #expect(throws: ScriptError(line: 3, message: #"usage: dock click "title""#)) { try parseScript("quit\nquit\ndock press \"Scribular\"") }
 }
 
+@Test func parsesStatusItemMouseClick() throws {
+    #expect(try parseScript("status-item-mouse-click \"Scribular\"").map(\.command) == [.statusItemMouseClick("Scribular")])
+    #expect(throws: ScriptError.self) { try parseScript("status-item-mouse-click Scribular") }
+}
+
+@Test func parsesCallAppPickerWithTimeout() throws {
+    let step = try #require(parseScript("pick-call-app \"afplay\" timeout 60s").first)
+    #expect(step.command == .pickCallApp("afplay"))
+    #expect(step.timeout == 60)
+    #expect(throws: ScriptError.self) { try parseScript("pick-call-app afplay") }
+}
+
 @Test func doctorReportFormatsResultsWithoutSecrets() {
     let passed = DoctorReport(checks: [
         DoctorCheck(name: "Accessibility", fix: "System Settings", passed: true),
