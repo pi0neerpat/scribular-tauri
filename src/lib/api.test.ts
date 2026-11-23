@@ -94,6 +94,19 @@ describe('api', () => {
     expect(onResult).toHaveBeenCalledWith(reply);
   });
 
+  it('ignores a stop from the previous job while a new session coach request starts', async () => {
+    const onStopped = vi.fn();
+    listen.mockResolvedValue(() => {});
+    invoke.mockImplementation(async () => {
+      const stopped = listen.mock.calls.find(([name]) => name === 'session-coach://stopped')?.[1];
+      stopped({ payload: { jobId: 'old-job', sessionId: 'session-1' } });
+      return 'new-job';
+    });
+    const started = await sessionCoachStart('session-1', 'Shorten this', vi.fn(), onStopped);
+    expect(started.jobId).toBe('new-job');
+    expect(onStopped).not.toHaveBeenCalled();
+  });
+
   it('wraps updater commands and event', async () => {
     invoke.mockResolvedValue({ state: 'idle', installable: false });
     await checkForUpdates();

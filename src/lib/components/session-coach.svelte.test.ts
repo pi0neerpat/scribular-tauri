@@ -119,8 +119,10 @@ it('shows stale acceptance and the shared availability reason', async () => {
   expect(ui.target.textContent).not.toContain('New note');
   ui.state.availability = { reason: 'loadFailed', message: 'Failed', sessionMessage: 'Summaries could not load', retry: 'tryAgain' };
   flushSync();
-  expect(ui.target.querySelector('textarea')?.disabled).toBe(true);
-  expect(ui.target.textContent).toContain('Summaries could not load');
+  const input = ui.target.querySelector('textarea')!;
+  expect(input.disabled).toBe(true);
+  expect(input.placeholder).toBe('Summaries could not load');
+  expect(ui.target.querySelector(`#${input.getAttribute('aria-describedby')}`)?.textContent).toBe(input.placeholder);
   expect(ui.button('Try Again')).toBeDefined();
   unmount(ui.app);
 });

@@ -146,11 +146,12 @@
     </section>
   {/if}
   {#if notice}<p role="status">{notice}</p>{/if}
-  {#if blocked}<p id="coach-reason">{reason}</p>{/if}
+  {#if blocked}<span id="coach-reason" hidden>{reason}</span>{/if}
   {#if availability?.retry === 'tryAgain'}<button onclick={() => void retrySummaryModel().catch((error) => (notice = String(error)))}>Try Again</button>{/if}
   <form onsubmit={(event) => { event.preventDefault(); if (pending) void stop(); else void send(); }}>
     <label for="coach-request">Ask Coach to change the note</label>
-    <textarea id="coach-request" bind:value={input} disabled={blocked} aria-describedby={blocked ? 'coach-reason' : undefined}></textarea>
+    <textarea id="coach-request" value={blocked ? '' : input} oninput={(event) => (input = event.currentTarget.value)}
+      disabled={blocked} placeholder={blocked ? reason : undefined} aria-describedby={blocked ? 'coach-reason' : undefined}></textarea>
     <button disabled={!pending && (blocked || !input.trim())}>{pending ? 'Stop' : 'Send'}</button>
   </form>
 </section>

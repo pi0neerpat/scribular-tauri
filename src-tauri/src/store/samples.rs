@@ -3,7 +3,13 @@ use rusqlite::{params, Transaction};
 use super::{settings, Result, Store};
 
 const SAMPLE_TRANSCRIPT: &str = "Therapist: How have things been since our last session? Client: It's been pretty stressful actually. I've been working a lot of overtime and I feel like I can't keep up. Therapist: That sounds really challenging. Can you tell me more about what's been happening? Client: Well, my boss keeps giving me more projects and I don't know how to say no. I'm worried about my job if I push back. Therapist: I understand that concern. Let's talk about some ways you might approach this conversation...";
-const SAMPLE_SUMMARY: &str = "Client discussed ongoing challenges with work-life balance and expressed feeling overwhelmed by recent deadlines. Explored coping strategies including time management techniques and boundary setting. Client identified a need to communicate more effectively with their supervisor about workload capacity. Client set the goal to implement a daily planning routine and schedule a conversation with their supervisor within the next week.";
+const SAMPLE_SUMMARY: &str = concat!(
+    "Data:\nClient reported working overtime and feeling unable to keep up.\n\n",
+    "Assessment:\nClient described difficulty saying no to new projects. ",
+    "Client worried about their job if they pushed back.\n\n",
+    "Plan:\nDiscuss ways to raise workload concerns with the supervisor. ",
+    "Explore ways to set boundaries around new projects."
+);
 const SAMPLE_DURATION_MS: u32 = 1_245_000;
 const DAY_MS: i64 = 86_400_000;
 
@@ -123,6 +129,9 @@ mod tests {
         assert_eq!(session.duration_ms, Some(SAMPLE_DURATION_MS));
         assert!(session.transcript.starts_with("Therapist:"));
         assert!(!session.transcript.contains("[EXAMPLE]"));
+        assert!(session.summary.starts_with("Data:\n"));
+        assert!(session.summary.contains("\n\nAssessment:\n"));
+        assert!(session.summary.contains("\n\nPlan:\n"));
         assert!(session.is_sample);
         assert!(!session.has_audio);
     }

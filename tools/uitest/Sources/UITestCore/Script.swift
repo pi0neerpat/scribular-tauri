@@ -22,6 +22,7 @@ public enum Command: Equatable {
     case key(KeyCombo)
     case expect(String)
     case expectNot(String)
+    case expectClipboardMatches(String)
     case wait(seconds: Double)
     case pause(seconds: Double)
     case pace(seconds: Double)
@@ -139,6 +140,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "expect", "expect-not":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: \(first.text) \"label\"") }
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
+        case "expect-clipboard-matches":
+            guard args.count == 1, let prefix = quoted(args.first), !prefix.isEmpty else {
+                throw fail("usage: expect-clipboard-matches \"text prefix\"")
+            }
+            command = .expectClipboardMatches(prefix)
         case "expect-status-item", "expect-notification":
             guard args.count == 1, let value = quoted(args.first), !value.isEmpty else {
                 throw fail("usage: \(first.text) \"text\"")

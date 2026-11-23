@@ -1,4 +1,9 @@
 import Testing
+
+@Test func parseClipboardMatch() throws {
+    #expect(try parseScript(#"expect-clipboard-matches "Data:""#).first?.command == .expectClipboardMatches("Data:"))
+    #expect(throws: ScriptError.self) { try parseScript(#"expect-clipboard-matches """#) }
+}
 @testable import UITestCore
 
 @Test func parsesAllCommands() throws {

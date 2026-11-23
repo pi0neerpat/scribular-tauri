@@ -234,11 +234,20 @@ export async function sessionCoachStart(
   onStopped: (stopped: SessionCoachStopped) => void,
   priorRequests: string[] = [], priorCandidateId: string | null = null,
 ): Promise<{ jobId: string; unlisten: () => void }> {
-  const stopResult = await onSessionCoachResult(onResult);
+  let jobId: string | undefined;
+  const early = new Map<string, () => void>();
+  function deliver(event: SessionCoachResult | SessionCoachStopped, callback: () => void) {
+    if (event.sessionId !== sessionId) return;
+    if (jobId === undefined) early.set(event.jobId, callback);
+    else if (event.jobId === jobId) callback();
+  }
+  const stopResult = await onSessionCoachResult((result) => deliver(result, () => onResult(result)));
   let stopStopped: UnlistenFn = () => {};
   try {
-    stopStopped = await onSessionCoachStopped(onStopped);
-    const jobId = await invoke<string>('session_coach_start', { sessionId, request, priorRequests, priorCandidateId });
+    stopStopped = await onSessionCoachStopped((stopped) => deliver(stopped, () => onStopped(stopped)));
+    jobId = await invoke<string>('session_coach_start', { sessionId, request, priorRequests, priorCandidateId });
+    early.get(jobId)?.();
+    early.clear();
     return { jobId, unlisten: () => { stopResult(); stopStopped(); } };
   } catch (error) {
     stopResult();

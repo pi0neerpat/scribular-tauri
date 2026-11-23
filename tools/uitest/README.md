@@ -92,6 +92,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `key cmd+shift+s` | Press a key with optional `cmd`, `shift`, `option`, or `ctrl` modifiers. |
 | `expect "text"` | Wait until visible text contains the value. |
 | `expect-not "text"` | Wait until visible text no longer contains the value. |
+| `expect-clipboard-matches "text prefix"` | Assert the clipboard exactly matches the full text of the one accessible static text value starting with the prefix. |
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `pause 3s` | Pause for reading without changing the configured action pace. |
 | `pace 2s` | Change the delay after UI actions for the rest of the script. |
