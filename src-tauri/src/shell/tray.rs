@@ -66,7 +66,7 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn stop(app: &AppHandle, speakers: Option<u8>) {
+pub(crate) fn stop(app: &AppHandle, speakers: Option<u8>) {
     if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
         let recorder = std::sync::Arc::clone(&recorder);
         let app = app.clone();
@@ -97,6 +97,20 @@ fn build_menu(
     recording: bool,
     multi_speaker: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
+    let chord = crate::shortcuts::active(app)
+        .map(|chord| {
+            format!(
+                " ({})",
+                chord
+                    .replace("control+", "⌃")
+                    .replace("alt+", "⌥")
+                    .replace("shift+", "⇧")
+                    .replace("super+", "⌘")
+                    .replace("Key", "")
+                    .replace("Digit", "")
+            )
+        })
+        .unwrap_or_default();
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
     for item in tray_model(recording, multi_speaker) {
         items.push(match item {
@@ -111,14 +125,14 @@ fn build_menu(
             TrayItem::Start => Box::new(MenuItem::with_id(
                 app,
                 "start",
-                "Start Recording",
+                format!("Start Recording{chord}"),
                 true,
                 None::<&str>,
             )?),
             TrayItem::Stop => Box::new(MenuItem::with_id(
                 app,
                 "stop",
-                "Stop Recording",
+                format!("Stop Recording{chord}"),
                 true,
                 None::<&str>,
             )?),
@@ -152,7 +166,7 @@ fn build_menu(
                 Box::new(tauri::menu::Submenu::with_id_and_items(
                     app,
                     "stop-submenu",
-                    "Stop Recording",
+                    format!("Stop Recording{chord}"),
                     true,
                     &refs,
                 )?)

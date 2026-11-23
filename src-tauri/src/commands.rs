@@ -52,6 +52,7 @@ pub const EVENTS: &[&str] = &[
     UPDATE_STATE_EVENT,
     TRAY_START_RECORDING_EVENT,
     TRAY_STOP_FAILED_EVENT,
+    crate::shortcuts::REGISTRATION_EVENT,
     QUIT_REQUESTED_EVENT,
     WINDOW_CLOSE_REQUESTED_EVENT,
     crate::coach::AVAILABILITY_EVENT,
@@ -129,6 +130,8 @@ pub enum SystemAudioPermissionStatus {
 pub(crate) fn export_ipc_types(cfg: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AppVersion::export_all(cfg)?;
     AppSettings::export_all(cfg)?;
+    crate::store::ShortcutSettings::export_all(cfg)?;
+    crate::shortcuts::ShortcutRegistrationState::export_all(cfg)?;
     Appearance::export_all(cfg)?;
     Accent::export_all(cfg)?;
     Background::export_all(cfg)?;
@@ -211,7 +214,9 @@ pub fn set_shell_menu_state(
     let has_sessions = app
         .try_state::<Arc<Store>>()
         .is_some_and(|store| store.session_count().is_ok_and(|count| count > 0));
-    let recorder_state = app.try_state::<Arc<Recorder>>().and_then(|r| r.recording_state());
+    let recorder_state = app
+        .try_state::<Arc<Recorder>>()
+        .and_then(|r| r.recording_state());
     let recording = recording || recorder_state.is_some();
     crate::shell::menu::set_state(
         &app,
@@ -1470,6 +1475,44 @@ pub async fn resume_recording(
 #[tauri::command]
 pub fn get_app_settings(store: State<Arc<Store>>) -> Result<AppSettings, String> {
     store.app_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_shortcut_settings(
+    store: State<Arc<Store>>,
+) -> Result<crate::store::ShortcutSettings, String> {
+    store.shortcut_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_shortcut_bindings() -> Vec<(&'static str, &'static str)> {
+    crate::shell::menu::BINDINGS.to_vec()
+}
+
+#[tauri::command]
+pub fn shortcut_registration_state(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::state(&app, &store)
+}
+
+#[tauri::command]
+pub fn set_shortcut_settings(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    settings: crate::store::ShortcutSettings,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::set(&app, &store, settings)
+}
+
+#[tauri::command]
+pub fn set_shortcut_capture(
+    app: AppHandle,
+    store: State<Arc<Store>>,
+    capturing: bool,
+) -> Result<crate::shortcuts::ShortcutRegistrationState, String> {
+    crate::shortcuts::capture(&app, &store, capturing)
 }
 
 #[tauri::command]

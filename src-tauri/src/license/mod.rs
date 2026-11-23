@@ -541,7 +541,9 @@ impl Licensing {
         let state = access_status(self.clock.now_ms(), &self.record());
         // The dev skip must reach the UI too, or its gates stay locked.
         if self.skip && !state.allows() {
-            return AccessState::Trial { days_left: TRIAL_DAYS };
+            return AccessState::Trial {
+                days_left: TRIAL_DAYS,
+            };
         }
         state
     }
@@ -1286,7 +1288,12 @@ mod tests {
         )
         .with_skip(true);
         assert!(skipping.require_access().is_ok());
-        assert_eq!(skipping.state(), AccessState::Trial { days_left: TRIAL_DAYS });
+        assert_eq!(
+            skipping.state(),
+            AccessState::Trial {
+                days_left: TRIAL_DAYS
+            }
+        );
     }
 
     #[test]

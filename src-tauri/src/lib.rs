@@ -11,6 +11,7 @@ pub mod license;
 pub mod llm;
 pub mod models;
 pub mod shell;
+pub mod shortcuts;
 pub mod store;
 pub mod stt;
 pub mod text;
@@ -134,8 +135,16 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    shortcuts::toggle_on_press(app, shortcut, event.state)
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(QuitConfirmed(AtomicBool::new(false)))
+        .manage(shortcuts::Registration::default())
         .manage(commands::SummaryNotices::default())
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
@@ -206,6 +215,11 @@ pub fn run() {
             commands::set_recording_source,
             commands::get_app_settings,
             commands::set_app_settings,
+            commands::get_shortcut_settings,
+            commands::get_shortcut_bindings,
+            commands::set_shortcut_settings,
+            commands::shortcut_registration_state,
+            commands::set_shortcut_capture,
             commands::get_appearance,
             commands::set_appearance,
             commands::request_notification_permission,
@@ -417,6 +431,8 @@ pub fn run() {
                 Some(Arc::clone(&store)),
             );
             app.manage(recorder);
+            shortcuts::restore(app.handle(), &store);
+            shortcuts::refresh_tray(app.handle(), &store);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut state = None;
@@ -457,6 +473,7 @@ pub fn run() {
                 if let Some(updates) = app.try_state::<Arc<update::UpdateManager>>() {
                     updates.install_on_quit();
                 }
+                shortcuts::unregister(app);
                 if let Some(store) = app.try_state::<Arc<Store>>() {
                     diag::telemetry::send_usage_on_quit(Arc::clone(&store));
                 }

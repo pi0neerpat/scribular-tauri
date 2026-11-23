@@ -30,6 +30,7 @@
   import { appSettings } from '../app-settings';
   import { startAppearance } from '../appearance-store';
   import LicenseSettings from './LicenseSettings.svelte';
+  import ShortcutsSettings from './ShortcutsSettings.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
   import type { AppSettings } from '../types/AppSettings';
   import type { Privacy } from '../types/Privacy';
@@ -323,7 +324,7 @@
   {/if}
 
   {#if category === 'License'}<LicenseSettings />{/if}
-  {#if category === 'Keyboard Shortcuts'}<p>Keyboard shortcuts are set in the app menus.</p>{/if}
+  {#if category === 'Keyboard Shortcuts'}<ShortcutsSettings />{/if}
 
   {#if category === 'General'}
   <fieldset>

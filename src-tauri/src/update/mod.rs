@@ -229,7 +229,12 @@ impl UpdateManager {
 
     pub fn check_automatically(&self) {
         // No store means no saved preference, so the default (on) applies.
-        let enabled = match self.store.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        let enabled = match self
+            .store
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
             None => true,
             Some(store) => match store.app_settings() {
                 Ok(settings) => settings.check_for_updates_automatically,

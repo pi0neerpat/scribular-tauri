@@ -18,6 +18,7 @@ public enum Command: Equatable {
     case launch(keepData: Bool)
     case click(label: String, index: Int?, within: String?)
     case pickApp(String)
+    case pickCallApp(String)
     case type(String)
     case key(KeyCombo)
     case expect(String)
@@ -33,6 +34,7 @@ public enum Command: Equatable {
     case screenshotScreen(name: String?)
     case expectStatusItem(String)
     case statusItemClick(String)
+    case statusItemMouseClick(String)
     case expectNotification(String)
     case dockClick(String)
     case play(path: String, loop: Bool)
@@ -124,6 +126,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "pick-app":
             guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-app \"app name\"") }
             command = .pickApp(app)
+        case "pick-call-app":
+            guard args.count == 1, let app = quoted(args.first), !app.isEmpty else { throw fail("usage: pick-call-app \"app name\"") }
+            command = .pickCallApp(app)
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
@@ -149,6 +154,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: status-item click \"help\"")
             }
             command = .statusItemClick(label)
+        case "status-item-mouse-click":
+            guard args.count == 1, let label = quoted(args[0]), !label.isEmpty else {
+                throw fail("usage: status-item-mouse-click \"help\"")
+            }
+            command = .statusItemMouseClick(label)
         case "dock":
             guard args.count == 2, args[0].text == "click", let title = quoted(args[1]), !title.isEmpty else {
                 throw fail("usage: dock click \"title\"")
@@ -181,8 +191,8 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "pick-app", "expect", "expect-not", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, pick-app, expect, expect-not, expect-status-item, expect-notification and close-window")
+        if timeout != nil, !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
+            throw fail("timeout only applies to launch, click, pick-app, pick-call-app, expect, expect-not, expect-status-item, expect-notification and close-window")
         }
         if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {
             throw fail("duplicate screenshot name: \(name)")

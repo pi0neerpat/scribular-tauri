@@ -1,0 +1,6 @@
+# Global shortcut dependency review (2026-11-21)
+
+- `src-tauri/Cargo.toml` pins `tauri-plugin-global-shortcut = "=2.3.2"`; `src-tauri/Cargo.lock` resolves 2.3.2 with registry checksum `b4dd9f4c5136c09cd962da0c86dc4accd4666db2ea591cf16e6597435843bd2b`. `cargo tree -i tauri-plugin-global-shortcut --depth 1` confirms Scribular uses that version with Tauri 2.12.1. No JavaScript plugin or webview permission was added.
+- The pinned crate's manifest declares `Apache-2.0 OR MIT`, compatible with closed-source distribution under either license's terms. Its direct `global-hotkey` dependency resolves to 0.8.0, checksum `8c386b0a4a70cb2d39fffd74480f985b6f0bfbcb934b6a6b6b7e630e448f242e`, also `Apache-2.0 OR MIT`.
+- OSV API queries on 2026-11-21 for `tauri-plugin-global-shortcut` 2.3.2 and `global-hotkey` 0.8.0 in the `crates.io` ecosystem both returned `{}` (no advisories). `cargo audit` was unavailable (`no such command: audit`), so this is a targeted check, not a full-lockfile audit.
+- The plugin's `build.rs` invokes only `tauri_plugin::Builder::build()` to generate command/API glue. `global-hotkey` declares `build = false`. Its macOS registration path calls system `RegisterEventHotKey` and `UnregisterEventHotKey`. No native artifact is downloaded by these packages' build scripts; artifact URL and SHA-256: none.

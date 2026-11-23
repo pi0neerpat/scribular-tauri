@@ -83,6 +83,21 @@ final class AXDriver: Driver {
             let value = attribute(picker, kAXValueAttribute) as? String ?? "(unavailable)"
             guard value == app else { throw .retryable("picker shows \"\(value)\"") }
             return nil
+        case .pickCallApp(let app):
+            let picker = "Choose a call app"
+            do {
+                return try perform(.click(label: app, index: nil, within: picker))
+            } catch .retryable("not found") {
+                let timeout = "Listing app audio sources timed out."
+                let listTimedOut = { self.allElements().contains { self.matches($0, substring: timeout) } }
+                guard listTimedOut() else { throw .retryable("call app \"\(app)\" not found") }
+                _ = try perform(.click(label: "Refresh", index: nil, within: picker))
+                // The previous error stays visible until the list request finishes (3s timeout).
+                guard waitUntil(timeout: 4, interval: 0.25, { !listTimedOut() }) else {
+                    throw .retryable("call app \"\(app)\": app list timed out after Refresh")
+                }
+                return try perform(.click(label: app, index: nil, within: picker))
+            }
         case .type(let text):
             for character in text {
                 guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
@@ -145,6 +160,11 @@ final class AXDriver: Driver {
         case .statusItemClick(let help):
             guard let item = statusItem(help) else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
             guard AXUIElementPerformAction(item, "AXPress" as CFString) == .success else { throw .fatal("could not press status item \"\(help)\"") }
+            return nil
+        case .statusItemMouseClick(let help):
+            guard let item = statusItem(help) else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
+            guard let rect = frame(of: item) else { throw .retryable("status item \"\(help)\" has no accessibility frame") }
+            try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
         case .expectNotification(let text):
             guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }

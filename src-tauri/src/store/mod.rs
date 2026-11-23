@@ -29,9 +29,9 @@ pub use sessions::{
 };
 pub(crate) use settings::valid_target_app;
 pub use settings::{
-    AppSettings, RecordLocation, RecordingSettings, RecordingSource, ACTIVE_PROMPT_ID,
-    ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL, SAMPLES_SEEDED, SKIPPED_UPDATE_VERSION,
-    SUMMARY_MODEL_ID,
+    AppSettings, RecordLocation, RecordingSettings, RecordingSource, ShortcutSettings,
+    ACTIVE_PROMPT_ID, ONBOARDING_COMPLETED, PENDING_UPDATE_INSTALL, SAMPLES_SEEDED,
+    SKIPPED_UPDATE_VERSION, SUMMARY_MODEL_ID,
 };
 
 #[derive(Debug)]
