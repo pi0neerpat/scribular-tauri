@@ -462,7 +462,9 @@ mod tests {
         use crate::commands::{read_onboarding_state, system_audio_permission_status};
         use crate::store::{AudioSource, InputMode, NewSession, SessionPatch};
 
-        let _log_guard = super::super::log::TEST_LOG_LOCK.lock().unwrap();
+        let _log_guard = super::super::log::TEST_LOG_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let (store, dir) = store();
         super::super::log::init(&dir).unwrap();
         set_enabled(&store, false).unwrap();
@@ -515,6 +517,9 @@ mod tests {
         record_session(Arc::clone(&store), 60_000);
         assert!(usage(&store).is_none());
         assert_eq!(store.get_setting(PENDING).unwrap(), None);
+        for key in [LAUNCHES, SESSIONS, SECONDS] {
+            assert_eq!(store.get_setting(key).unwrap().as_deref(), Some("0"));
+        }
         assert!(!store.first_note_tip_dismissed().unwrap());
         let logs = std::fs::read_to_string(dir.join("scribular.log")).unwrap();
         let error_payload =

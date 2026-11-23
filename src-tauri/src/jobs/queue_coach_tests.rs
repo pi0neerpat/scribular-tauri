@@ -283,7 +283,9 @@ fn cancelled_practice_drops_the_result_and_has_no_persisted_job() {
 
 #[test]
 fn session_coach_job_leaves_saved_session_unchanged() {
-    let _log_guard = crate::diag::log::TEST_LOG_LOCK.lock().unwrap();
+    let _log_guard = crate::diag::log::TEST_LOG_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let (_db, store) = TestStore::new();
     let log_dir = std::env::temp_dir().join(format!(
         "scribular-session-coach-logs-{}",
