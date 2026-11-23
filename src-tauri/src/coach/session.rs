@@ -242,16 +242,21 @@ fn shortening_options(draft: &str, body_range: Range<usize>) -> Option<Vec<Range
 }
 
 fn remove_sentence(draft: &str, options: &[Range<usize>], selection: &str) -> Option<String> {
-    let index = selection
-        .trim()
-        .lines()
-        .next()?
-        .trim()
+    let line = selection.trim().lines().next()?.trim();
+    let choice = line.strip_prefix("REMOVE ").unwrap_or(line);
+    let (number, echoed_sentence) = match choice.split_once(". ") {
+        Some((number, sentence)) => (number, Some(sentence)),
+        None => (choice, None),
+    };
+    let index = number
         .trim_end_matches('.')
         .parse::<usize>()
         .ok()?
         .checked_sub(1)?;
     let range = options.get(index)?;
+    if echoed_sentence.is_some_and(|sentence| sentence != draft[range.clone()].trim()) {
+        return None;
+    }
     Some(format!("{}{}", &draft[..range.start], &draft[range.end..]))
 }
 
@@ -351,9 +356,9 @@ pub fn session_coach_start(
                 .map(|(index, range)| format!("{}. {}", index + 1, draft[range.clone()].trim()))
                 .collect::<Vec<_>>().join("\n");
             format!(
-                "Choose the least important complete sentence to remove from this section of a clinical note. \
-                 Preserve any sentence needed to understand the others. Start your reply with the number of the sentence to remove on its own line.\n\n\
-                 Earlier requests:\n{}\n\nCurrent request:\n{request}\n\n{choices}",
+                "Earlier requests:\n{}\n\nCurrent request:\n{request}\n\n\
+                 Which sentence is less important to keep when shortening this section? \
+                 Preserve context needed by the remaining sentences. Answer with REMOVE followed by the selected number.\n\n{choices}",
                 prior_requests.join("\n")
             )
         } else {
@@ -539,7 +544,19 @@ mod tests {
         );
         assert_eq!(
             remove_sentence(draft, &options, "2\nExplanation."),
+            Some(keep_first.clone())
+        );
+        assert_eq!(
+            remove_sentence(draft, &options, "REMOVE 2"),
+            Some(keep_first.clone())
+        );
+        assert_eq!(
+            remove_sentence(draft, &options, "2. Try a consistent bedtime."),
             Some(keep_first)
+        );
+        assert_eq!(
+            remove_sentence(draft, &options, "2. Review the sleep diary."),
+            None
         );
         assert_eq!(remove_sentence(draft, &options, "1."), Some(keep_second));
         assert_eq!(remove_sentence(draft, &options, "3"), None);
