@@ -133,6 +133,9 @@ pub fn init(dir: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+pub static TEST_LOG_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
 pub fn reset_for_tests() {
     if let Some(logger) = LOGGER.get() {
         *logger.lock().unwrap_or_else(|p| p.into_inner()) = None;

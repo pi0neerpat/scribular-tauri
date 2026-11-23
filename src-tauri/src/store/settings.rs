@@ -18,6 +18,7 @@ pub const NOTIFY_SUMMARY_COMPLETE: &str = "notify_summary_complete";
 pub const SHOW_BACKGROUND_ANIMATION: &str = "show_background_animation";
 pub const CHECK_FOR_UPDATES_AUTOMATICALLY: &str = "check_for_updates_automatically";
 pub const ONBOARDING_COMPLETED: &str = "onboarding_completed";
+pub(super) const FIRST_NOTE_TIP_DISMISSED: &str = "first_note_tip_dismissed";
 pub const APP_AUDIO_EXPLAINER_SHOWN: &str = "app_audio_explainer_shown";
 pub const SAMPLES_SEEDED: &str = "samples_seeded";
 const INPUT_MODE: &str = "input_mode";
@@ -289,6 +290,14 @@ impl Store {
 
     pub fn onboarding_completed(&self) -> Result<bool> {
         Ok(self.get_setting(ONBOARDING_COMPLETED)?.as_deref() == Some("1"))
+    }
+
+    pub fn first_note_tip_dismissed(&self) -> Result<bool> {
+        Ok(self.get_setting(FIRST_NOTE_TIP_DISMISSED)?.as_deref() == Some("1"))
+    }
+
+    pub fn dismiss_first_note_tip(&self) -> Result<()> {
+        self.set_setting(FIRST_NOTE_TIP_DISMISSED, "1")
     }
 
     pub fn app_audio_explainer_shown(&self) -> Result<bool> {

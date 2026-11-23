@@ -2,7 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount } from 'svelte';
 import App from './App.svelte';
+import { navigation } from './lib/navigation';
+import type { CoachAvailability } from './lib/types/CoachAvailability';
 import type { ModelProgress } from './lib/types/ModelProgress';
+import type { Session } from './lib/types/Session';
 
 const { invoke, listen, emit } = vi.hoisted(() => {
   const listeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
@@ -24,12 +27,22 @@ vi.mock('@tauri-apps/api/event', () => ({ listen }));
 const speech = (state: ModelProgress['state'], downloadedBytes = 0, error: string | null = null): ModelProgress =>
   ({ modelId: 'whisper-base', state, downloadedBytes, totalBytes: 100, error });
 const seededSample = { id: 'sample', title: 'Example session', isSample: true, createdAt: Date.now(), status: 'done' };
+const readyCoach: CoachAvailability = { reason: null, message: null, retry: null, sessionMessage: null };
+const realNote: Session = {
+  id: 'first-note', title: 'First note', createdAt: Date.now(), status: 'done', isSample: false,
+  inputMode: 'mic', summary: 'Finished note', transcript: 'Transcript', error: null, promptId: null,
+  modelId: null, plainTranscript: null, rawTranscript: null, speakerMap: null, diarizationState: 'none',
+  durationMs: 1000, timings: null, hasAudio: false, audioExpiresAt: null, previousSummary: null,
+  previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null,
+};
 
 let completed: boolean;
 let consent: 'on' | 'off' | 'undecided';
 let fail: string | undefined;
 let snapshot: Promise<ModelProgress[]>;
 let saveConsent: Promise<void>;
+let firstNoteId: string | null;
+let tipDismissed: boolean;
 let app: ReturnType<typeof mount> | undefined;
 let target: HTMLDivElement;
 
@@ -62,11 +75,14 @@ beforeEach(() => {
   fail = undefined;
   snapshot = Promise.resolve([speech('downloading', 40)]);
   saveConsent = Promise.resolve();
+  firstNoteId = null;
+  tipDismissed = false;
+  navigation.set({ view: 'record', navigationLocked: false });
   target = document.body.appendChild(document.createElement('div'));
   invoke.mockImplementation(async (command, args) => {
     if (command === fail) throw new Error('IPC failed');
     switch (command) {
-      case 'get_onboarding_state': return { completed, appAudioExplainerShown: false, firstNoteTipDismissed: false };
+      case 'get_onboarding_state': return { completed, appAudioExplainerShown: false, firstNoteTipDismissed: tipDismissed };
       case 'complete_onboarding': completed = true; return;
       case 'get_telemetry_setting': return consent;
       case 'set_telemetry_setting':
@@ -78,12 +94,19 @@ beforeEach(() => {
       case 'get_app_settings': return { showBackgroundAnimation: false };
       case 'get_update_state': return { state: 'idle', installable: false };
       case 'get_recording_source': return { location: 'inRoom', targetApp: null };
-      case 'list_sessions': return [seededSample];
+      case 'list_sessions': return firstNoteId ? [seededSample, realNote] : [seededSample];
+      case 'get_session':
+        return (args as { id?: string })?.id === 'sample'
+          ? { ...realNote, ...seededSample, summary: 'Sample note' }
+          : realNote;
+      case 'get_first_note_tip_session': return tipDismissed ? null : firstNoteId;
+      case 'dismiss_first_note_tip': tipDismissed = true; return;
+      case 'get_coach_availability': return readyCoach;
+      case 'coach_open': return { id: 'draft', name: '', isAdjustment: false };
       case 'list_summary_models': return [];
       case 'locked_state':
       case 'current_recording':
-      case 'get_recording_state':
-      case 'get_first_note_tip_session': return null;
+      case 'get_recording_state': return null;
     }
   });
 });
@@ -95,6 +118,67 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+});
+
+describe('AS6 first-note tip', () => {
+  const tip = () => [...target.querySelectorAll('aside')].find((el) => el.textContent?.includes('Want notes that look like yours?'));
+
+  async function openSession(id: string, summary: string) {
+    const row = () => target.querySelector<HTMLButtonElement>(`[data-session-id="${id}"]`);
+    await vi.waitFor(() => expect(row()?.disabled).toBe(false));
+    row()!.click();
+    await vi.waitFor(() => expect([...target.querySelectorAll('pre')].some((el) => el.textContent === summary)).toBe(true));
+  }
+
+  it.each(['dismiss', 'open coach'])('persists after %s and relaunch', async (action) => {
+    completed = true;
+    snapshot = Promise.resolve([speech('ready')]);
+    launch();
+    await openSession('sample', 'Sample note');
+    expect(tip()).toBeUndefined();
+
+    firstNoteId = realNote.id;
+    emit('session://progress', { sessionId: realNote.id, state: 'done' });
+    await openSession(realNote.id, realNote.summary);
+    await vi.waitFor(() => expect(tip()).toBeDefined());
+    expect(calls('dismiss_first_note_tip')).toHaveLength(0);
+
+    emit('coach-availability', { ...readyCoach, reason: 'recording', message: 'Finish recording first.' });
+    const coachAction = () => button('New Style from Example Note…', tip()!);
+    await vi.waitFor(() => expect(coachAction().getAttribute('aria-disabled')).toBe('true'));
+    expect(tip()?.textContent).toContain('Finish recording first.');
+    coachAction().click();
+    expect(calls('coach_open')).toHaveLength(0);
+    expect(button('Dismiss tip', tip()!).disabled).toBe(false);
+
+    if (action === 'dismiss') {
+      fail = 'dismiss_first_note_tip';
+      button('Dismiss tip', tip()!).click();
+      await vi.waitFor(() => expect(tip()?.textContent).toContain('Couldn’t save the dismissal.'));
+      expect(tipDismissed).toBe(false);
+      fail = undefined;
+      button('Dismiss tip', tip()!).click();
+    } else {
+      emit('coach-availability', readyCoach);
+      await vi.waitFor(() => expect(coachAction().getAttribute('aria-disabled')).toBe('false'));
+      fail = 'coach_open';
+      coachAction().click();
+      await vi.waitFor(() => expect(dialog()?.textContent).toContain('Close it and try again.'));
+      expect(calls('dismiss_first_note_tip')).toHaveLength(0);
+      dialog()!.dispatchEvent(new Event('cancel', { cancelable: true }));
+      await vi.waitFor(() => expect(button('Stop', dialog()!)).toBeDefined());
+      button('Stop', dialog()!).click();
+      await vi.waitFor(() => expect(dialog()).toBeNull());
+      fail = undefined;
+      coachAction().click();
+      await vi.waitFor(() => expect(dialog()?.querySelector('[aria-current="step"]')?.textContent).toBe('Your example note'));
+    }
+    await vi.waitFor(() => expect(tip()).toBeUndefined());
+    expect(tipDismissed).toBe(true);
+    await relaunch();
+    await openSession(realNote.id, realNote.summary);
+    expect(tip()).toBeUndefined();
+  });
 });
 
 describe('AS1 welcome on first launch', () => {

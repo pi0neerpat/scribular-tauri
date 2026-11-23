@@ -243,16 +243,18 @@ pub fn app_version() -> AppVersion {
 
 #[tauri::command]
 pub fn get_onboarding_state(store: State<Arc<Store>>) -> Result<OnboardingState, String> {
+    read_onboarding_state(&store)
+}
+
+pub(crate) fn read_onboarding_state(store: &Store) -> Result<OnboardingState, String> {
     Ok(OnboardingState {
         completed: store.onboarding_completed().map_err(|e| e.to_string())?,
         app_audio_explainer_shown: store
             .app_audio_explainer_shown()
             .map_err(|e| e.to_string())?,
         first_note_tip_dismissed: store
-            .get_setting("first_note_tip_dismissed")
-            .map_err(|e| e.to_string())?
-            .as_deref()
-            == Some("1"),
+            .first_note_tip_dismissed()
+            .map_err(|e| e.to_string())?,
     })
 }
 
@@ -291,9 +293,7 @@ pub fn get_first_note_tip_session(store: State<Arc<Store>>) -> Result<Option<Str
 
 #[tauri::command]
 pub fn dismiss_first_note_tip(store: State<Arc<Store>>) -> Result<(), String> {
-    store
-        .set_setting("first_note_tip_dismissed", "1")
-        .map_err(|e| e.to_string())
+    store.dismiss_first_note_tip().map_err(|e| e.to_string())
 }
 
 #[tauri::command]

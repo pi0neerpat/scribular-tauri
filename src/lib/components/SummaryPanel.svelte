@@ -219,7 +219,8 @@
         <strong>Want notes that look like yours?</strong>
         <p>Give the coach an example of how you write so it can make a style for your future notes.</p>
         <CoachEntry {availability} onOpen={(opener) => coach.open({}, opener, coach.dismissTip)} showRetry />
-        <button onclick={coach.dismissTip}>Dismiss tip</button>
+        <button disabled={coach.tipSaving()} onclick={coach.dismissTip}>Dismiss tip</button>
+        {#if coach.tipSaveFailed()}<p role="alert">Couldn’t save the dismissal. Try Dismiss tip again.</p>{/if}
       </aside>
     {/if}
     <button onclick={regenerate} disabled={!allows($accessState) || summaryAvailability !== 'ready' || working || busy || !session.transcript || !selectedPrompt}>Regenerate</button>
