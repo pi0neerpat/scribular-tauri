@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+use std::{
+    ops::Range,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use serde::Serialize;
@@ -101,6 +104,67 @@ fn complete_note(text: &str) -> Option<&str> {
     text.trim_end().strip_suffix(END_NOTE).map(str::trim_end)
 }
 
+fn shortening_options(draft: &str, request: &str) -> Option<Vec<Range<usize>>> {
+    // shortcut: explicit heading and a single plain prose paragraph; use the general editor for other layouts.
+    let request = request.trim().trim_end_matches('.').to_lowercase();
+    let heading = request
+        .strip_prefix("also ")
+        .unwrap_or(&request)
+        .strip_prefix("shorten ")?;
+    let mut offset = 0;
+    let mut sections = draft.split("\n\n").filter_map(|section| {
+        let start = offset;
+        offset += section.len() + 2;
+        let (title, body) = section.split_once('\n')?;
+        let (name, inline) = super::extract::split_heading(title)?;
+        (inline.is_empty() && name.to_lowercase() == heading)
+            .then_some((start + title.len() + 1, body))
+    });
+    let (body_start, body) = sections.next()?;
+    let body = body.trim_end();
+    if sections.next().is_some()
+        || body.contains(['\n', '\r', '"', '“', '”', '‘'])
+        || !body.ends_with('.')
+    {
+        return None;
+    }
+    let mut offset = body_start;
+    let mut options = Vec::new();
+    for sentence in body.split_inclusive(". ") {
+        let end = offset + sentence.len();
+        let last_sentence = end == body_start + body.len();
+        let prose = sentence.trim().strip_suffix('.')?;
+        let last_word = prose.split_whitespace().next_back()?;
+        if prose.contains(['.', '!', '?'])
+            || !prose.starts_with(char::is_uppercase)
+            || prose.split_whitespace().count() < 3
+            || (!last_sentence && last_word.starts_with(char::is_uppercase))
+        {
+            return None;
+        }
+        // Remove the separator after the sentence, or before it if this is the last sentence.
+        let start = if last_sentence && !options.is_empty() {
+            offset - 1
+        } else {
+            offset
+        };
+        options.push(start..end);
+        offset = end;
+    }
+    (options.len() > 1).then_some(options)
+}
+
+fn remove_sentence(draft: &str, options: &[Range<usize>], selection: &str) -> Option<String> {
+    let index = selection
+        .trim()
+        .trim_end_matches('.')
+        .parse::<usize>()
+        .ok()?
+        .checked_sub(1)?;
+    let range = options.get(index)?;
+    Some(format!("{}{}", &draft[..range.start], &draft[range.end..]))
+}
+
 fn supported(request: &str) -> bool {
     words(request).iter().any(|word| {
         matches!(
@@ -184,17 +248,31 @@ pub fn session_coach_start(
             return Ok(job_id);
         }
         let candidate_id = commands::opaque_id()?;
-        let draft_context = match &prior {
-            Some(draft) => format!(
-                "Saved note (source):\n{}\n\nEarlier requests:\n{}\n\nDraft to edit:\n{draft}",
-                session.summary, prior_requests.join("\n")
-            ),
-            None => format!("Saved note (draft to edit):\n{}", session.summary),
+        let draft = prior.as_deref().unwrap_or(&session.summary);
+        let shortening = shortening_options(draft, &request);
+        let prompt = if let Some(options) = &shortening {
+            let choices = options.iter().enumerate()
+                .map(|(index, range)| format!("{}. {}", index + 1, draft[range.clone()].trim()))
+                .collect::<Vec<_>>().join("\n");
+            format!(
+                "Choose the least important complete sentence to remove from this section of a clinical note. \
+                 Preserve any sentence needed to understand the others. Reply with only the number of the sentence to remove.\n\n\
+                 Earlier requests:\n{}\n\nCurrent request:\n{request}\n\n{choices}",
+                prior_requests.join("\n")
+            )
+        } else {
+            let draft_context = match &prior {
+                Some(draft) => format!(
+                    "Saved note (source):\n{}\n\nEarlier requests:\n{}\n\nDraft to edit:\n{draft}",
+                    session.summary, prior_requests.join("\n")
+                ),
+                None => format!("Saved note (draft to edit):\n{}", session.summary),
+            };
+            format!(
+                "Edit the draft clinical note to fulfill the current request. Keep earlier edits. If the request names a section, copy the other sections unchanged, including formatting. Use complete source sentences from the saved note or transcript. Keep their facts and speaker attribution intact. When asked to shorten, keep the most important sentences and omit less important details. For a shortening request on a multi-sentence section, remove at least one sentence. Return the full edited note with its headings and no preamble, then {END_NOTE}.\n\nTranscript:\n{}\n\n{draft_context}\n\nCurrent request:\n{request}",
+                session.transcript
+            )
         };
-        let prompt = format!(
-            "Edit the draft clinical note to fulfill the current request. Keep earlier edits. If the request names a section, copy the other sections unchanged, including formatting. Use complete source sentences from the saved note or transcript. Keep their facts and speaker attribution intact. When asked to shorten, keep the most important sentences and omit less important details. For a shortening request on a multi-sentence section, remove at least one sentence. Return the full edited note with its headings and no preamble, then {END_NOTE}.\n\nTranscript:\n{}\n\n{draft_context}\n\nCurrent request:\n{request}",
-            session.transcript
-        );
         let cancel = Arc::new(AtomicBool::new(false));
         let app_for_result = app.clone();
         let job_for_result = job_id.clone();
@@ -211,14 +289,17 @@ pub fn session_coach_start(
                 return;
             }
             state.active = None;
-            let revised = result.as_deref().ok().and_then(complete_note).filter(|text| {
-                *text != prior.as_deref().unwrap_or(&note).trim_end()
-                    && *text != note.trim_end()
+            let draft = prior.as_deref().unwrap_or(&note);
+            let revised = result.as_deref().ok().and_then(|output| match &shortening {
+                Some(options) => remove_sentence(draft, options, output),
+                None => complete_note(output).map(str::to_string),
+            }).filter(|text| {
+                text.trim_end() != draft.trim_end()
+                    && text.trim_end() != note.trim_end()
                     && grounded(&note, &transcript, text)
             });
             let outcome = match revised {
                 Some(text) => {
-                    let text = text.to_string();
                     let replaced = state.candidate.replace(Candidate {
                         session_id: session_for_result.clone(), id: candidate_id.clone(),
                         job_id: job_for_result.clone(),
@@ -341,6 +422,30 @@ pub fn cancel_for_gate(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortening_a_section_keeps_earlier_edits_and_removes_only_a_source_sentence() {
+        let draft = "Assessment:\n* Client felt tired.\n\nPlan:\nReview the sleep diary. Try a consistent bedtime.\n\nFollow-Up:\nMeet again next week.";
+        let options = shortening_options(draft, "Also shorten Plan").unwrap();
+        let keep_first = draft.replace(" Try a consistent bedtime.", "");
+        let keep_second = draft.replace("Review the sleep diary. ", "");
+        assert_eq!(remove_sentence(draft, &options, "2\n"), Some(keep_first));
+        assert_eq!(remove_sentence(draft, &options, "1."), Some(keep_second));
+        assert_eq!(remove_sentence(draft, &options, "3"), None);
+        assert_eq!(remove_sentence(draft, &options, "Try a diary."), None);
+        assert!(shortening_options(
+            "Plan:\nClient said “I will try.” Check in next week.",
+            "Shorten Plan"
+        )
+        .is_none());
+        assert!(shortening_options(
+            "Plan:\nFollow up with Dr. Moreno about sleep quality.",
+            "Shorten Plan"
+        )
+        .is_none());
+        assert!(shortening_options(draft, "Shorten Follow-Up").is_none());
+        assert!(shortening_options(draft, "Shorten").is_none());
+    }
 
     #[test]
     fn stop_restores_previous_candidate_if_the_follow_up_has_already_finished() {
