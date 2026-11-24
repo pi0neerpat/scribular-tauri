@@ -1242,13 +1242,36 @@ fn capture_faults_log_metadata_and_keep_committed_audio() {
 fn stopping_with_no_audio_fails_the_session() {
     let h = Harness::new();
     let id = h.start(InputMode::Mic);
-    h.recorder.stop().unwrap();
+    assert!(matches!(h.recorder.stop(), Err(RecordError::NoAudio)));
     h.events.wait_for(&id, SessionStatus::Failed);
 
     let s = h.get(&id);
     assert_eq!(s.error.as_deref(), Some("no audio was recorded"));
     assert!(h.stt.calls().is_empty());
     assert_eq!(h.summarizer.loads.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn failed_stop_preparation_keeps_the_recording_running() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.store
+        .set_status(&id, SessionStatus::Failed, None)
+        .unwrap();
+
+    assert!(matches!(
+        h.recorder.stop(),
+        Err(RecordError::StopPreparationFailed)
+    ));
+    assert_eq!(h.recorder.current().as_deref(), Some(id.as_str()));
+    assert!(h.mic.is_open());
+
+    h.store
+        .set_status(&id, SessionStatus::Recording, None)
+        .unwrap();
+    h.feed(3);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
 }
 
 #[test]
@@ -1828,10 +1851,9 @@ fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
     );
 }
 
-/// Parity spec 03 AS9: changing the active style mid-recording does not
-/// change the style of the recording in progress.
+/// Keyboard shortcuts R11: a recording uses the note style selected at Stop.
 #[test]
-fn as9_a_recording_keeps_the_style_active_at_start() {
+fn stopping_uses_the_style_selected_during_recording() {
     let h = Harness::new();
     let at_start = h.store.get_active_prompt_id().unwrap().unwrap();
     let id = h.start(InputMode::Mic);
@@ -1840,13 +1862,13 @@ fn as9_a_recording_keeps_the_style_active_at_start() {
         Err(RecordError::AlreadyRecording)
     ));
     h.feed(2);
-    h.store
-        .set_active_prompt("default-narrative-therapy")
-        .unwrap();
+    let at_stop = "default-narrative-therapy";
+    assert_ne!(at_start, at_stop);
+    h.store.set_active_prompt(at_stop).unwrap();
 
     h.recorder.stop().unwrap();
     h.events.wait_for(&id, SessionStatus::Done);
     assert!(h.queue.wait_idle(WAIT));
 
-    assert_eq!(h.get(&id).prompt_id, Some(at_start));
+    assert_eq!(h.get(&id).prompt_id.as_deref(), Some(at_stop));
 }

@@ -191,3 +191,23 @@ import Testing
     #expect(missing.lines == ["MISSING ffmpeg: brew install ffmpeg"])
     #expect(!missing.lines.joined().contains("secret-password"))
 }
+
+@Test func parsesShortcutObservationCommands() throws {
+    let steps = try parseScript("""
+    expect-frontmost "com.apple.finder" timeout 5s
+    observe-no-notification "Recording started" 3s
+    """)
+    #expect(steps.map(\.command) == [
+        .expectFrontmost("com.apple.finder"),
+        .observeNoNotification("Recording started", seconds: 3)
+    ])
+    #expect(steps[0].timeout == 5)
+    #expect(throws: ScriptError.self) { try parseScript("expect-frontmost Finder") }
+    #expect(throws: ScriptError.self) { try parseScript(#"observe-no-notification "Recording stopped" 0s"#) }
+}
+
+@Test func parsesClaimHotkey() throws {
+    let steps = try parseScript("claim-hotkey ctrl+option+cmd+r")
+    #expect(steps.map(\.command) == [.claimHotkey(KeyCombo(modifiers: [.ctrl, .option, .cmd], key: "r"))])
+    #expect(throws: ScriptError.self) { try parseScript("claim-hotkey r") }
+}

@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import CoreGraphics
 import Foundation
 import Darwin
@@ -11,6 +12,7 @@ final class AXDriver: Driver {
     private let keychainPassword: String?
     private let player: Player
     private var application: NSRunningApplication?
+    private var claimedHotkey: EventHotKeyRef?
     private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?, player: Player) {
@@ -19,6 +21,10 @@ final class AXDriver: Driver {
         self.runDir = runDir
         self.keychainPassword = keychainPassword
         self.application = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first
+    }
+
+    deinit {
+        if let claimedHotkey { UnregisterEventHotKey(claimedHotkey) }
     }
 
     func perform(_ command: Command) throws(DriverError) -> String? {
@@ -129,6 +135,25 @@ final class AXDriver: Driver {
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
             return nil
+        case .claimHotkey(let combo):
+            guard claimedHotkey == nil else { throw .fatal("this run already claimed a hotkey") }
+            guard let code = keyCodes[combo.key] else { throw .fatal("unsupported key: \(combo.key)") }
+            let modifiers = combo.modifiers.reduce(UInt32(0)) { flags, modifier in
+                switch modifier {
+                case .cmd: flags | UInt32(cmdKey)
+                case .shift: flags | UInt32(shiftKey)
+                case .option: flags | UInt32(optionKey)
+                case .ctrl: flags | UInt32(controlKey)
+                }
+            }
+            let status = RegisterEventHotKey(
+                UInt32(code), modifiers, EventHotKeyID(signature: 0x55495453, id: 1),
+                GetApplicationEventTarget(), UInt32(kEventHotKeyExclusive), &claimedHotkey
+            )
+            guard status == noErr, claimedHotkey != nil else {
+                throw .fatal("macOS could not reserve the test hotkey (OSStatus \(status))")
+            }
+            return nil
         case .expect(let label):
             guard allElements().contains(where: { matches($0, substring: label) }) else { throw .retryable("not found") }
             return nil
@@ -180,6 +205,18 @@ final class AXDriver: Driver {
             return nil
         case .expectNotification(let text):
             guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }
+            return nil
+        case .expectFrontmost(let bundle):
+            let active = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            guard active == bundle else {
+                throw .retryable("expected frontmost bundle \(bundle), found \(active ?? "none")")
+            }
+            return nil
+        case .observeNoNotification(let text, let seconds):
+            let found = waitUntil(timeout: seconds) {
+                notificationTexts().contains { $0.localizedCaseInsensitiveContains(text) }
+            }
+            if found { throw .fatal("unexpected notification matching \"\(text)\"") }
             return nil
         case .dockClick(let title):
             let items = processElements(bundleID: "com.apple.dock").filter {

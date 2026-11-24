@@ -30,7 +30,7 @@ let emitProgress: ((progress: SessionProgress) => void) | undefined;
 let emitRecordingState: ((state: { sessionId: string; status: 'running'; activeElapsedMs: number; targetApp: string; appAudioStatus: 'permissionRequired' | 'capturing' | 'unavailable' }) => void) | undefined;
 let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
-  accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy, getRecordingSettings, getSession,
+  accessDenied: () => null, cancelJob, cancelTrayStart: vi.fn(async () => {}), currentRecording, deniedPrivacy, getRecordingSettings, getSession,
   getRecordingSource, setRecordingSource, getOnboardingState, markAppAudioExplainerShown,
   systemAudioPermissionStatus, recordingState, onRecordingState, onSessionLevels,
   listAudioApps, openPrivacySettings, pauseRecording: vi.fn(), resumeRecording: vi.fn(),
@@ -187,8 +187,8 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[0].checked).toBe(true));
     target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
-    window.dispatchEvent(new Event('tray-start-recording'));
-    await vi.waitFor(() => expect(startRecording).toHaveBeenCalled());
+    window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: 7 }));
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Zoom', expect.any(String), 7));
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
     unmount(app);
     target.remove();
@@ -233,7 +233,7 @@ describe('recording speaker-count prompt', () => {
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'onCall', targetApp: 'Playing Other App' });
     await vi.waitFor(() => expect(target.textContent).toContain('App: Playing Other App'));
     await clickButton(target, 'Start recording');
-    expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Playing Other App', expect.any(String));
+    expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Playing Other App', expect.any(String), undefined);
     unmount(app);
     target.remove();
   });

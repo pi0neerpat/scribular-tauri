@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, setContext, tick } from 'svelte';
-  import { appVersion, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, onAppSettingsChanged, listSessions } from './lib/api';
+  import { appVersion, cancelTrayStart, checkForUpdates, currentRecording, lockedState, onHeartbeat, onShellMenu, openExternalLink, openSettings, restoreSampleSessions, setShellMenuState, onSessionProgress, onQuitRequested, quitApp, onTrayStartRecording, onTrayStopFailed, onWindowCloseRequested, takeEncryptionNotice, getAppSettings, onAppSettingsChanged, listSessions } from './lib/api';
   import RecordView from './lib/components/RecordView.svelte';
   import LockedScreen from './lib/components/LockedScreen.svelte';
   import NoteStyles from './lib/components/NoteStyles.svelte';
@@ -240,9 +240,11 @@
       if (typeof gate === 'object') void quitApp();
       else quitIntent = restart ? 'restart' : 'quit';
     });
-    const trayStart = onTrayStartRecording(() => {
-      if (welcomeOpen) void setMainWindowVisible(true).catch((e) => (error = String(e)));
-      else window.dispatchEvent(new Event('tray-start-recording'));
+    const trayStart = onTrayStartRecording((request) => {
+      if (welcomeOpen) {
+        void cancelTrayStart(request).catch((e) => (error = String(e)));
+        void setMainWindowVisible(true).catch((e) => (error = String(e)));
+      } else window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: request }));
     });
     const closeRequest = onWindowCloseRequested(() => {
       if (coach) closeCoach(false);

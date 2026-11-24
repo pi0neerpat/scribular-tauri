@@ -21,6 +21,7 @@ public enum Command: Equatable {
     case pickCallApp(String)
     case type(String)
     case key(KeyCombo)
+    case claimHotkey(KeyCombo)
     case expect(String)
     case expectNot(String)
     case expectClipboardMatches(String)
@@ -37,6 +38,8 @@ public enum Command: Equatable {
     case statusItemClick(String)
     case statusItemMouseClick(String)
     case expectNotification(String)
+    case expectFrontmost(String)
+    case observeNoNotification(String, seconds: Double)
     case dockClick(String)
     case play(path: String, loop: Bool)
     case stopAudio
@@ -133,15 +136,17 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
-        case "key":
-            guard args.count == 1, !args[0].quoted else { throw fail("usage: key cmd+shift+s") }
+        case "key", "claim-hotkey":
+            guard args.count == 1, !args[0].quoted else { throw fail("usage: \(first.text) cmd+shift+s") }
             let parts = args[0].text.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
             guard let key = parts.last, !key.isEmpty else { throw fail("invalid key combo") }
             var modifiers = Set<Modifier>()
             for part in parts.dropLast() {
                 guard let modifier = Modifier(rawValue: part), modifiers.insert(modifier).inserted else { throw fail("invalid key modifier: \(part)") }
             }
-            command = .key(KeyCombo(modifiers: modifiers, key: key))
+            let combo = KeyCombo(modifiers: modifiers, key: key)
+            if first.text == "claim-hotkey", modifiers.isEmpty { throw fail("claimed hotkey needs a modifier") }
+            command = first.text == "key" ? .key(combo) : .claimHotkey(combo)
         case "expect", "expect-not":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: \(first.text) \"label\"") }
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
@@ -155,6 +160,18 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: \(first.text) \"text\"")
             }
             command = first.text == "expect-status-item" ? .expectStatusItem(value) : .expectNotification(value)
+        case "expect-frontmost":
+            guard args.count == 1, let bundle = quoted(args[0]), !bundle.isEmpty else {
+                throw fail("usage: expect-frontmost \"bundle identifier\"")
+            }
+            command = .expectFrontmost(bundle)
+        case "observe-no-notification":
+            guard args.count == 2, let text = quoted(args[0]), !text.isEmpty, !args[1].quoted else {
+                throw fail("usage: observe-no-notification \"text\" 3s")
+            }
+            let duration = try seconds(args[1])
+            guard duration > 0 else { throw fail("observation duration must be positive") }
+            command = .observeNoNotification(text, seconds: duration)
         case "status-item":
             guard args.count == 2, args[0].text == "click", let label = quoted(args[1]), !label.isEmpty else {
                 throw fail("usage: status-item click \"help\"")
@@ -197,7 +214,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-clipboard-matches", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
+        if timeout != nil, first.text != "expect-frontmost", !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-clipboard-matches", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
             throw fail("timeout only applies to launch, click, pick-app, pick-call-app, expect, expect-not, expect-clipboard-matches, expect-status-item, expect-notification and close-window")
         }
         if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {

@@ -235,7 +235,7 @@ describe('AS1 welcome on first launch', () => {
     launch();
     await vi.waitFor(() => expect(next().disabled || start().disabled).toBe(false));
     reopenFromHelp();
-    emit('tray-start-recording', null);
+    emit('tray-start-recording', 7);
     await vi.waitFor(() => expect(calls('set_main_window_visible')).toHaveLength(2));
     expect(calls('get_recording_settings')).toHaveLength(0);
     expect(target.querySelectorAll('dialog[open]')).toHaveLength(1);
