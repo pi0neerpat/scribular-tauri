@@ -16,6 +16,7 @@ public struct KeyCombo: Equatable {
 
 public enum Command: Equatable {
     case launch(keepData: Bool)
+    case launchWithUnavailableHotkey
     case click(label: String, index: Int?, within: String?)
     case pickApp(String)
     case pickCallApp(String)
@@ -37,6 +38,7 @@ public enum Command: Equatable {
     case expectStatusItem(String)
     case statusItemClick(String)
     case statusItemMouseClick(String)
+    case backgroundStatusItemClick(String)
     case expectNotification(String)
     case expectFrontmost(String)
     case expectActiveApp(String)
@@ -109,6 +111,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "launch":
             guard args.isEmpty || args.map(\.text) == ["--keep-data"] else { throw fail("usage: launch [--keep-data]") }
             command = .launch(keepData: !args.isEmpty)
+        case "launch-with-unavailable-hotkey":
+            guard args.isEmpty else { throw fail("usage: launch-with-unavailable-hotkey") }
+            command = .launchWithUnavailableHotkey
         case "click":
             guard let label = quoted(args.first), !label.isEmpty else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
             var index: Int?
@@ -193,6 +198,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: status-item-mouse-click \"help\"")
             }
             command = .statusItemMouseClick(label)
+        case "background-status-item-click":
+            guard args.count == 1, let label = quoted(args[0]), !label.isEmpty else {
+                throw fail("usage: background-status-item-click \"help\"")
+            }
+            command = .backgroundStatusItemClick(label)
         case "dock":
             guard args.count == 2, args[0].text == "click", let title = quoted(args[1]), !title.isEmpty else {
                 throw fail("usage: dock click \"title\"")

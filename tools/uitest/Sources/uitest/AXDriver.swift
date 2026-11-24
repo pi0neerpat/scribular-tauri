@@ -39,6 +39,9 @@ final class AXDriver: Driver {
                 throw .retryable("app window not ready")
             }
             return detail
+        case .launchWithUnavailableHotkey:
+            _ = try lifecycle.launch(keepData: false, runDir: runDir, unavailableHotkey: true)
+            return try perform(.launch(keepData: false))
         case .play(let path, let loop):
             let file = try resolvePlayPath(path, cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
             do { try player.start(file, loop: loop) }
@@ -205,6 +208,28 @@ final class AXDriver: Driver {
             guard let item = statusItem(help) else { throw .retryable("status item \"\(help)\" not found; AXHelp present: \(statusItemHelpValues())") }
             guard let rect = frame(of: item) else { throw .retryable("status item \"\(help)\" has no accessibility frame") }
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
+            return nil
+        case .backgroundStatusItemClick(let help):
+            guard let item = statusItem(help), let rect = frame(of: item), !rect.isEmpty else {
+                throw .retryable("status item \"\(help)\" has no accessible frame")
+            }
+            try answerKeychainPrompt()
+            guard keychainWindow() == nil else { throw .retryable("keychain prompt covers the desktop") }
+            let point = CGPoint(x: rect.midX, y: rect.midY)
+            let system = AXUIElementCreateSystemWide()
+            var hit: AXUIElement?
+            guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+                  let hit else { throw .retryable("could not hit-test status item \"\(help)\"") }
+            var hitPID: pid_t = 0
+            _ = AXUIElementGetPid(hit, &hitPID)
+            let owner = NSRunningApplication(processIdentifier: hitPID)
+            let role = attribute(hit, kAXRoleAttribute) as? String
+            let menuBarProxy = owner?.bundleIdentifier == "com.apple.controlcenter"
+                && role == kAXMenuBarItemRole && frame(of: hit) == rect
+            guard CFEqual(item, hit) || menuBarProxy else {
+                throw .retryable("status item \"\(help)\" is covered by \(owner?.localizedName ?? "an unknown app") (\(role ?? "unknown role"))")
+            }
+            try postClick(at: point)
             return nil
         case .expectNotification(let text):
             guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }

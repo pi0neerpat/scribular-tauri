@@ -161,6 +161,11 @@ pub fn refresh(app: &AppHandle, recording: bool, multi_speaker: bool) {
     if let Ok(menu) = build_menu(app, recording, multi_speaker) {
         let _ = tray.set_menu(Some(menu));
     }
+    let _ = tray.set_tooltip(Some(if recording {
+        "Scribular — Recording"
+    } else {
+        "Scribular"
+    }));
     let (bytes, template): (&[u8], bool) = if recording {
         (include_bytes!("../../icons/tray-recording.png"), false)
     } else {
@@ -198,7 +203,10 @@ mod tests {
 
     #[test]
     fn chord_label_uses_mac_modifier_order() {
-        assert_eq!(display_chord("Shift+Super+Alt+Control+KeyR".parse().unwrap()), "⌃⌥⇧⌘R");
+        assert_eq!(
+            display_chord("Shift+Super+Alt+Control+KeyR".parse().unwrap()),
+            "⌃⌥⇧⌘R"
+        );
     }
 
     #[test]

@@ -28,6 +28,7 @@ pub struct FakeSummarizer {
     /// Tokens each sequence produces before its end-of-turn.
     pub reply_tokens: usize,
     pub token_delay: Duration,
+    pub hold: AtomicBool,
     /// Every request passed to `generate`, call by call.
     pub calls: Mutex<Vec<Vec<Generation>>>,
     active: AtomicUsize,
@@ -41,6 +42,7 @@ impl FakeSummarizer {
             context,
             reply_tokens: 5,
             token_delay: Duration::ZERO,
+            hold: AtomicBool::new(false),
             calls: Mutex::default(),
             active: AtomicUsize::new(0),
             max_active: AtomicUsize::new(0),
@@ -85,6 +87,12 @@ impl Summarizer for FakeSummarizer {
         }
         let _leave = Leave(&self.active);
 
+        while self.hold.load(Ordering::SeqCst) {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(LlmError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
         for r in requests {
             if self.prompt_tokens(&r.prompt)? + r.max_tokens > self.context {
                 return Err(LlmError::Engine("sequence exceeds the context".into()));

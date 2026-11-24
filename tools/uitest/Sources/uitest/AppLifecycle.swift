@@ -35,7 +35,7 @@ final class AppLifecycle {
 
     init(appPath: URL, noTrust: Bool = false) { self.appPath = appPath; self.noTrust = noTrust }
 
-    func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
+    func launch(keepData: Bool, runDir: URL, unavailableHotkey: Bool = false) throws(DriverError) -> String {
         if !launched {
             let trusted = try trustBuild(runDir: runDir)
             try terminateExisting()
@@ -63,6 +63,9 @@ final class AppLifecycle {
                 }
                 if let skip = ProcessInfo.processInfo.environment["SCRIBULAR_SKIP_LICENSE"], !skip.isEmpty {
                     configuration.environment["SCRIBULAR_SKIP_LICENSE"] = skip
+                }
+                if unavailableHotkey {
+                    configuration.environment["SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY"] = "1"
                 }
                 NSWorkspace.shared.openApplication(at: appPath, configuration: configuration) { application, error in
                     result.set(app: application, error: error)

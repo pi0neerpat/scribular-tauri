@@ -435,6 +435,16 @@ pub fn run() {
                 Some(Arc::clone(&store)),
             );
             app.manage(recorder);
+            #[cfg(debug_assertions)]
+            if std::env::var_os("SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY").is_some()
+                && store.shortcut_settings()? == store::ShortcutSettings::default()
+            {
+                // The macOS registrar cannot map F21, though it is a valid stored chord.
+                store.set_shortcut_settings(&store::ShortcutSettings {
+                    toggle_recording: Some("Ctrl+Alt+F21".into()),
+                    ..Default::default()
+                })?;
+            }
             shortcuts::restore(app.handle(), &store);
             shortcuts::refresh_tray(app.handle());
             let handle = app.handle().clone();

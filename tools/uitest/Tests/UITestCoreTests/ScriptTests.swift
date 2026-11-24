@@ -12,6 +12,17 @@ import Testing
 }
 @testable import UITestCore
 
+@Test func parsesFreshLaunchWithUnavailableHotkey() throws {
+    #expect(try parseScript("launch-with-unavailable-hotkey").first?.command == .launchWithUnavailableHotkey)
+    #expect(throws: ScriptError.self) { try parseScript("launch-with-unavailable-hotkey --keep-data") }
+}
+
+@Test func parsesBackgroundStatusItemClick() throws {
+    let steps = try parseScript(#"background-status-item-click "Scribular — Recording""#)
+    #expect(steps.map(\.command) == [.backgroundStatusItemClick("Scribular — Recording")])
+    #expect(throws: ScriptError.self) { try parseScript(#"background-status-item-click """#) }
+}
+
 @Test func parsesAllCommands() throws {
     let script = """
     launch
