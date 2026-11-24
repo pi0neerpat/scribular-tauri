@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @Test func parseClipboardMatch() throws {
@@ -238,4 +239,29 @@ import Testing
         .expectActiveApp("com.apple.finder"), .holdFixtureDatabaseWriter, .releaseFixtureDatabaseWriter
     ])
     #expect(throws: ScriptError.self) { try parseScript("hold-fixture-database-writer arbitrary-path") }
+}
+
+@Test func parsesKeyboardPR3RecoveryScenarios() throws {
+    let scenarios = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("scenarios")
+    let paused = try parseScript(String(contentsOf: scenarios.appendingPathComponent(
+        "keyboard-pr3-paused-speakers-frontmost.uitest"
+    ), encoding: .utf8)).map(\.command)
+    let foreground = Command.expectActiveApp("com.app.scribular.tauri")
+    let reopen = try #require(paused.firstIndex(of: .reopenApp))
+    #expect(paused.dropFirst(reopen + 1).first == foreground)
+    let resume = try #require(paused.firstIndex(of: .expect("Resume")))
+    #expect(Array(paused.dropFirst(resume + 1).prefix(2)) == [foreground, .closeWindow])
+
+    let fallback = try parseScript(String(contentsOf: scenarios.appendingPathComponent(
+        "keyboard-pr3-unavailable-hotkey-tray-start.uitest"
+    ), encoding: .utf8)).map(\.command)
+    #expect(fallback.first == .launchWithUnavailableHotkey)
+    let openTray = try #require(fallback.firstIndex(of: .statusItemMouseClick("Scribular")))
+    #expect(fallback.prefix(openTray).contains(.closeWindow))
+    #expect(Array(fallback.dropFirst(openTray + 1).prefix(2)) == [
+        .expect("Show Scribular"),
+        .click(label: "Start Recording", index: nil, within: nil)
+    ])
 }
