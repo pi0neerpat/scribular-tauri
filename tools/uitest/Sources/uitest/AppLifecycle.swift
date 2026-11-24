@@ -161,8 +161,12 @@ final class AppLifecycle {
     }
 
     private func waitForTermination(_ app: NSRunningApplication, seconds: Double) -> Bool {
+        let pid = app.processIdentifier
         let deadline = Date().addingTimeInterval(seconds)
-        while !app.isTerminated && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        return app.isTerminated
+        // AppKit can cache isTerminated while the caller is waiting outside the main run loop.
+        while !app.isTerminated && !processHasExited(pid) && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return app.isTerminated || processHasExited(pid)
     }
 }
