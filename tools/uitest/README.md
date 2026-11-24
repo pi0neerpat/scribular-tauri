@@ -99,6 +99,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `pace 2s` | Change the delay after UI actions for the rest of the script. |
 | `<step> timeout 300s` | End a `launch`, `click`, `pick-app`, `expect`, `expect-not`, `expect-clipboard-matches`, `expect-status-item`, `expect-notification` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). `pick-app` reports the last failure and attempt count if it times out. |
 | `close-window` | Click the front window's close control. |
+| `reopen-app` | Open the running app’s bundle through Launch Services, including when its Dock icon is absent. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
 | `labels` | Print a count, then every accessible label with its role (`Button "Save"`), one line per element, so you can write `click`/`expect` lines without reading the app source. Button, link, menu and similar actionable labels are printed in full; values and other text are cut at 80 characters; repeated elements are listed separately (use `click ... index N`). Off-screen web content may be included. |
 | `screenshot ["name"]` | Save the app window to `runs/<timestamp>/<name>.png` (default `step-<line>.png`) for checking layout. The step prints the path. |

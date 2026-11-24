@@ -30,6 +30,7 @@ public enum Command: Equatable {
     case pause(seconds: Double)
     case pace(seconds: Double)
     case closeWindow
+    case reopenApp
     case handleKeychain
     case labels
     case screenshot(name: String?)
@@ -228,6 +229,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "stop-audio":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = .stopAudio
+        case "reopen-app":
+            guard args.isEmpty else { throw fail("usage: reopen-app") }
+            command = .reopenApp
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit

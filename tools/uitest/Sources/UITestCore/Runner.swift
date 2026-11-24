@@ -160,6 +160,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         options.onStep?(step, completedAt)
         let changed = switch step.command {
         case .backgroundStatusItemClick: true
+        case .reopenApp: true
         case .click, .pickApp, .pickCallApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .statusItemMouseClick, .dockClick: true
         default: false
         }

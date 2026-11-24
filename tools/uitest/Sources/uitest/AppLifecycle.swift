@@ -94,6 +94,11 @@ final class AppLifecycle {
         return detail ?? appPath.path
     }
 
+    func reopen() throws(DriverError) {
+        guard let app, !app.isTerminated else { throw .fatal("reopen-app requires a running app launched by this script") }
+        guard NSWorkspace.shared.open(appPath) else { throw .fatal("could not reopen the app bundle") }
+    }
+
     /// Runs trust-build.sh so a rebuilt (new cdhash) app reads its keychain key without a prompt.
     private func trustBuild(runDir: URL) throws(DriverError) -> String {
         let log = runDir.appendingPathComponent("trust-build.log")

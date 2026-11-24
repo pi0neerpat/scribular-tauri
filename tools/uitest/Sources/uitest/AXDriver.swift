@@ -189,6 +189,9 @@ final class AXDriver: Driver {
                   let rect = frame(of: close) else { throw .retryable("close button not found") }
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
+        case .reopenApp:
+            try lifecycle.reopen()
+            return nil
         case .handleKeychain:
             guard waitUntil(timeout: 5, { keychainWindow() != nil }) else { return "no prompt" }
             try answerKeychainPrompt()

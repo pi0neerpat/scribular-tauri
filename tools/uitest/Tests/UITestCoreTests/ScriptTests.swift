@@ -12,6 +12,11 @@ import Testing
 }
 @testable import UITestCore
 
+@Test func parsesReopenApp() throws {
+    #expect(try parseScript("reopen-app").first?.command == .reopenApp)
+    #expect(throws: ScriptError.self) { try parseScript("reopen-app Scribular") }
+}
+
 @Test func parsesFreshLaunchWithUnavailableHotkey() throws {
     #expect(try parseScript("launch-with-unavailable-hotkey").first?.command == .launchWithUnavailableHotkey)
     #expect(throws: ScriptError.self) { try parseScript("launch-with-unavailable-hotkey --keep-data") }
