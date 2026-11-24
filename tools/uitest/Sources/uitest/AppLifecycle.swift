@@ -30,6 +30,7 @@ final class AppLifecycle {
     private var launched = false
     private var launching: LaunchResult?
     private var dataMoved = false
+    private(set) var usesFreshProfile = false
     private var detail: String?
 
     init(appPath: URL, noTrust: Bool = false) { self.appPath = appPath; self.noTrust = noTrust }
@@ -47,6 +48,7 @@ final class AppLifecycle {
                 do { _ = try moveDataDir(from: source, intoRunDir: runDir) }
                 catch { throw .fatal("could not move app data: \(error.localizedDescription)") }
                 dataMoved = true
+                usesFreshProfile = true
             }
             try linkCache(source, cache)
             do {
@@ -134,6 +136,7 @@ final class AppLifecycle {
         app = nil
         launching = nil
         launched = false
+        usesFreshProfile = false
     }
 
     private func linkCache(_ appDataDir: URL, _ cache: URL) throws(DriverError) {

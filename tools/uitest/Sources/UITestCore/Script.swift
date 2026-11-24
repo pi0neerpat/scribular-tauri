@@ -39,7 +39,10 @@ public enum Command: Equatable {
     case statusItemMouseClick(String)
     case expectNotification(String)
     case expectFrontmost(String)
+    case expectActiveApp(String)
     case observeNoNotification(String, seconds: Double)
+    case holdFixtureDatabaseWriter
+    case releaseFixtureDatabaseWriter
     case dockClick(String)
     case play(path: String, loop: Bool)
     case stopAudio
@@ -165,6 +168,14 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: expect-frontmost \"bundle identifier\"")
             }
             command = .expectFrontmost(bundle)
+        case "expect-active-app":
+            guard args.count == 1, let bundle = quoted(args[0]), !bundle.isEmpty else {
+                throw fail("usage: expect-active-app \"bundle identifier\"")
+            }
+            command = .expectActiveApp(bundle)
+        case "hold-fixture-database-writer", "release-fixture-database-writer":
+            guard args.isEmpty else { throw fail("usage: \(first.text)") }
+            command = first.text == "hold-fixture-database-writer" ? .holdFixtureDatabaseWriter : .releaseFixtureDatabaseWriter
         case "observe-no-notification":
             guard args.count == 2, let text = quoted(args[0]), !text.isEmpty, !args[1].quoted else {
                 throw fail("usage: observe-no-notification \"text\" 3s")

@@ -211,3 +211,15 @@ import Testing
     #expect(steps.map(\.command) == [.claimHotkey(KeyCombo(modifiers: [.ctrl, .option, .cmd], key: "r"))])
     #expect(throws: ScriptError.self) { try parseScript("claim-hotkey r") }
 }
+
+@Test func parsesFreshFixtureFailureCommands() throws {
+    let steps = try parseScript("""
+    expect-active-app "com.apple.finder"
+    hold-fixture-database-writer
+    release-fixture-database-writer
+    """)
+    #expect(steps.map(\.command) == [
+        .expectActiveApp("com.apple.finder"), .holdFixtureDatabaseWriter, .releaseFixtureDatabaseWriter
+    ])
+    #expect(throws: ScriptError.self) { try parseScript("hold-fixture-database-writer arbitrary-path") }
+}

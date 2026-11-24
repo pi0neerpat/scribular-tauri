@@ -13,6 +13,7 @@ final class AXDriver: Driver {
     private let player: Player
     private var application: NSRunningApplication?
     private var claimedHotkey: EventHotKeyRef?
+    private var fixtureWriter: Int32?
     private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?, player: Player) {
@@ -25,6 +26,7 @@ final class AXDriver: Driver {
 
     deinit {
         if let claimedHotkey { UnregisterEventHotKey(claimedHotkey) }
+        if let fixtureWriter { close(fixtureWriter) }
     }
 
     func perform(_ command: Command) throws(DriverError) -> String? {
@@ -47,6 +49,7 @@ final class AXDriver: Driver {
             player.stop()
             return nil
         case .quit:
+            releaseFixtureWriter()
             player.stop()
             lifecycle.quit()
             application = nil
@@ -212,6 +215,20 @@ final class AXDriver: Driver {
                 throw .retryable("expected frontmost bundle \(bundle), found \(active ?? "none")")
             }
             return nil
+        case .expectActiveApp(let bundle):
+            // NSWorkspace delivers activation updates on the run loop.
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+            let active = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            guard active == bundle else {
+                throw .retryable("expected active bundle \(bundle), found \(active ?? "none")")
+            }
+            return nil
+        case .holdFixtureDatabaseWriter:
+            try holdFixtureWriter()
+            return nil
+        case .releaseFixtureDatabaseWriter:
+            releaseFixtureWriter()
+            return nil
         case .observeNoNotification(let text, let seconds):
             let found = waitUntil(timeout: seconds) {
                 notificationTexts().contains { $0.localizedCaseInsensitiveContains(text) }
@@ -234,6 +251,32 @@ final class AXDriver: Driver {
         case .screenshotScreen(let name):
             return try surfaceScreenshot(name: name ?? "screen", menubar: false)
         }
+    }
+
+    private func holdFixtureWriter() throws(DriverError) {
+        guard lifecycle.usesFreshProfile else { throw .fatal("database lock requires a fresh fixture launch") }
+        guard fixtureWriter == nil else { return }
+        let checkout = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).lastPathComponent
+        let appData = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            "Library/Application Support/com.app.scribular.tauri"
+        )
+        let paths = ["dev/\(checkout)/scribular.db-shm", "scribular.db-shm"].map(appData.appendingPathComponent)
+        guard let walIndex = paths.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw .retryable("fixture WAL index is unavailable")
+        }
+        let fd = open(walIndex.path, O_RDWR | O_NOFOLLOW)
+        guard fd >= 0 else { throw .retryable("fixture WAL index is unavailable") }
+        // SQLite assigns the WAL writer the first POSIX lock byte in the index header.
+        guard lseek(fd, 120, SEEK_SET) == 120, lockf(fd, F_TLOCK, 1) == 0 else {
+            close(fd)
+            throw .retryable("fixture WAL writer is busy")
+        }
+        fixtureWriter = fd
+    }
+
+    private func releaseFixtureWriter() {
+        if let fixtureWriter { close(fixtureWriter) }
+        fixtureWriter = nil
     }
 
     private func statusItem(_ help: String) -> AXUIElement? {
