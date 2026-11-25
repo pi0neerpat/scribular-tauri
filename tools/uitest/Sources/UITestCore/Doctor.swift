@@ -27,3 +27,57 @@ public struct DoctorReport: Equatable {
         checks.map { "\($0.passed ? "ok" : "MISSING") \($0.name): \($0.fix)" } + info
     }
 }
+
+public struct DoctorProbes {
+    public var accessibility: () -> Bool
+    public var screenRecording: () -> Bool
+    public var automation: () -> Bool
+    public var ffmpeg: () -> Bool
+    public var keychainPassword: () -> Bool
+    public var tmuxServer: () -> (pid: Int32, responsible: String)?
+
+    public init(
+        accessibility: @escaping () -> Bool,
+        screenRecording: @escaping () -> Bool,
+        automation: @escaping () -> Bool,
+        ffmpeg: @escaping () -> Bool,
+        keychainPassword: @escaping () -> Bool,
+        tmuxServer: @escaping () -> (pid: Int32, responsible: String)?
+    ) {
+        self.accessibility = accessibility
+        self.screenRecording = screenRecording
+        self.automation = automation
+        self.ffmpeg = ffmpeg
+        self.keychainPassword = keychainPassword
+        self.tmuxServer = tmuxServer
+    }
+}
+
+public func doctorReport(probes: DoctorProbes, noPrompt: Bool, appCheck: DoctorCheck?) -> DoctorReport {
+    let host = ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "the terminal app running uitest"
+    let accessibility = probes.accessibility()
+    let screenRecording = probes.screenRecording()
+    var checks = [
+        DoctorCheck(name: "Accessibility", fix: "System Settings → Privacy & Security → Accessibility (allow \(host))", passed: accessibility),
+        DoctorCheck(name: "Screen Recording", fix: "System Settings → Privacy & Security → Screen Recording (allow \(host))", passed: screenRecording),
+    ]
+    var info = [String]()
+    if noPrompt {
+        info.append("not checked Automation (System Events): skipped by --no-prompt")
+    } else {
+        checks.append(DoctorCheck(name: "Automation (System Events)", fix: "System Settings → Privacy & Security → Automation → allow System Events", passed: probes.automation()))
+    }
+    checks.append(DoctorCheck(name: "ffmpeg", fix: "brew install ffmpeg", passed: probes.ffmpeg()))
+    checks.append(DoctorCheck(name: "Keychain password", fix: "bash tools/uitest/trust-build.sh --store-password", passed: probes.keychainPassword()))
+    if let appCheck { checks.append(appCheck) }
+
+    if (!accessibility || !screenRecording), let (pid, responsible) = probes.tmuxServer() {
+        info.append("permission is decided for tmux server pid \(pid), started by \(responsible)")
+        let terminals = ["terminal", "iterm2", "ghostty", "wezterm", "kitty", "alacritty"]
+        let path = responsible.lowercased().components(separatedBy: "/")
+        if !terminals.contains(where: { path.last == $0 || path.contains("\($0).app") }) {
+            info.append("fix: tmux kill-server, then in a terminal run: tmux new-session -d -s tmux-anchor (kill-server stops every running cwf session)")
+        }
+    }
+    return DoctorReport(checks: checks, info: info)
+}

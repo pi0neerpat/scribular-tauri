@@ -204,38 +204,66 @@ private func copyAppLog(to runDir: URL) {
 }
 
 private func runDoctor(_ args: [String]) -> Int32 {
+    var args = args[...]
+    var noPrompt = false
     var appPath: String?
-    guard args.count <= 2 else {
-        print("usage: uitest doctor [--app <path>]")
-        return 2
-    }
-    if !args.isEmpty {
-        guard args.count == 2, args[0] == "--app", !args[1].isEmpty else {
-            print("usage: uitest doctor [--app <path>]")
+    while let option = args.popFirst() {
+        switch option {
+        case "--no-prompt" where !noPrompt:
+            noPrompt = true
+        case "--app" where appPath == nil && args.first.map({ !$0.isEmpty && !$0.hasPrefix("--") }) == true:
+            appPath = args.popFirst()
+        default:
+            print("usage: uitest doctor [--no-prompt] [--app <path>]")
             return 2
         }
-        appPath = args[1]
     }
-    let host = ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "the terminal app running uitest"
-    var checks = [
-        DoctorCheck(name: "Accessibility", fix: "System Settings → Privacy & Security → Accessibility (allow \(host))", passed: AXIsProcessTrusted()),
-        DoctorCheck(name: "Screen Recording", fix: "System Settings → Privacy & Security → Screen Recording (allow \(host))", passed: CGPreflightScreenCaptureAccess()),
-        DoctorCheck(name: "Automation (System Events)", fix: "System Settings → Privacy & Security → Automation → allow System Events", passed: commandSucceeded("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of first process"])),
-        DoctorCheck(name: "ffmpeg", fix: "brew install ffmpeg", passed: Preflight.executable("ffmpeg") != nil),
-        DoctorCheck(name: "Keychain password", fix: "bash tools/uitest/trust-build.sh --store-password", passed: commandSucceeded("/usr/bin/security", ["find-generic-password", "-s", "scribular-uitest", "-a", "login-password"])),
-    ]
-    var info = [String]()
-    if let appPath {
+    let probes = DoctorProbes(
+        accessibility: { AXIsProcessTrusted() },
+        screenRecording: { CGPreflightScreenCaptureAccess() },
+        automation: { commandSucceeded("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of first process"]) },
+        ffmpeg: { Preflight.executable("ffmpeg") != nil },
+        keychainPassword: { commandSucceeded("/usr/bin/security", ["find-generic-password", "-s", "scribular-uitest", "-a", "login-password"]) },
+        tmuxServer: tmuxServer
+    )
+    let appCheck = appPath.map { appPath in
         let bundleURL = URL(fileURLWithPath: appPath, isDirectory: true)
         let bundle = Bundle(url: bundleURL)
         let bundleExists = bundleURL.pathExtension == "app" && bundle?.executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } == true
-        checks.append(DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' TAURI_SIGNING_PRIVATE_KEY=<key> npm run tauri -- build --bundles app", passed: bundleExists))
-        let quotedAppPath = "'\(appPath.replacingOccurrences(of: "'", with: "'\\''"))'"
-        info.append("info after each rebuild run: bash tools/uitest/trust-build.sh \(quotedAppPath)")
+        return DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json", passed: bundleExists)
     }
-    let report = DoctorReport(checks: checks, info: info)
+    let report = doctorReport(probes: probes, noPrompt: noPrompt, appCheck: appCheck)
     report.lines.forEach { print($0) }
+    if let appPath {
+        let quotedAppPath = "'\(appPath.replacingOccurrences(of: "'", with: "'\\''"))'"
+        print("info after each rebuild run: bash tools/uitest/trust-build.sh \(quotedAppPath)")
+    }
     return report.exitCode
+}
+
+@_silgen_name("responsibility_get_pid_responsible_for_pid")
+private func responsiblePID(_ pid: Int32) -> Int32
+
+private func tmuxServer() -> (pid: Int32, responsible: String)? {
+    guard ProcessInfo.processInfo.environment["TMUX"] != nil,
+          let tmux = Preflight.executable("tmux") else { return nil }
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = tmux
+    process.arguments = ["display-message", "-p", "#{pid}"]
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    do { try process.run() } catch { return nil }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0,
+          let pid = Int32(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)),
+          pid > 0 else { return nil }
+
+    let responsible = responsiblePID(pid)
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    guard responsible > 0, proc_pidpath(responsible, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+    return (pid, String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self))
 }
 
 private func commandSucceeded(_ path: String, _ arguments: [String]) -> Bool {
