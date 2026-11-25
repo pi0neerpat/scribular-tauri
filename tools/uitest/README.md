@@ -27,10 +27,17 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 ## Build and run
 
-Build the signed app separately; `launch` never builds. `launch` runs `trust-build.sh` first: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (their partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt. `launch` fails with a clear message if no password is stored.
+Verify runs use a signed debug build and launch with `SCRIBULAR_SKIP_LICENSE=1`. Release builds ignore that variable. Build the app separately; `launch` never builds. `launch` runs `trust-build.sh` first: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (their partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt. `launch` fails with a clear message if no password is stored.
+
+On a fresh target directory, first build the native libraries that Tauri reads from `target/release` for both bundle profiles. Run this from the repo root with the same `CARGO_TARGET_DIR` as the app build.
 
 ```sh
-APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app
+TAURI_CONFIG='{"bundle":{"macOS":{"frameworks":[]}}}' cargo build --locked --release --manifest-path src-tauri/Cargo.toml --lib
+```
+
+```sh
+APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json
+export SCRIBULAR_SKIP_LICENSE=1
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
 ```
@@ -39,9 +46,7 @@ Use `--record <name>` only for a happy path or an issue that cannot be reproduce
 
 Recorded runs default to 2.5 seconds of pacing after UI actions. `--pace 2s` overrides it (`--pace 0` disables it); unrecorded runs default to no pacing. In scripts, `pause 3s` pauses for reading and `pace 2s` changes the action pace from that point. An `expect` or `expect-not` after an action waits one extra second for the new state to be read.
 
-Generate a local throwaway updater key with `npm run tauri signer generate -- -w <path>` and use its private key value for `TAURI_SIGNING_PRIVATE_KEY`; set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` only if the key has a password.
-
-The bundle is at `$CARGO_TARGET_DIR/<debug|release>/bundle/macos/Scribular.app` when `CARGO_TARGET_DIR` is set (under cwf, the target directory is per clone), or `src-tauri/target/<debug|release>/bundle/macos/Scribular.app` otherwise. Pass the path printed by your build with `--app`. `launch` reports the app path and executable modification time so stale builds are visible. Trust output is saved in `runs/<timestamp>/trust-build.log`. For prompt tests only, `--no-trust` skips trust-build.
+The bundle is at `$CARGO_TARGET_DIR/debug/bundle/macos/Scribular.app` when `CARGO_TARGET_DIR` is set (under cwf, the target directory is per clone), or `src-tauri/target/debug/bundle/macos/Scribular.app` otherwise. Pass the path printed by your build with `--app`. `launch` reports the app path and executable modification time so stale builds are visible. Trust output is saved in `runs/<timestamp>/trust-build.log`. For prompt tests only, `--no-trust` skips trust-build.
 
 Other scenarios:
 
@@ -123,7 +128,7 @@ Use the native UI command first, then a surface screenshot, then a log or state 
 
 ### Doctor
 
-Run `swift run --package-path tools/uitest uitest doctor [--app /path/to/Scribular.app]` to check host permissions, System Events automation, `ffmpeg`, the stored keychain password, and optionally the app bundle. It prints every check as `ok` or `MISSING`, includes the fix command, exits 1 if any check is missing, and never prints the stored password. With `--app`, it also prints the per-build trust command; the current cdhash trust cannot be detected automatically.
+Run `swift run --package-path tools/uitest uitest doctor [--no-prompt] [--app /path/to/Scribular.app]` to check host permissions, System Events automation, `ffmpeg`, the stored keychain password, and optionally the app bundle. Use `--no-prompt` for preflight to skip the System Events automation check, which can prompt. Doctor prints each performed check as `ok` or `MISSING`, includes the fix command, exits 1 if any check is missing, and never prints the stored password. With `--app`, it also prints the per-build trust command; the current cdhash trust cannot be detected automatically.
 
 ### Keychain after rebuild
 
