@@ -247,9 +247,7 @@ describe('AS1 welcome on first launch', () => {
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
     expect(calls('complete_onboarding')).toHaveLength(1);
   });
-});
 
-describe('AS2 Help and usage-data consent', () => {
   it('cancels a tray start while the startup gate is loading', async () => {
     const defaultInvoke = invoke.getMockImplementation()!;
     invoke.mockImplementation((command, args) =>
@@ -260,7 +258,9 @@ describe('AS2 Help and usage-data consent', () => {
     expect(calls('cancel_tray_start')).toEqual([['cancel_tray_start', { request: 7 }]]);
     expect(calls('get_recording_settings')).toHaveLength(0);
   });
+});
 
+describe('AS2 Help and usage-data consent', () => {
   it.each([true, false])('recovers a failed startup read without guessing whether welcome was seen (completed=%s)', async (seen) => {
     completed = seen;
     fail = 'get_onboarding_state';

@@ -86,6 +86,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | Command | Meaning |
 | --- | --- |
 | `launch [--keep-data]` | Start the built app. By default, move its app data into the run folder first. |
+| `launch-with-unavailable-hotkey` | Launch the app like `launch` with `SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY=1`, so it reports its background shortcut as unavailable (exercises the registration-failure path). Requires a fresh launch: use `quit` first if the script already launched the app. |
 | `click "Label" [index N] [in "Scope"]` | Click the unique exact label; use a 1-based index or scope to disambiguate. |
 | `pick-app "afplay" timeout 60s` | Close any menu left open, refresh the App-audio list, wait 2.5 seconds, open the App picker, and wait for the menu to open and close as detected by the window server. Type-select the name, press Return, wait 1 second, verify the picker value, and retry if it differs. |
 | `pick-call-app "afplay" timeout 60s` | Click the named button in the Choose a call app dialog. If the app is missing and the source list timed out, click Refresh before retrying. |
@@ -115,8 +116,6 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `dock click "Scribular"` | Press the unique matching Dock item. |
 
 `timeout 30s` also applies to `pick-call-app`, `expect-frontmost`, and `expect-active-app`. Both focus checks take a quoted bundle identifier. With the **Choose a call app** dialog open, `pick-app` uses the same selection behavior as `pick-call-app`.
-
-`launch-with-unavailable-hotkey` requires a fresh launch. Use `quit` first if the script already launched the app.
 
 `timeout 30s` also applies to `expect-status-item` and `expect-notification`. Notifications are brief (about 3–4 seconds in the tested VM), so put `expect-notification` directly after the action that triggers the banner. It searches banner text in Notification Center; it does not read notification history.
 

@@ -35,7 +35,7 @@ import Testing
     let start = try #require(commands.firstIndex(of: key))
     let stop = try #require(commands.lastIndex(of: key))
     #expect(onCall < callApp && callApp < finderFocus && finderFocus < play && play < start && start < stop)
-    #expect(commands[(start + 1)..<stop].contains(finder))
+    #expect(start < stop && commands[(start + 1)..<stop].contains(finder))
     #expect(commands.dropFirst(stop + 1).contains(finder))
     #expect(commands.dropFirst(stop + 1).contains(.expectNot("How many people spoke?")))
 }
