@@ -15,7 +15,10 @@ struct DoctorTests {
 
     @Test func noPromptReportsAutomationNotChecked() {
         var probes = self.probes
-        probes.automation = { fatalError("Automation may prompt") }
+        probes.automation = {
+            Issue.record("Automation probe ran under --no-prompt")
+            return false
+        }
         let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil)
         #expect(report.lines.contains("not checked Automation (System Events): skipped by --no-prompt"))
         #expect(!report.lines.contains { $0.hasPrefix("ok Automation") })
@@ -45,16 +48,30 @@ struct DoctorTests {
         #expect(report.exitCode == 1)
     }
 
-    @Test(arguments: ["Terminal", "iTerm2", "Ghostty", "WezTerm", "kitty", "Alacritty"])
-    func terminalStartedServerGetsNoKillHint(terminal: String) {
+    @Test(arguments: ["Terminal", "iTerm2", "Ghostty", "WezTerm", "kitty", "Alacritty", "Warp", "Visual Studio Code"])
+    func appStartedServerGetsNoKillHint(app: String) {
         var probes = self.probes
-        let executable = terminal == "WezTerm" ? "wezterm-gui" : terminal
-        let responsible = "/Applications/\(terminal).app/Contents/MacOS/\(executable)"
+        let executable = app == "WezTerm" ? "wezterm-gui" : app
+        let responsible = "/Applications/\(app).app/Contents/MacOS/\(executable)"
         probes.accessibility = { false }
         probes.tmuxServer = { (123, responsible) }
         let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil)
         #expect(report.info.contains("permission is decided for tmux server pid 123, started by \(responsible)"))
         #expect(!report.info.contains { $0.contains("tmux kill-server") })
+    }
+
+    @Test(arguments: [
+        ("tmux", "the terminal app running uitest"),
+        ("Apple_Terminal", "Terminal"),
+        ("iTerm.app", "iTerm2"),
+    ])
+    func permissionFixesNameTheHost(termProgram: String, expectedHost: String) {
+        var probes = self.probes
+        probes.accessibility = { false }
+        probes.screenRecording = { false }
+        let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil, termProgram: termProgram)
+        #expect(report.lines.contains("MISSING Accessibility: System Settings → Privacy & Security → Accessibility (allow \(expectedHost))"))
+        #expect(report.lines.contains("MISSING Screen Recording: System Settings → Privacy & Security → Screen Recording (allow \(expectedHost))"))
     }
 
     @Test func outsideTmuxAddsNoServerLine() {
@@ -66,7 +83,10 @@ struct DoctorTests {
 
     @Test func exitCodeIgnoresNotChecked() {
         var probes = self.probes
-        probes.tmuxServer = { fatalError("Permissions already passed") }
+        probes.tmuxServer = {
+            Issue.record("tmux server probe ran after both permission checks passed")
+            return nil
+        }
         let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil)
         #expect(report.exitCode == 0)
     }

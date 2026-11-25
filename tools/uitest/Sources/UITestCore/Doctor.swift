@@ -53,8 +53,17 @@ public struct DoctorProbes {
     }
 }
 
-public func doctorReport(probes: DoctorProbes, noPrompt: Bool, appCheck: DoctorCheck?) -> DoctorReport {
-    let host = ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "the terminal app running uitest"
+public func doctorReport(
+    probes: DoctorProbes,
+    noPrompt: Bool,
+    appCheck: DoctorCheck?,
+    termProgram: String? = ProcessInfo.processInfo.environment["TERM_PROGRAM"]
+) -> DoctorReport {
+    let host = switch termProgram {
+    case "Apple_Terminal": "Terminal"
+    case "iTerm.app": "iTerm2"
+    default: "the terminal app running uitest"
+    }
     let accessibility = probes.accessibility()
     let screenRecording = probes.screenRecording()
     var checks = [
@@ -73,9 +82,7 @@ public func doctorReport(probes: DoctorProbes, noPrompt: Bool, appCheck: DoctorC
 
     if (!accessibility || !screenRecording), let (pid, responsible) = probes.tmuxServer() {
         info.append("permission is decided for tmux server pid \(pid), started by \(responsible)")
-        let terminals = ["terminal", "iterm2", "ghostty", "wezterm", "kitty", "alacritty"]
-        let path = responsible.lowercased().components(separatedBy: "/")
-        if !terminals.contains(where: { path.last == $0 || path.contains("\($0).app") }) {
+        if !responsible.split(separator: "/").contains(where: { $0.lowercased().hasSuffix(".app") }) {
             info.append("fix: tmux kill-server, then in a terminal run: tmux new-session -d -s tmux-anchor (kill-server stops every running cwf session)")
         }
     }

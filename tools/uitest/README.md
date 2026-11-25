@@ -29,7 +29,7 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 Verify runs use a signed debug build and launch with `SCRIBULAR_SKIP_LICENSE=1`. Release builds ignore that variable. Build the app separately; `launch` never builds. `launch` runs `trust-build.sh` first: a self-signed cert has no Team ID, so macOS gates keychain items by the build's cdhash (their partition list), which changes each build. The script adds the new cdhash to Scribular's keychain items, so the rebuilt app reads its key without a prompt. `launch` fails with a clear message if no password is stored.
 
-On a fresh target directory, first build the native libraries that Tauri reads from `target/release` for both bundle profiles. Run this from the repo root with the same `CARGO_TARGET_DIR` as the app build.
+On a fresh target directory, first build the native libraries that Tauri reads from `target/release` for both bundle profiles. Run this from the repo root with the same absolute `CARGO_TARGET_DIR` as the app build, or leave `CARGO_TARGET_DIR` unset for both commands.
 
 ```sh
 TAURI_CONFIG='{"bundle":{"macOS":{"frameworks":[]}}}' cargo build --locked --release --manifest-path src-tauri/Cargo.toml --lib
