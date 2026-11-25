@@ -35,6 +35,8 @@ public struct DoctorProbes {
     public var ffmpeg: () -> Bool
     public var keychainPassword: () -> Bool
     public var tmuxServer: () -> (pid: Int32, responsible: String)?
+    /// Label text of an open SecurityAgent prompt that is not for Scribular; nil when none is open.
+    public var foreignPrompt: () -> String?
 
     public init(
         accessibility: @escaping () -> Bool,
@@ -42,7 +44,8 @@ public struct DoctorProbes {
         automation: @escaping () -> Bool,
         ffmpeg: @escaping () -> Bool,
         keychainPassword: @escaping () -> Bool,
-        tmuxServer: @escaping () -> (pid: Int32, responsible: String)?
+        tmuxServer: @escaping () -> (pid: Int32, responsible: String)?,
+        foreignPrompt: @escaping () -> String? = { nil }
     ) {
         self.accessibility = accessibility
         self.screenRecording = screenRecording
@@ -50,7 +53,10 @@ public struct DoctorProbes {
         self.ffmpeg = ffmpeg
         self.keychainPassword = keychainPassword
         self.tmuxServer = tmuxServer
+        self.foreignPrompt = foreignPrompt
     }
+
+    public static func isForeign(text: String) -> Bool { !text.contains("com.app.scribular.tauri") }
 }
 
 public func doctorReport(
@@ -79,6 +85,13 @@ public func doctorReport(
     checks.append(DoctorCheck(name: "ffmpeg", fix: "brew install ffmpeg", passed: probes.ffmpeg()))
     checks.append(DoctorCheck(name: "Keychain password", fix: "bash tools/uitest/trust-build.sh --store-password", passed: probes.keychainPassword()))
     if let appCheck { checks.append(appCheck) }
+    // reading SecurityAgent windows needs only Accessibility, so this runs under --no-prompt too
+    if accessibility {
+        let prompt = probes.foreignPrompt()
+        checks.append(DoctorCheck(name: "Foreign keychain prompt", fix: prompt.map { "answer or dismiss it: \($0.prefix(120))" } ?? "none open", passed: prompt == nil))
+    } else {
+        info.append("not checked Foreign keychain prompt: Accessibility missing")
+    }
 
     if (!accessibility || !screenRecording), let (pid, responsible) = probes.tmuxServer() {
         info.append("permission is decided for tmux server pid \(pid), started by \(responsible)")

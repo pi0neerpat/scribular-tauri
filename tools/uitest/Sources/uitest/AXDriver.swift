@@ -532,7 +532,7 @@ final class AXDriver: Driver {
         }
         guard let window = found else { return "no prompt" }
         let promptText = allElements(from: window).flatMap { labelValues($0) }.joined(separator: " ")
-        guard promptText.contains("com.app.scribular.tauri") else { throw .fatal("keychain prompt is not for com.app.scribular.tauri") }
+        guard !DoctorProbes.isForeign(text: promptText) else { throw .fatal("keychain prompt is not for com.app.scribular.tauri: \(promptText.prefix(120))") }
         guard let keychainPassword else { throw .fatal("keychain prompt not answered: no stored password; fix: bash tools/uitest/trust-build.sh --store-password") }
         let fields = allElements(from: window).filter {
             let role = attribute($0, kAXRoleAttribute) as? String
