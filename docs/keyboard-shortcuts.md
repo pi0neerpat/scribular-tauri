@@ -1,6 +1,6 @@
 # Keyboard shortcuts (part 1: fixed app keys)
 
-Shipped in PR #41. Spec: `plans/2026-11-16-keyboard-shortcuts-spec.md` (R1-R4, AS1-AS3). Part 2 (editable global recording key, Shortcuts pane, Help route) is not shipped. macOS only.
+Shipped in PR #41. Spec: `plans/2026-11-16-keyboard-shortcuts-spec.md` (R1-R4, AS1-AS3). Parts 2 and 3 (editable global recording key, Shortcuts pane, Help route) are shipped: see `docs/background-shortcut.md`. macOS only.
 
 ## What it does
 
@@ -19,5 +19,5 @@ Shipped in PR #41. Spec: `plans/2026-11-16-keyboard-shortcuts-spec.md` (R1-R4, A
 ## Known limits
 
 - Note tabs, persistent note undo/redo and Help ▸ Keyboard Shortcuts stay disabled until later work.
-- Accelerators are fixed; nothing is editable yet and there is no global (outside-app) key.
+- Menu accelerators are fixed; only the global recording chord is editable.
 - AS1 and AS3 were not verified by an agent.
