@@ -56,7 +56,8 @@ public struct DoctorProbes {
         self.foreignPrompt = foreignPrompt
     }
 
-    public static func isForeign(text: String) -> Bool { !text.contains("com.app.scribular.tauri") }
+    /// Empty text is a SecurityAgent window with no readable label, not a foreign prompt.
+    public static func isForeign(text: String) -> Bool { !text.isEmpty && !text.contains("com.app.scribular.tauri") }
 }
 
 public func doctorReport(
@@ -88,7 +89,7 @@ public func doctorReport(
     // reading SecurityAgent windows needs only Accessibility, so this runs under --no-prompt too
     if accessibility {
         let prompt = probes.foreignPrompt()
-        checks.append(DoctorCheck(name: "Foreign keychain prompt", fix: prompt.map { "answer or dismiss it: \($0.prefix(120))" } ?? "none open", passed: prompt == nil))
+        checks.append(DoctorCheck(name: "Foreign keychain prompt", fix: prompt.map { "answer or dismiss it: \($0.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(120))" } ?? "none open", passed: prompt == nil))
     } else {
         info.append("not checked Foreign keychain prompt: Accessibility missing")
     }

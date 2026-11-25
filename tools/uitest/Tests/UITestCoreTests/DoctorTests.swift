@@ -93,11 +93,18 @@ struct DoctorTests {
 
     @Test func foreignPromptFailsDoctor() {
         var probes = self.probes
-        let text = "Agent Token Monitor wants to use Claude Code-credentials"
+        let text = String(repeating: "x", count: 121)
         probes.foreignPrompt = { text }
         let report = doctorReport(probes: probes, noPrompt: false, appCheck: nil)
         #expect(report.exitCode == 1)
-        #expect(report.lines.contains { $0.hasPrefix("MISSING Foreign keychain prompt") && $0.contains(text) })
+        #expect(report.lines.contains("MISSING Foreign keychain prompt: answer or dismiss it: \(text.prefix(120))"))
+    }
+
+    @Test func multiLinePromptStaysOnOneLine() {
+        var probes = self.probes
+        probes.foreignPrompt = { "Agent Token Monitor\n  wants to use\tkeychain" }
+        let report = doctorReport(probes: probes, noPrompt: false, appCheck: nil)
+        #expect(report.lines.contains("MISSING Foreign keychain prompt: answer or dismiss it: Agent Token Monitor wants to use keychain"))
     }
 
     @Test func noForeignPromptPassesDoctor() {
@@ -124,11 +131,12 @@ struct DoctorTests {
         }
         let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil)
         #expect(report.info.contains("not checked Foreign keychain prompt: Accessibility missing"))
-        #expect(!report.lines.contains { $0.hasPrefix("ok Foreign keychain prompt") })
+        #expect(!report.checks.contains { $0.name == "Foreign keychain prompt" })
     }
 
     @Test func scribularPromptIsNotForeign() {
         #expect(!DoctorProbes.isForeign(text: "Scribular wants to use com.app.scribular.tauri in your keychain"))
+        #expect(!DoctorProbes.isForeign(text: ""))
         #expect(DoctorProbes.isForeign(text: "Agent Token Monitor wants to use Claude Code-credentials"))
     }
 }
