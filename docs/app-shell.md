@@ -37,7 +37,7 @@ Shipped in PRs #26-#30. Spec: `plans/2026-11-16-app-shell-spec.md` (R1-R16, AS1-
 - Updater config is in `src-tauri/tauri.conf.json` under `plugins.updater`:
   - `endpoints`: `https://github.com/pi0neerpat/scribular-tauri-releases/releases/latest/download/latest.json`
   - `pubkey`: currently the placeholder `REPLACE_WITH_TAURI_UPDATER_PUBKEY`.
-  - `bundle.createUpdaterArtifacts` is `true`, so builds need `TAURI_SIGNING_PRIVATE_KEY` (see `CLAUDE.md`).
+  - Builds that use the default `bundle.createUpdaterArtifacts: true` require `TAURI_SIGNING_PRIVATE_KEY`. Set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has a password. For a local build, generate a throwaway key with `npm run tauri signer generate -- -w <path>`.
 - Settings window capability: `src-tauri/capabilities/default.json` lists the `main` and `settings` windows.
 
 ## How to test
