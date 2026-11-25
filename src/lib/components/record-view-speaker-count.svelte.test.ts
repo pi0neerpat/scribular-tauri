@@ -19,6 +19,7 @@ const onSessionLevels = vi.fn();
 const listAudioApps = vi.fn();
 const deniedPrivacy = vi.fn(() => null as 'microphone' | 'systemAudio' | null);
 const getSession = vi.fn();
+const notifyTrayStartFailure = vi.fn(async () => {});
 const onSessionProgress = vi.fn();
 const onSessionTranscriptWaiting = vi.fn(async (_handler: (state: { sessionId: string; waiting: boolean }) => void) => () => {});
 const onSessionSegments = vi.fn();
@@ -37,6 +38,7 @@ vi.mock('../api', () => ({
   onSessionProgress, onSessionTranscriptWaiting, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
   getSummaryAvailability, onSummaryAvailability,
+  notifyTrayStartFailure,
   subscribeSummaryAvailability: async (callback: (state: string) => void) => { callback(await getSummaryAvailability()); return () => {}; },
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
@@ -190,6 +192,15 @@ describe('recording speaker-count prompt', () => {
     window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: 7 }));
     await vi.waitFor(() => expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Zoom', expect.any(String), 7));
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
+    unmount(app);
+    target.remove();
+  });
+  it('reports the missing call app as a specific tray start failure', async () => {
+    getRecordingSource.mockResolvedValue({ location: 'onCall', targetApp: null });
+    const { target, app } = await renderRecordView();
+    window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: 7 }));
+    await vi.waitFor(() => expect(notifyTrayStartFailure).toHaveBeenCalledExactlyOnceWith('Choose an app before recording a call.'));
+    expect(startRecording).not.toHaveBeenCalled();
     unmount(app);
     target.remove();
   });

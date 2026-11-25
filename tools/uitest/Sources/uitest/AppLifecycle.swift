@@ -95,7 +95,9 @@ final class AppLifecycle {
     }
 
     func reopen() throws(DriverError) {
-        guard let app, !app.isTerminated else { throw .fatal("reopen-app requires a running app launched by this script") }
+        guard let app, !app.isTerminated, !processHasExited(app.processIdentifier) else {
+            throw .fatal("reopen-app requires a running app launched by this script")
+        }
         guard NSWorkspace.shared.open(appPath) else { throw .fatal("could not reopen the app bundle") }
     }
 

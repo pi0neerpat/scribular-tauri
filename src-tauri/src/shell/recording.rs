@@ -135,7 +135,7 @@ fn finish_stop(
         Err(RecordError::NoAudio) => failure("empty recording", "No audio was recorded."),
         Err(RecordError::StopPreparationFailed) => failure(
             "recording stop preparation failed",
-            "Couldn’t prepare to stop. Recording is still running.",
+            RecordError::STOP_PREPARATION_FAILED_MESSAGE,
         ),
         Err(_) => failure(
             "recording stop failed",

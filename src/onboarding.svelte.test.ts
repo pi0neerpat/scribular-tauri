@@ -250,6 +250,17 @@ describe('AS1 welcome on first launch', () => {
 });
 
 describe('AS2 Help and usage-data consent', () => {
+  it('cancels a tray start while the startup gate is loading', async () => {
+    const defaultInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation((command, args) =>
+      command === 'locked_state' ? new Promise(() => {}) : defaultInvoke(command, args));
+    launch();
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith('tray-start-recording', expect.any(Function)));
+    emit('tray-start-recording', 7);
+    expect(calls('cancel_tray_start')).toEqual([['cancel_tray_start', { request: 7 }]]);
+    expect(calls('get_recording_settings')).toHaveLength(0);
+  });
+
   it.each([true, false])('recovers a failed startup read without guessing whether welcome was seen (completed=%s)', async (seen) => {
     completed = seen;
     fail = 'get_onboarding_state';

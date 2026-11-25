@@ -229,6 +229,22 @@ import Testing
     #expect(throws: ScriptError.self) { try parseScript("claim-hotkey r") }
 }
 
+@Test func parsesTimeoutsForBothFocusAssertions() throws {
+    let steps = try parseScript("""
+    expect-frontmost "com.apple.finder" timeout 5s
+    expect-active-app "com.apple.finder" timeout 3s
+    """)
+    #expect(steps.map(\.timeout) == [5, 3])
+}
+
+@Test func unavailableHotkeyLaunchRequiresFreshApp() throws {
+    #expect(throws: ScriptError.self) { try parseScript("launch\nlaunch-with-unavailable-hotkey") }
+    #expect(throws: ScriptError.self) {
+        try parseScript("launch-with-unavailable-hotkey\nlaunch-with-unavailable-hotkey")
+    }
+    #expect(try parseScript("launch\nquit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
+}
+
 @Test func parsesFreshFixtureFailureCommands() throws {
     let steps = try parseScript("""
     expect-active-app "com.apple.finder"

@@ -77,6 +77,9 @@ impl Summarizer for FakeSummarizer {
         on_event: &mut dyn FnMut(GenEvent<'_>),
     ) -> Result<Vec<String>> {
         self.calls.lock().unwrap().push(requests.to_vec());
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(now, Ordering::SeqCst);
         struct Leave<'a>(&'a AtomicUsize);
@@ -377,6 +380,18 @@ impl SystemAudio for FakeSystemAudio {
 mod tests {
     use super::*;
     use crate::audio::chunk_writer;
+
+    #[test]
+    fn empty_generation_bypasses_hold_and_cancellation() {
+        let summarizer = FakeSummarizer::new(32);
+        summarizer.hold.store(true, Ordering::SeqCst);
+        let cancelled = AtomicBool::new(true);
+        let mut on_event = |_: GenEvent<'_>| panic!("empty batch emitted an event");
+        assert!(summarizer
+            .generate(&[], &cancelled, &mut on_event)
+            .unwrap()
+            .is_empty());
+    }
 
     #[test]
     fn feed_rejects_a_block_larger_than_the_ring_without_retrying() {

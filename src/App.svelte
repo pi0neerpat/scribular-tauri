@@ -241,10 +241,12 @@
       else quitIntent = restart ? 'restart' : 'quit';
     });
     const trayStart = onTrayStartRecording((request) => {
-      if (welcomeOpen) {
-        void cancelTrayStart(request).catch((e) => (error = String(e)));
-        void setMainWindowVisible(true).catch((e) => (error = String(e)));
-      } else window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: request }));
+      if (!welcomeOpen && recordView) {
+        window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: request }));
+        return;
+      }
+      void cancelTrayStart(request).catch((e) => (error = String(e)));
+      if (welcomeOpen) void setMainWindowVisible(true).catch((e) => (error = String(e)));
     });
     const closeRequest = onWindowCloseRequested(() => {
       if (coach) closeCoach(false);

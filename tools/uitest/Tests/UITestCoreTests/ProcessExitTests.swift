@@ -10,7 +10,7 @@ import Testing
     try child.run()
     let pid = child.processIdentifier
     #expect(!processHasExited(pid))
-    input.fileHandleForWriting.closeFile()
+    try input.fileHandleForWriting.close()
     child.waitUntilExit()
     #expect(processHasExited(pid))
     #expect(!processHasExited(-1))

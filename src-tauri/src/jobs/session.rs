@@ -46,6 +46,11 @@ pub enum RecordError {
     Store(StoreError),
 }
 
+impl RecordError {
+    pub(crate) const STOP_PREPARATION_FAILED_MESSAGE: &str =
+        "Couldn’t prepare to stop. Recording is still running.";
+}
+
 impl fmt::Display for RecordError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -53,9 +58,7 @@ impl fmt::Display for RecordError {
             Self::NotRecording => f.write_str("nothing is recording"),
             Self::SpeechModelNotReady => f.write_str("The speech model isn't downloaded yet."),
             Self::NoAudio => f.write_str("No audio was recorded."),
-            Self::StopPreparationFailed => {
-                f.write_str("Couldn’t prepare to stop. Recording is still running.")
-            }
+            Self::StopPreparationFailed => f.write_str(Self::STOP_PREPARATION_FAILED_MESSAGE),
             Self::NoTargetApp => f.write_str("Choose an app to record."),
             Self::UnsupportedMode => f.write_str("Choose In the room or On a call to record."),
             Self::Interrupted => f.write_str("Recording stopped. Saved audio can be recovered."),

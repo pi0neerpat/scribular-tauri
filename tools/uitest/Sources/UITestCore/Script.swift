@@ -114,6 +114,14 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             command = .launch(keepData: !args.isEmpty)
         case "launch-with-unavailable-hotkey":
             guard args.isEmpty else { throw fail("usage: launch-with-unavailable-hotkey") }
+            for prior in steps.reversed() {
+                if prior.command == .quit { break }
+                switch prior.command {
+                case .launch, .launchWithUnavailableHotkey:
+                    throw fail("launch-with-unavailable-hotkey requires a fresh launch; quit first")
+                default: break
+                }
+            }
             command = .launchWithUnavailableHotkey
         case "click":
             guard let label = quoted(args.first), !label.isEmpty else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
@@ -239,8 +247,15 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, first.text != "expect-frontmost", !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-clipboard-matches", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, pick-app, pick-call-app, expect, expect-not, expect-clipboard-matches, expect-status-item, expect-notification and close-window")
+        if timeout != nil {
+            let retrying = [
+                "launch", "click", "pick-app", "pick-call-app", "expect", "expect-not",
+                "expect-clipboard-matches", "expect-status-item", "expect-notification",
+                "expect-frontmost", "expect-active-app", "close-window",
+            ]
+            guard retrying.contains(first.text) else {
+                throw fail("timeout only applies to \(retrying.joined(separator: ", "))")
+            }
         }
         if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {
             throw fail("duplicate screenshot name: \(name)")

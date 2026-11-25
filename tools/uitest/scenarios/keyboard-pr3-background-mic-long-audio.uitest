@@ -29,5 +29,6 @@ expect-status-item "Scribular"
 expect-active-app "com.apple.finder"
 stop-audio
 reopen-app
+expect-not "How many people spoke?"
 expect "Therapy (DORA) ·" timeout 400s
 quit

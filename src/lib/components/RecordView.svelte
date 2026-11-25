@@ -395,14 +395,15 @@
         sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
       }
       const refused = accessDenied(e);
+      const reason = e instanceof Error ? e.message : String(e);
       if (refused) {
         accessState.set(refused);
       } else {
-        denied = deniedPrivacy(String(e));
-        error = String(e);
+        denied = deniedPrivacy(reason);
+        error = reason;
       }
       if (trayRequest !== undefined) {
-        const message = refused ? 'Scribular cannot start recording because account access is restricted.' : String(e);
+        const message = refused ? 'Scribular cannot start recording because account access is restricted.' : reason;
         window.dispatchEvent(new Event('tray-start-failed'));
         try { await notifyTrayStartFailure(message); }
         catch (noticeError) { error = `${message} (notification failed: ${String(noticeError)})`; }

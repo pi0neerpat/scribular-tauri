@@ -114,6 +114,10 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `expect-notification "text"` | Wait until a Notification Center banner's text contains the value. |
 | `dock click "Scribular"` | Press the unique matching Dock item. |
 
+`timeout 30s` also applies to `pick-call-app`, `expect-frontmost`, and `expect-active-app`. Both focus checks take a quoted bundle identifier. With the **Choose a call app** dialog open, `pick-app` uses the same selection behavior as `pick-call-app`.
+
+`launch-with-unavailable-hotkey` requires a fresh launch. Use `quit` first if the script already launched the app.
+
 `timeout 30s` also applies to `expect-status-item` and `expect-notification`. Notifications are brief (about 3–4 seconds in the tested VM), so put `expect-notification` directly after the action that triggers the banner. It searches banner text in Notification Center; it does not read notification history.
 
 ### Native surfaces and fallbacks

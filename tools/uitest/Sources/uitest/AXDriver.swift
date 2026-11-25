@@ -68,6 +68,9 @@ final class AXDriver: Driver {
             guard let frame = frame(of: element) else { throw .retryable("not found") }
             return try click(element, at: CGPoint(x: frame.midX, y: frame.midY))
         case .pickApp(let app):
+            if allElements().contains(where: { matches($0, exact: "Choose a call app") }) {
+                return try perform(.pickCallApp(app))
+            }
             if popupMenuOpen() {
                 _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
                 let closed = waitUntil(timeout: 2) { !popupMenuOpen() }

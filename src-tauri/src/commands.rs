@@ -1362,6 +1362,7 @@ fn tray_start_notice(message: &str) -> &str {
         | "Choose an app before recording a call."
         | "Scribular cannot start recording because account access is restricted."
         | "microphone permission denied"
+        | "system audio recording permission denied"
         | "no microphone found" => message,
         _ => "Couldn't start recording. Open Scribular for details.",
     }
@@ -1808,6 +1809,7 @@ mod tests {
     fn tray_start_notice_preserves_safe_reasons_and_hides_raw_errors() {
         for reason in [
             "microphone permission denied",
+            "system audio recording permission denied",
             "Choose an app before recording a call.",
         ] {
             assert_eq!(tray_start_notice(reason), reason);

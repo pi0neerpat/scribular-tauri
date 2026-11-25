@@ -205,7 +205,7 @@ fn replace_with(
         }
     }
     actual.active = next.map(str::to_owned);
-    actual.press.held = false;
+    actual.press = PressGuard::default();
     Ok(())
 }
 
@@ -241,10 +241,13 @@ pub fn set(
         return Err(error);
     }
     if store.set_shortcut_settings(&settings).is_err() {
+        crate::diag::log::log("ERROR", "shortcuts", "shortcut settings save failed");
         let previous = desired(&current, false);
         let message = match replace(app, &mut actual, previous) {
             Ok(()) => "Could not save shortcut settings.".to_string(),
-            Err(rollback) => format!("Could not save shortcut settings. {rollback}"),
+            Err(rollback) => format!(
+                "Could not save shortcut settings, and could not restore the previous shortcut. {rollback}"
+            ),
         };
         actual.error = Some(message.clone());
         drop(actual);
@@ -341,6 +344,21 @@ mod tests {
         assert!(validate("Ctrl+Alt+Up").is_err());
         assert!(validate("Shift+Super+3").is_err());
         assert!(validate("Ctrl+Alt+F5").is_ok());
+    }
+
+    #[test]
+    fn replacement_clears_debounce_only_when_the_active_chord_changes() {
+        let now = Instant::now();
+        let mut actual = Actual {
+            active: Some("old".into()),
+            ..Default::default()
+        };
+        assert!(actual.press.accepts(ShortcutState::Pressed, now));
+        replace_with(&mut actual, Some("old"), |_| Ok(()), |_| Ok(())).unwrap();
+        assert!(!actual.press.accepts(ShortcutState::Released, now));
+        assert!(!actual.press.accepts(ShortcutState::Pressed, now));
+        replace_with(&mut actual, Some("new"), |_| Ok(()), |_| Ok(())).unwrap();
+        assert!(actual.press.accepts(ShortcutState::Pressed, now));
     }
 
     #[test]
