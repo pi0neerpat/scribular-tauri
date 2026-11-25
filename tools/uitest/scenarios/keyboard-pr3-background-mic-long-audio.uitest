@@ -1,0 +1,34 @@
+# AS9. Run with a quiet test microphone that can hear the fixture from the speakers.
+# Omit --record when running this scenario.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+click "Settings"
+expect "Keyboard Shortcuts"
+click "Keyboard Shortcuts"
+expect "When enabled, this shortcut works in every app"
+click "Enable background shortcut" index 1
+expect "Active: ⌃⌥⌘R"
+key cmd+w
+expect-not "Scribular Settings"
+close-window
+dock click "Finder"
+expect-active-app "com.apple.finder"
+expect-status-item "Scribular"
+key ctrl+option+cmd+r
+expect-status-item "Scribular — Recording"
+expect-active-app "com.apple.finder"
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+wait 35s
+key ctrl+option+cmd+r
+expect-status-item "Scribular"
+expect-active-app "com.apple.finder"
+stop-audio
+reopen-app
+expect-not "How many people spoke?"
+expect "Therapy (DORA) ·" timeout 400s
+quit

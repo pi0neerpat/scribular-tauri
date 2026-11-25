@@ -10,7 +10,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, Short
 use ts_rs::TS;
 
 use crate::{
-    shell::menu::BINDINGS,
+    shell::{
+        menu::BINDINGS,
+        recording::{background, BackgroundAction},
+    },
     store::{ShortcutSettings, Store},
 };
 
@@ -155,14 +158,7 @@ pub fn toggle_on_press(app: &AppHandle, shortcut: &Shortcut, state: ShortcutStat
         return;
     }
     drop(actual);
-    let recording = app
-        .try_state::<std::sync::Arc<crate::jobs::Recorder>>()
-        .is_some_and(|recorder| recorder.recording_state().is_some());
-    if recording {
-        crate::shell::tray::stop(app, None);
-    } else {
-        let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
-    }
+    background(app, BackgroundAction::Toggle);
 }
 
 fn replace(app: &AppHandle, actual: &mut Actual, next: Option<&str>) -> Result<(), String> {
@@ -241,15 +237,16 @@ pub fn set(
         if let Ok(result) = state(app, store) {
             let _ = app.emit(REGISTRATION_EVENT, result);
         }
-        refresh_tray(app, store);
+        refresh_tray(app);
         return Err(error);
     }
-    if let Err(error) = store.set_shortcut_settings(&settings) {
+    if store.set_shortcut_settings(&settings).is_err() {
+        crate::diag::log::log("ERROR", "shortcuts", "shortcut settings save failed");
         let previous = desired(&current, false);
         let message = match replace(app, &mut actual, previous) {
-            Ok(()) => error.to_string(),
+            Ok(()) => "Could not save shortcut settings.".to_string(),
             Err(rollback) => format!(
-                "Could not save shortcut: {error}; could not restore previous shortcut: {rollback}"
+                "Could not save shortcut settings, and could not restore the previous shortcut. {rollback}"
             ),
         };
         actual.error = Some(message.clone());
@@ -257,7 +254,7 @@ pub fn set(
         if let Ok(result) = state(app, store) {
             let _ = app.emit(REGISTRATION_EVENT, result);
         }
-        refresh_tray(app, store);
+        refresh_tray(app);
         return Err(message);
     }
     actual.capturing = false;
@@ -265,7 +262,7 @@ pub fn set(
     drop(actual);
     let result = state(app, store)?;
     let _ = app.emit(REGISTRATION_EVENT, &result);
-    refresh_tray(app, store);
+    refresh_tray(app);
     Ok(result)
 }
 
@@ -288,18 +285,17 @@ pub fn capture(
         actual.capturing = false;
     }
     drop(actual);
-    refresh_tray(app, store);
+    refresh_tray(app);
     let result = state(app, store)?;
     let _ = app.emit(REGISTRATION_EVENT, &result);
     Ok(result)
 }
 
-pub fn refresh_tray(app: &AppHandle, store: &Store) {
-    let recording = app
+pub fn refresh_tray(app: &AppHandle) {
+    let (recording, multi_speaker) = app
         .try_state::<std::sync::Arc<crate::jobs::Recorder>>()
-        .is_some_and(|r| r.recording_state().is_some());
-    let multi = store.recording_settings().is_ok_and(|s| s.multi_speaker);
-    crate::shell::tray::refresh(app, recording, multi);
+        .map_or((false, false), |recorder| recorder.tray_state());
+    crate::shell::tray::refresh(app, recording, multi_speaker);
 }
 
 pub fn restore(app: &AppHandle, store: &Store) {
@@ -348,6 +344,21 @@ mod tests {
         assert!(validate("Ctrl+Alt+Up").is_err());
         assert!(validate("Shift+Super+3").is_err());
         assert!(validate("Ctrl+Alt+F5").is_ok());
+    }
+
+    #[test]
+    fn replacement_clears_debounce_only_when_the_active_chord_changes() {
+        let now = Instant::now();
+        let mut actual = Actual {
+            active: Some("old".into()),
+            ..Default::default()
+        };
+        assert!(actual.press.accepts(ShortcutState::Pressed, now));
+        replace_with(&mut actual, Some("old"), |_| Ok(()), |_| Ok(())).unwrap();
+        assert!(!actual.press.accepts(ShortcutState::Released, now));
+        assert!(!actual.press.accepts(ShortcutState::Pressed, now));
+        replace_with(&mut actual, Some("new"), |_| Ok(()), |_| Ok(())).unwrap();
+        assert!(actual.press.accepts(ShortcutState::Pressed, now));
     }
 
     #[test]

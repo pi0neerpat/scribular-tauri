@@ -235,7 +235,7 @@ describe('AS1 welcome on first launch', () => {
     launch();
     await vi.waitFor(() => expect(next().disabled || start().disabled).toBe(false));
     reopenFromHelp();
-    emit('tray-start-recording', null);
+    emit('tray-start-recording', 7);
     await vi.waitFor(() => expect(calls('set_main_window_visible')).toHaveLength(2));
     expect(calls('get_recording_settings')).toHaveLength(0);
     expect(target.querySelectorAll('dialog[open]')).toHaveLength(1);
@@ -246,6 +246,17 @@ describe('AS1 welcome on first launch', () => {
     button('Cancel').click();
     await vi.waitFor(() => expect(dialog()).not.toBeNull());
     expect(calls('complete_onboarding')).toHaveLength(1);
+  });
+
+  it('cancels a tray start while the startup gate is loading', async () => {
+    const defaultInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation((command, args) =>
+      command === 'locked_state' ? new Promise(() => {}) : defaultInvoke(command, args));
+    launch();
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith('tray-start-recording', expect.any(Function)));
+    emit('tray-start-recording', 7);
+    expect(calls('cancel_tray_start')).toEqual([['cancel_tray_start', { request: 7 }]]);
+    expect(calls('get_recording_settings')).toHaveLength(0);
   });
 });
 

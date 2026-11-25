@@ -16,11 +16,13 @@ public struct KeyCombo: Equatable {
 
 public enum Command: Equatable {
     case launch(keepData: Bool)
+    case launchWithUnavailableHotkey
     case click(label: String, index: Int?, within: String?)
     case pickApp(String)
     case pickCallApp(String)
     case type(String)
     case key(KeyCombo)
+    case claimHotkey(KeyCombo)
     case expect(String)
     case expectNot(String)
     case expectClipboardMatches(String)
@@ -28,6 +30,7 @@ public enum Command: Equatable {
     case pause(seconds: Double)
     case pace(seconds: Double)
     case closeWindow
+    case reopenApp
     case handleKeychain
     case labels
     case screenshot(name: String?)
@@ -36,7 +39,13 @@ public enum Command: Equatable {
     case expectStatusItem(String)
     case statusItemClick(String)
     case statusItemMouseClick(String)
+    case backgroundStatusItemClick(String)
     case expectNotification(String)
+    case expectFrontmost(String)
+    case expectActiveApp(String)
+    case observeNoNotification(String, seconds: Double)
+    case holdFixtureDatabaseWriter
+    case releaseFixtureDatabaseWriter
     case dockClick(String)
     case play(path: String, loop: Bool)
     case stopAudio
@@ -103,6 +112,17 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "launch":
             guard args.isEmpty || args.map(\.text) == ["--keep-data"] else { throw fail("usage: launch [--keep-data]") }
             command = .launch(keepData: !args.isEmpty)
+        case "launch-with-unavailable-hotkey":
+            guard args.isEmpty else { throw fail("usage: launch-with-unavailable-hotkey") }
+            for prior in steps.reversed() {
+                if prior.command == .quit { break }
+                switch prior.command {
+                case .launch, .launchWithUnavailableHotkey:
+                    throw fail("launch-with-unavailable-hotkey requires a fresh launch; quit first")
+                default: break
+                }
+            }
+            command = .launchWithUnavailableHotkey
         case "click":
             guard let label = quoted(args.first), !label.isEmpty else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
             var index: Int?
@@ -133,15 +153,17 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "type":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: type \"text\"") }
             command = .type(value)
-        case "key":
-            guard args.count == 1, !args[0].quoted else { throw fail("usage: key cmd+shift+s") }
+        case "key", "claim-hotkey":
+            guard args.count == 1, !args[0].quoted else { throw fail("usage: \(first.text) cmd+shift+s") }
             let parts = args[0].text.lowercased().split(separator: "+", omittingEmptySubsequences: false).map(String.init)
             guard let key = parts.last, !key.isEmpty else { throw fail("invalid key combo") }
             var modifiers = Set<Modifier>()
             for part in parts.dropLast() {
                 guard let modifier = Modifier(rawValue: part), modifiers.insert(modifier).inserted else { throw fail("invalid key modifier: \(part)") }
             }
-            command = .key(KeyCombo(modifiers: modifiers, key: key))
+            let combo = KeyCombo(modifiers: modifiers, key: key)
+            if first.text == "claim-hotkey", modifiers.isEmpty { throw fail("claimed hotkey needs a modifier") }
+            command = first.text == "key" ? .key(combo) : .claimHotkey(combo)
         case "expect", "expect-not":
             guard args.count == 1, let value = quoted(args.first) else { throw fail("usage: \(first.text) \"label\"") }
             command = first.text == "expect" ? .expect(value) : .expectNot(value)
@@ -155,6 +177,26 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: \(first.text) \"text\"")
             }
             command = first.text == "expect-status-item" ? .expectStatusItem(value) : .expectNotification(value)
+        case "expect-frontmost":
+            guard args.count == 1, let bundle = quoted(args[0]), !bundle.isEmpty else {
+                throw fail("usage: expect-frontmost \"bundle identifier\"")
+            }
+            command = .expectFrontmost(bundle)
+        case "expect-active-app":
+            guard args.count == 1, let bundle = quoted(args[0]), !bundle.isEmpty else {
+                throw fail("usage: expect-active-app \"bundle identifier\"")
+            }
+            command = .expectActiveApp(bundle)
+        case "hold-fixture-database-writer", "release-fixture-database-writer":
+            guard args.isEmpty else { throw fail("usage: \(first.text)") }
+            command = first.text == "hold-fixture-database-writer" ? .holdFixtureDatabaseWriter : .releaseFixtureDatabaseWriter
+        case "observe-no-notification":
+            guard args.count == 2, let text = quoted(args[0]), !text.isEmpty, !args[1].quoted else {
+                throw fail("usage: observe-no-notification \"text\" 3s")
+            }
+            let duration = try seconds(args[1])
+            guard duration > 0 else { throw fail("observation duration must be positive") }
+            command = .observeNoNotification(text, seconds: duration)
         case "status-item":
             guard args.count == 2, args[0].text == "click", let label = quoted(args[1]), !label.isEmpty else {
                 throw fail("usage: status-item click \"help\"")
@@ -165,6 +207,11 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 throw fail("usage: status-item-mouse-click \"help\"")
             }
             command = .statusItemMouseClick(label)
+        case "background-status-item-click":
+            guard args.count == 1, let label = quoted(args[0]), !label.isEmpty else {
+                throw fail("usage: background-status-item-click \"help\"")
+            }
+            command = .backgroundStatusItemClick(label)
         case "dock":
             guard args.count == 2, args[0].text == "click", let title = quoted(args[1]), !title.isEmpty else {
                 throw fail("usage: dock click \"title\"")
@@ -190,6 +237,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "stop-audio":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = .stopAudio
+        case "reopen-app":
+            guard args.isEmpty else { throw fail("usage: reopen-app") }
+            command = .reopenApp
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit
@@ -197,8 +247,15 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             throw fail("unknown command: \(first.text)")
         }
         // only these commands retry; a timeout anywhere else would be silently ignored
-        if timeout != nil, !["launch", "click", "pick-app", "pick-call-app", "expect", "expect-not", "expect-clipboard-matches", "expect-status-item", "expect-notification", "close-window"].contains(first.text) {
-            throw fail("timeout only applies to launch, click, pick-app, pick-call-app, expect, expect-not, expect-clipboard-matches, expect-status-item, expect-notification and close-window")
+        if timeout != nil {
+            let retrying = [
+                "launch", "click", "pick-app", "pick-call-app", "expect", "expect-not",
+                "expect-clipboard-matches", "expect-status-item", "expect-notification",
+                "expect-frontmost", "expect-active-app", "close-window",
+            ]
+            guard retrying.contains(first.text) else {
+                throw fail("timeout only applies to \(retrying.joined(separator: ", "))")
+            }
         }
         if let name = screenshotName(command, line: lineNumber), steps.contains(where: { screenshotName($0.command, line: $0.line) == name }) {
             throw fail("duplicate screenshot name: \(name)")

@@ -1,0 +1,36 @@
+# The fresh debug fixture seeds F21, which passes app validation but cannot register on macOS.
+launch-with-unavailable-hotkey
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+click "Settings"
+click "Keyboard Shortcuts"
+expect "When enabled, this shortcut works in every app"
+click "Enable background shortcut" index 1
+expect "macOS could not register that shortcut."
+expect-not "Active:"
+# Use the window control so the tray click follows a mouse event.
+close-window
+expect-not "Scribular Settings"
+expect-active-app "com.app.scribular.tauri"
+expect-status-item "Scribular"
+status-item-mouse-click "Scribular"
+expect "Show Scribular"
+click "Start Recording"
+expect-status-item "Scribular — Recording"
+expect "Pause"
+wait 2s
+click "Stop"
+expect-status-item "Scribular"
+expect "Start recording"
+click "Start recording"
+expect-status-item "Scribular — Recording"
+expect "Pause"
+wait 2s
+click "Stop"
+expect-status-item "Scribular"
+expect "Start recording"
+quit

@@ -163,8 +163,11 @@ export function confirmQuit(restartForUpdate: boolean): Promise<void> {
   return invoke<void>('confirm_quit', { restartForUpdate });
 }
 export function notifyTrayStartFailure(message: string): Promise<void> { return invoke<void>('notify_tray_start_failure', { message }); }
-export function onTrayStartRecording(handler: () => void): Promise<UnlistenFn> {
-  return listen('tray-start-recording', () => handler());
+export function cancelTrayStart(request: number): Promise<void> {
+  return invoke('cancel_tray_start', { request });
+}
+export function onTrayStartRecording(handler: (request: number) => void): Promise<UnlistenFn> {
+  return listen<number>('tray-start-recording', (event) => handler(event.payload));
 }
 export function onQuitRequested(handler: (restartForUpdate: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>('quit-requested', (event) => handler(event.payload));
@@ -451,8 +454,9 @@ export function startRecording(
   mode: InputMode,
   appId: string | null,
   title: string,
+  trayRequest?: number,
 ): Promise<Session> {
-  return invoke<Session>('start_recording', { mode, appId, title });
+  return invoke<Session>('start_recording', { mode, appId, title, ...(trayRequest === undefined ? {} : { trayRequest }) });
 }
 
 /** Stops recording and starts transcription; resolves to the session id. */

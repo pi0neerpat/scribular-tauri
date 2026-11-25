@@ -1352,13 +1352,30 @@ pub(crate) async fn confirm_quit(
 }
 
 #[tauri::command]
+pub fn cancel_tray_start(request: u32) {
+    crate::shell::recording::cancel_start(request);
+}
+
+fn tray_start_notice(message: &str) -> &str {
+    match message {
+        "The speech model isn't downloaded yet."
+        | "Choose an app before recording a call."
+        | "Scribular cannot start recording because account access is restricted."
+        | "microphone permission denied"
+        | "system audio recording permission denied"
+        | "no microphone found" => message,
+        _ => "Couldn't start recording. Open Scribular for details.",
+    }
+}
+
+#[tauri::command]
 pub fn notify_tray_start_failure(app: AppHandle, message: String) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
     crate::shell::show_main(&app);
     app.notification()
         .builder()
         .title("Scribular")
-        .body(message)
+        .body(tray_start_notice(&message))
         .show()
         .map_err(|e| e.to_string())
 }
@@ -1388,18 +1405,26 @@ pub async fn list_audio_apps(recorder: State<'_, Arc<Recorder>>) -> Result<Vec<A
 /// [`open_privacy_settings`] then takes the user to the pane.
 #[tauri::command]
 pub async fn start_recording(
+    app: AppHandle,
     recorder: State<'_, Arc<Recorder>>,
     mode: InputMode,
     app_id: Option<String>,
     title: String,
     licensing: State<'_, Arc<Licensing>>,
+    tray_request: Option<u32>,
 ) -> Result<Session, String> {
+    let (action, notify) = crate::shell::recording::Action::begin(tray_request)?;
     licensing.require_access()?;
     let recorder = Arc::clone(&recorder);
     tauri::async_runtime::spawn_blocking(move || {
-        recorder
+        let _action = action;
+        let session = recorder
             .start(mode, app_id.as_deref(), &title)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        if notify {
+            crate::shell::recording::started(&app, &session);
+        }
+        Ok(session)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1414,8 +1439,10 @@ pub async fn stop_recording(
     if !matches!(num_speakers, None | Some(2 | 3)) {
         return Err("speaker count must be 2, 3, or 4+".into());
     }
+    let (action, _) = crate::shell::recording::Action::begin(None)?;
     let recorder = Arc::clone(&recorder);
     tauri::async_runtime::spawn_blocking(move || {
+        let _action = action;
         recorder
             .stop_with_speakers(num_speakers)
             .map_err(|e| e.to_string())
@@ -1777,6 +1804,22 @@ impl JobEvents for TauriJobEvents {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tray_start_notice_preserves_safe_reasons_and_hides_raw_errors() {
+        for reason in [
+            "microphone permission denied",
+            "system audio recording permission denied",
+            "Choose an app before recording a call.",
+        ] {
+            assert_eq!(tray_start_notice(reason), reason);
+        }
+        let private = "private audio path, transcript, note, custom style and session title";
+        assert_eq!(
+            tray_start_notice(private),
+            "Couldn't start recording. Open Scribular for details."
+        );
+    }
 
     #[test]
     fn summary_notice_is_opt_in_focused_suppressed_and_once_per_session() {

@@ -4,6 +4,7 @@
   import {
     accessDenied,
     cancelJob,
+    cancelTrayStart,
     currentRecording,
     deniedPrivacy,
     getPromptList,
@@ -130,7 +131,6 @@
   let error = $state<string | null>(null);
   let denied = $state<Privacy | null>(null);
   let startedAt = $state(0);
-  let trayStart = false;
   // Two sources show speaker labels.
   let labeled = $state(false);
   let now = $state(Date.now());
@@ -224,7 +224,11 @@
   onMount(() => {
     getRecordingSource().then((saved) => { source = saved; sourceReady = true; }).catch((e) => (error = String(e)));
     void loadOnboarding();
-    const startFromTray = () => { if (trayStart || busy) return; trayStart = true; void start(); };
+    const startFromTray = (event: Event) => {
+      const request: number = (event as CustomEvent<number>).detail;
+      if (busy) void cancelTrayStart(request).catch(() => {});
+      else void start(request).finally(() => cancelTrayStart(request).catch(() => {}));
+    };
     window.addEventListener('tray-start-recording', startFromTray);
     const unlisten = onSessionProgress((p) => {
       if (p.sessionId !== sessionId) {
@@ -242,6 +246,7 @@
         }).catch(() => {});
       }
       if (p.state === 'recording') firstCall = false;
+      else askSpeakerCount = false;
       progress = p;
       status = p.state;
       if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
@@ -344,15 +349,15 @@
     if (source.location === 'inRoom') { firstCall = pickerOpen = false; denied = error = null; }
   }
 
-  async function start() {
+  async function start(trayRequest?: number) {
+    if (busy) return;
     if (!speechReady) {
       onStartFailed();
       const message = "The speech model isn't downloaded yet.";
       error = message;
-      if (trayStart) {
+      if (trayRequest !== undefined) {
         window.dispatchEvent(new Event('tray-start-failed'));
         try { await notifyTrayStartFailure(message); } catch (e) { error = `${message} (notification failed: ${String(e)})`; }
-        trayStart = false;
       }
       return;
     }
@@ -371,7 +376,8 @@
       attempt = crypto.randomUUID();
       sessionStorage.setItem(IN_FLIGHT_START_KEY, attempt);
       sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, String(settings.multiSpeaker));
-      const session = await startRecording(chosenSource.location === 'onCall' ? 'micAndSystem' : 'mic', app, title);
+      const mode = chosenSource.location === 'onCall' ? 'micAndSystem' : 'mic';
+      const session = await startRecording(mode, app, title, trayRequest);
       if (sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) sessionStorage.removeItem(IN_FLIGHT_START_KEY);
       resultFetch++;
       sessionId = session.id;
@@ -382,7 +388,6 @@
       startedAt = Date.now();
       level = {};
       capture = await recordingState().catch(() => null);
-      trayStart = false;
     } catch (e) {
       onStartFailed();
       if (attempt && sessionStorage.getItem(IN_FLIGHT_START_KEY) === attempt) {
@@ -390,26 +395,18 @@
         sessionStorage.removeItem(IN_FLIGHT_SPEAKERS_KEY);
       }
       const refused = accessDenied(e);
+      const reason = e instanceof Error ? e.message : String(e);
       if (refused) {
         accessState.set(refused);
-        if (trayStart) {
-          const message = 'Scribular cannot start recording because account access is restricted.';
-          window.dispatchEvent(new Event('tray-start-failed'));
-          try { await notifyTrayStartFailure(message); }
-          catch (noticeError) { error = `${message} (notification failed: ${String(noticeError)})`; }
-          trayStart = false;
-        }
+      } else {
+        denied = deniedPrivacy(reason);
+        error = reason;
       }
-      else {
-        denied = deniedPrivacy(String(e));
-        error = String(e);
-        if (trayStart) {
-          window.dispatchEvent(new Event('tray-start-failed'));
-          try {
-            await notifyTrayStartFailure(String(e));
-          } catch (noticeError) { error = `${String(e)} (notification failed: ${String(noticeError)})`; }
-          trayStart = false;
-        }
+      if (trayRequest !== undefined) {
+        const message = refused ? 'Scribular cannot start recording because account access is restricted.' : reason;
+        window.dispatchEvent(new Event('tray-start-failed'));
+        try { await notifyTrayStartFailure(message); }
+        catch (noticeError) { error = `${message} (notification failed: ${String(noticeError)})`; }
       }
     } finally {
       busy = false;
@@ -552,7 +549,7 @@
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
     <div class="record-control">
       <div class="record-ring" class:downloading={!speechReady} style:--speech-progress={`${speechPercent}%`}>
-        <button onclick={start} aria-describedby={speechReady ? undefined : modelStatusId} disabled={busy || !sourceReady || denied === 'microphone' || (source.location === 'onCall' && !source.targetApp) || !speechReady || !allows($accessState)}>
+        <button onclick={() => void start()} aria-describedby={speechReady ? undefined : modelStatusId} disabled={busy || !sourceReady || denied === 'microphone' || (source.location === 'onCall' && !source.targetApp) || !speechReady || !allows($accessState)}>
           Start recording
         </button>
       </div>

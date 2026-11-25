@@ -36,6 +36,8 @@ pub enum RecordError {
     AlreadyRecording,
     NotRecording,
     SpeechModelNotReady,
+    NoAudio,
+    StopPreparationFailed,
     /// System audio was asked for without an app to capture.
     NoTargetApp,
     UnsupportedMode,
@@ -44,12 +46,19 @@ pub enum RecordError {
     Store(StoreError),
 }
 
+impl RecordError {
+    pub(crate) const STOP_PREPARATION_FAILED_MESSAGE: &str =
+        "Couldn’t prepare to stop. Recording is still running.";
+}
+
 impl fmt::Display for RecordError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AlreadyRecording => f.write_str("a recording is already running"),
             Self::NotRecording => f.write_str("nothing is recording"),
             Self::SpeechModelNotReady => f.write_str("The speech model isn't downloaded yet."),
+            Self::NoAudio => f.write_str("No audio was recorded."),
+            Self::StopPreparationFailed => f.write_str(Self::STOP_PREPARATION_FAILED_MESSAGE),
             Self::NoTargetApp => f.write_str("Choose an app to record."),
             Self::UnsupportedMode => f.write_str("Choose In the room or On a call to record."),
             Self::Interrupted => f.write_str("Recording stopped. Saved audio can be recovered."),
@@ -325,6 +334,13 @@ impl Recorder {
             .map(Recording::snapshot)
     }
 
+    pub(crate) fn tray_state(&self) -> (bool, bool) {
+        let recording = lock(&self.inner.recording);
+        recording
+            .as_ref()
+            .map_or((false, false), |r| (true, r.multi_speaker))
+    }
+
     /// Creates a session and starts the microphone. App audio attaches in the background.
     pub fn start(
         &self,
@@ -426,19 +442,27 @@ impl Recorder {
         let _gate = lock(&self.install_gate);
         let inner = &self.inner;
         let mut current = lock(&inner.recording);
-        let mut recording = current.take().ok_or(RecordError::NotRecording)?;
+        let id = current
+            .as_ref()
+            .ok_or(RecordError::NotRecording)?
+            .session_id
+            .clone();
+        if let Err(error) = inner.store.snapshot_recording_prompt(&id) {
+            crate::diag::log::log("ERROR", "recording", crate::diag::log::kind(&error));
+            return Err(RecordError::StopPreparationFailed);
+        }
+        let mut recording = current.take().expect("active recording");
         inner.recording_ended();
-        let id = recording.session_id.clone();
         let diarize = recording.multi_speaker && num_speakers != Some(0);
         if let Err(error) = recording.close(inner) {
             inner.interrupt_audio(&id, error, &recording.transcription);
-            return Ok(id);
+            return Err(RecordError::Interrupted);
         }
         let samples = recording.samples();
         if samples == 0 {
             recording.transcription.cancel();
             inner.end(&id, SessionStatus::Failed, "no audio was recorded");
-            return Ok(id);
+            return Err(RecordError::NoAudio);
         }
         let duration_ms =
             u32::try_from(samples as u64 * 1000 / u64::from(SAMPLE_RATE)).unwrap_or(u32::MAX);
@@ -492,6 +516,7 @@ impl Recorder {
                     "Recording stopped: couldn't start transcription.",
                     &transcription,
                 );
+                return Err(RecordError::Interrupted);
             }
         }
         Ok(id)

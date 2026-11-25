@@ -1,0 +1,44 @@
+# AS11. The synthetic speech runs in one afplay process throughout capture.
+# Built-in style IDs: default-therapy-dora and default-narrative-therapy.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+click "Settings"
+expect "Keyboard Shortcuts"
+click "Keyboard Shortcuts"
+expect "When enabled, this shortcut works in every app"
+click "Enable background shortcut" index 1
+expect "Active: ⌃⌥⌘R"
+key cmd+w
+expect-not "Scribular Settings"
+click "Note Styles"
+expect "Built-in"
+click "Show Narrative Therapy in style menu"
+click "New Recording"
+expect "Start recording"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+expect "Therapy (DORA)"
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+click "Start recording"
+expect "Pause"
+expect-status-item "Scribular — Recording"
+click "Therapy (DORA)"
+wait 1s
+key down
+wait 1s
+key enter
+expect "Narrative Therapy"
+wait 35s
+key ctrl+option+cmd+r
+expect-status-item "Scribular"
+stop-audio
+expect "Narrative Therapy ·" timeout 400s
+quit

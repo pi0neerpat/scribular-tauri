@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @Test func parseClipboardMatch() throws {
@@ -11,6 +12,22 @@ import Testing
     #expect(step.timeout == 300)
 }
 @testable import UITestCore
+
+@Test func parsesReopenApp() throws {
+    #expect(try parseScript("reopen-app").first?.command == .reopenApp)
+    #expect(throws: ScriptError.self) { try parseScript("reopen-app Scribular") }
+}
+
+@Test func parsesFreshLaunchWithUnavailableHotkey() throws {
+    #expect(try parseScript("launch-with-unavailable-hotkey").first?.command == .launchWithUnavailableHotkey)
+    #expect(throws: ScriptError.self) { try parseScript("launch-with-unavailable-hotkey --keep-data") }
+}
+
+@Test func parsesBackgroundStatusItemClick() throws {
+    let steps = try parseScript(#"background-status-item-click "Scribular — Recording""#)
+    #expect(steps.map(\.command) == [.backgroundStatusItemClick("Scribular — Recording")])
+    #expect(throws: ScriptError.self) { try parseScript(#"background-status-item-click """#) }
+}
 
 @Test func parsesAllCommands() throws {
     let script = """
@@ -190,4 +207,77 @@ import Testing
     #expect(missing.exitCode == 1)
     #expect(missing.lines == ["MISSING ffmpeg: brew install ffmpeg"])
     #expect(!missing.lines.joined().contains("secret-password"))
+}
+
+@Test func parsesShortcutObservationCommands() throws {
+    let steps = try parseScript("""
+    expect-frontmost "com.apple.finder" timeout 5s
+    observe-no-notification "Recording started" 3s
+    """)
+    #expect(steps.map(\.command) == [
+        .expectFrontmost("com.apple.finder"),
+        .observeNoNotification("Recording started", seconds: 3)
+    ])
+    #expect(steps[0].timeout == 5)
+    #expect(throws: ScriptError.self) { try parseScript("expect-frontmost Finder") }
+    #expect(throws: ScriptError.self) { try parseScript(#"observe-no-notification "Recording stopped" 0s"#) }
+}
+
+@Test func parsesClaimHotkey() throws {
+    let steps = try parseScript("claim-hotkey ctrl+option+cmd+r")
+    #expect(steps.map(\.command) == [.claimHotkey(KeyCombo(modifiers: [.ctrl, .option, .cmd], key: "r"))])
+    #expect(throws: ScriptError.self) { try parseScript("claim-hotkey r") }
+}
+
+@Test func parsesTimeoutsForBothFocusAssertions() throws {
+    let steps = try parseScript("""
+    expect-frontmost "com.apple.finder" timeout 5s
+    expect-active-app "com.apple.finder" timeout 3s
+    """)
+    #expect(steps.map(\.timeout) == [5, 3])
+}
+
+@Test func unavailableHotkeyLaunchRequiresFreshApp() throws {
+    #expect(throws: ScriptError.self) { try parseScript("launch\nlaunch-with-unavailable-hotkey") }
+    #expect(throws: ScriptError.self) {
+        try parseScript("launch-with-unavailable-hotkey\nlaunch-with-unavailable-hotkey")
+    }
+    #expect(try parseScript("launch\nquit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
+}
+
+@Test func parsesFreshFixtureFailureCommands() throws {
+    let steps = try parseScript("""
+    expect-active-app "com.apple.finder"
+    hold-fixture-database-writer
+    release-fixture-database-writer
+    """)
+    #expect(steps.map(\.command) == [
+        .expectActiveApp("com.apple.finder"), .holdFixtureDatabaseWriter, .releaseFixtureDatabaseWriter
+    ])
+    #expect(throws: ScriptError.self) { try parseScript("hold-fixture-database-writer arbitrary-path") }
+}
+
+@Test func parsesKeyboardPR3RecoveryScenarios() throws {
+    let scenarios = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("scenarios")
+    let paused = try parseScript(String(contentsOf: scenarios.appendingPathComponent(
+        "keyboard-pr3-paused-speakers-frontmost.uitest"
+    ), encoding: .utf8)).map(\.command)
+    let foreground = Command.expectActiveApp("com.app.scribular.tauri")
+    let reopen = try #require(paused.firstIndex(of: .reopenApp))
+    #expect(paused.dropFirst(reopen + 1).first == foreground)
+    let resume = try #require(paused.firstIndex(of: .expect("Resume")))
+    #expect(Array(paused.dropFirst(resume + 1).prefix(2)) == [foreground, .closeWindow])
+
+    let fallback = try parseScript(String(contentsOf: scenarios.appendingPathComponent(
+        "keyboard-pr3-unavailable-hotkey-tray-start.uitest"
+    ), encoding: .utf8)).map(\.command)
+    #expect(fallback.first == .launchWithUnavailableHotkey)
+    let openTray = try #require(fallback.firstIndex(of: .statusItemMouseClick("Scribular")))
+    #expect(fallback.prefix(openTray).contains(.closeWindow))
+    #expect(Array(fallback.dropFirst(openTray + 1).prefix(2)) == [
+        .expect("Show Scribular"),
+        .click(label: "Start Recording", index: nil, within: nil)
+    ])
 }

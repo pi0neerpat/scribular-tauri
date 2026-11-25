@@ -428,12 +428,8 @@ fn a_session_records_transcribes_and_summarizes() {
 
 #[test]
 fn low_memory_stream_announces_summary_wait_then_catches_up_without_losing_audio() {
-    let h = Harness::with(
-        |_| {},
-        |loader| {
-            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
-        },
-    );
+    let h = Harness::new();
+    h.summarizer.summarizer.hold.store(true, Ordering::SeqCst);
     let first = h.start(InputMode::Mic);
     h.feed(12);
     h.wait_chunks(&first, 2);
@@ -454,6 +450,7 @@ fn low_memory_stream_announces_summary_wait_then_catches_up_without_losing_audio
     });
     assert_eq!(h.get(&id).status, SessionStatus::Recording);
 
+    h.summarizer.summarizer.hold.store(false, Ordering::SeqCst);
     assert!(h.queue.wait_idle(WAIT));
     wait_until("transcript waiting clear", || {
         h.events
@@ -1242,13 +1239,36 @@ fn capture_faults_log_metadata_and_keep_committed_audio() {
 fn stopping_with_no_audio_fails_the_session() {
     let h = Harness::new();
     let id = h.start(InputMode::Mic);
-    h.recorder.stop().unwrap();
+    assert!(matches!(h.recorder.stop(), Err(RecordError::NoAudio)));
     h.events.wait_for(&id, SessionStatus::Failed);
 
     let s = h.get(&id);
     assert_eq!(s.error.as_deref(), Some("no audio was recorded"));
     assert!(h.stt.calls().is_empty());
     assert_eq!(h.summarizer.loads.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn failed_stop_preparation_keeps_the_recording_running() {
+    let h = Harness::new();
+    let id = h.start(InputMode::Mic);
+    h.store
+        .set_status(&id, SessionStatus::Failed, None)
+        .unwrap();
+
+    assert!(matches!(
+        h.recorder.stop(),
+        Err(RecordError::StopPreparationFailed)
+    ));
+    assert_eq!(h.recorder.current().as_deref(), Some(id.as_str()));
+    assert!(h.mic.is_open());
+
+    h.store
+        .set_status(&id, SessionStatus::Recording, None)
+        .unwrap();
+    h.feed(3);
+    assert_eq!(h.recorder.stop().unwrap(), id);
+    h.events.wait_for(&id, SessionStatus::Done);
 }
 
 #[test]
@@ -1355,24 +1375,28 @@ fn a_slow_transcriber_catches_up_without_dropping_audio() {
     let h = Harness::new();
     h.stt.hold.store(true, Ordering::SeqCst);
     let id = h.start(InputMode::Mic);
-    h.feed(62);
-    h.wait_chunks(&id, 12);
-    h.stt.hold.store(false, Ordering::SeqCst);
-    // Three windows queued behind the first, then all done while recording.
-    wait_until("the queue drains", || h.stt.calls().len() == 4);
-    wait_until("caught up", || {
-        h.events.messages(&id).last().map(String::as_str) == Some("Recording...")
+    h.feed(20);
+    wait_until("the first transcription window starts", || {
+        h.stt.calls().len() == 1
     });
-    assert_eq!(
-        h.events.messages(&id),
-        ["Recording...", "Catching up...", "Recording..."]
-    );
+    h.feed(65);
+    // Each drain is at most 22 seconds. Once 85 seconds are persisted,
+    // the writer has already sent the windows through 60 seconds to STT.
+    h.wait_chunks(&id, 17);
+    h.stt.hold.store(false, Ordering::SeqCst);
+    wait_until("caught up", || {
+        h.stt.calls().len() == 5
+            && h.events.messages(&id) == ["Recording...", "Catching up...", "Recording..."]
+    });
 
     h.recorder.stop().unwrap();
     h.events.wait_for(&id, SessionStatus::Done);
-    // 0–15, 10–30, 25–45, 40–60, then the 55–62 tail at Stop.
-    assert_eq!(h.stt.calls(), WINDOW_CALLS);
-    assert_eq!(h.get(&id).duration_ms, Some(62_000));
+    // 0–15, 10–30, 25–45, 40–60, 55–75, then the 70–85 tail at Stop.
+    assert_eq!(
+        h.stt.calls(),
+        [15, 20, 20, 20, 20, 15].map(|seconds| seconds * 16_000)
+    );
+    assert_eq!(h.get(&id).duration_ms, Some(85_000));
     h.assert_rows_matched_events();
 }
 
@@ -1442,12 +1466,8 @@ fn segments_are_saved_and_emitted_in_recording_time() {
 
 #[test]
 fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
-    let h = Harness::with(
-        |_| {},
-        |loader| {
-            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
-        },
-    );
+    let h = Harness::new();
+    h.summarizer.summarizer.hold.store(true, Ordering::SeqCst);
     h.recorder.set_unload_whisper(true);
 
     let first = h.start(InputMode::Mic);
@@ -1457,11 +1477,18 @@ fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
 
     let second = h.start(InputMode::Mic);
     h.feed(20);
-    h.wait_chunks(&second, 1);
-    std::thread::sleep(Duration::from_millis(50));
+    wait_until("Whisper waits for the summary", || {
+        h.events
+            .waiting
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.session_id == second && event.waiting)
+    });
     assert_eq!(loads(&h), 1, "Whisper must wait until Gemma is idle");
 
     h.recorder.stop().unwrap();
+    h.summarizer.summarizer.hold.store(false, Ordering::SeqCst);
     h.events.wait_for(&first, SessionStatus::Done);
     h.events.wait_for(&second, SessionStatus::Done);
     assert!(h.queue.wait_idle(WAIT));
@@ -1470,12 +1497,8 @@ fn low_memory_recording_waits_for_a_running_summary_before_loading_whisper() {
 
 #[test]
 fn cancelling_while_waiting_for_summary_to_finish_preserves_cancelled_session() {
-    let h = Harness::with(
-        |_| {},
-        |loader| {
-            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
-        },
-    );
+    let h = Harness::new();
+    h.summarizer.summarizer.hold.store(true, Ordering::SeqCst);
     h.recorder.set_unload_whisper(true);
 
     let first = h.start(InputMode::Mic);
@@ -1497,6 +1520,7 @@ fn cancelling_while_waiting_for_summary_to_finish_preserves_cancelled_session() 
     h.recorder.stop().unwrap();
     h.events.wait_for(&second, SessionStatus::Finalizing);
     assert!(h.recorder.cancel(&second));
+    h.summarizer.summarizer.hold.store(false, Ordering::SeqCst);
 
     h.events.wait_for(&second, SessionStatus::Cancelled);
     h.events.wait_for(&first, SessionStatus::Done);
@@ -1517,12 +1541,8 @@ fn cancelling_while_waiting_for_summary_to_finish_preserves_cancelled_session() 
 
 #[test]
 fn high_memory_live_transcript_continues_during_a_running_summary_without_wait_events() {
-    let h = Harness::with(
-        |_| {},
-        |loader| {
-            Arc::get_mut(&mut loader.summarizer).unwrap().token_delay = Duration::from_millis(500);
-        },
-    );
+    let h = Harness::new();
+    h.summarizer.summarizer.hold.store(true, Ordering::SeqCst);
     h.recorder.set_unload_whisper(false);
 
     let first = h.start(InputMode::Mic);
@@ -1544,6 +1564,7 @@ fn high_memory_live_transcript_continues_during_a_running_summary_without_wait_e
     });
     assert!(h.events.waiting.lock().unwrap().is_empty());
 
+    h.summarizer.summarizer.hold.store(false, Ordering::SeqCst);
     h.recorder.stop().unwrap();
     h.events.wait_for(&second, SessionStatus::Done);
     h.events.wait_for(&first, SessionStatus::Done);
@@ -1828,10 +1849,9 @@ fn safe_delete_refuses_live_capture_and_clear_all_reports_skipped_sessions() {
     );
 }
 
-/// Parity spec 03 AS9: changing the active style mid-recording does not
-/// change the style of the recording in progress.
+/// Keyboard shortcuts R11: a recording uses the note style selected at Stop.
 #[test]
-fn as9_a_recording_keeps_the_style_active_at_start() {
+fn stopping_uses_the_style_selected_during_recording() {
     let h = Harness::new();
     let at_start = h.store.get_active_prompt_id().unwrap().unwrap();
     let id = h.start(InputMode::Mic);
@@ -1840,13 +1860,13 @@ fn as9_a_recording_keeps_the_style_active_at_start() {
         Err(RecordError::AlreadyRecording)
     ));
     h.feed(2);
-    h.store
-        .set_active_prompt("default-narrative-therapy")
-        .unwrap();
+    let at_stop = "default-narrative-therapy";
+    assert_ne!(at_start, at_stop);
+    h.store.set_active_prompt(at_stop).unwrap();
 
     h.recorder.stop().unwrap();
     h.events.wait_for(&id, SessionStatus::Done);
     assert!(h.queue.wait_idle(WAIT));
 
-    assert_eq!(h.get(&id).prompt_id, Some(at_start));
+    assert_eq!(h.get(&id).prompt_id.as_deref(), Some(at_stop));
 }

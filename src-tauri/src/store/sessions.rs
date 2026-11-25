@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::{Result, Store, StoreError};
+use super::{settings::ACTIVE_PROMPT_ID, Result, Store, StoreError};
 
 /// The KTD7 job states. `Failed` keeps its reason in `Session::error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -611,6 +611,18 @@ impl Store {
                  WHERE id = ?1",
                 params![id, status.as_str(), error],
             )?))?;
+        if changed == 0 {
+            return Err(session_not_found(id));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn snapshot_recording_prompt(&self, id: &str) -> Result<()> {
+        let changed = self.with(|c| Ok(c.execute(
+            "UPDATE sessions SET prompt_id = (SELECT value FROM settings WHERE key = ?2)
+             WHERE id = ?1 AND status = 'recording'",
+            params![id, ACTIVE_PROMPT_ID],
+        )?))?;
         if changed == 0 {
             return Err(session_not_found(id));
         }

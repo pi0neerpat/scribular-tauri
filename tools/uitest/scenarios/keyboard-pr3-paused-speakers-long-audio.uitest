@@ -1,0 +1,48 @@
+# AS9. Use the signed debug bundle and a cache with the verified speaker model.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+click "Settings"
+click "Keyboard Shortcuts"
+expect "When enabled, this shortcut works in every app"
+click "Enable background shortcut" index 1
+expect "Active: ⌃⌥⌘R"
+click "Recording" in "Settings categories"
+expect "Identify speakers" timeout 120s
+click "Identify speakers" index 1
+key cmd+w
+expect-not "Scribular Settings"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+close-window
+dock click "Finder"
+expect-active-app "com.apple.finder"
+expect-status-item "Scribular"
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+key ctrl+option+cmd+r
+expect-status-item "Scribular — Recording"
+expect-active-app "com.apple.finder"
+wait 35s
+reopen-app
+expect-active-app "com.app.scribular.tauri"
+expect "Pause"
+key option+cmd+r
+expect "Resume"
+close-window
+dock click "Finder"
+expect-active-app "com.apple.finder"
+key ctrl+option+cmd+r
+expect-status-item "Scribular"
+expect-active-app "com.apple.finder"
+stop-audio
+reopen-app
+expect-not "How many people spoke?"
+expect "Therapy (DORA) ·" timeout 400s
+quit

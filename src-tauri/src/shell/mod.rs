@@ -1,4 +1,5 @@
 pub mod menu;
+pub(crate) mod recording;
 pub mod tray;
 
 use tauri::{AppHandle, Manager, WebviewWindow};

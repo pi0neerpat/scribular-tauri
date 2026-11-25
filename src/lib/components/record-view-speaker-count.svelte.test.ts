@@ -19,6 +19,7 @@ const onSessionLevels = vi.fn();
 const listAudioApps = vi.fn();
 const deniedPrivacy = vi.fn(() => null as 'microphone' | 'systemAudio' | null);
 const getSession = vi.fn();
+const notifyTrayStartFailure = vi.fn(async () => {});
 const onSessionProgress = vi.fn();
 const onSessionTranscriptWaiting = vi.fn(async (_handler: (state: { sessionId: string; waiting: boolean }) => void) => () => {});
 const onSessionSegments = vi.fn();
@@ -30,13 +31,14 @@ let emitProgress: ((progress: SessionProgress) => void) | undefined;
 let emitRecordingState: ((state: { sessionId: string; status: 'running'; activeElapsedMs: number; targetApp: string; appAudioStatus: 'permissionRequired' | 'capturing' | 'unavailable' }) => void) | undefined;
 let emitTranscriptWaiting: ((state: { sessionId: string; waiting: boolean }) => void) | undefined;
 vi.mock('../api', () => ({
-  accessDenied: () => null, cancelJob, currentRecording, deniedPrivacy, getRecordingSettings, getSession,
+  accessDenied: () => null, cancelJob, cancelTrayStart: vi.fn(async () => {}), currentRecording, deniedPrivacy, getRecordingSettings, getSession,
   getRecordingSource, setRecordingSource, getOnboardingState, markAppAudioExplainerShown,
   systemAudioPermissionStatus, recordingState, onRecordingState, onSessionLevels,
   listAudioApps, openPrivacySettings, pauseRecording: vi.fn(), resumeRecording: vi.fn(),
   onSessionProgress, onSessionTranscriptWaiting, onSessionSegments, startRecording, stopRecording,
   getPromptList: vi.fn(() => new Promise(() => {})), listSummaryModels: vi.fn(async () => []), setActivePrompt: vi.fn(),
   getSummaryAvailability, onSummaryAvailability,
+  notifyTrayStartFailure,
   subscribeSummaryAvailability: async (callback: (state: string) => void) => { callback(await getSummaryAvailability()); return () => {}; },
 }));
 const { default: RecordView } = await import('./RecordView.svelte');
@@ -187,9 +189,18 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[0].checked).toBe(true));
     target.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1].click();
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).not.toBeNull());
-    window.dispatchEvent(new Event('tray-start-recording'));
-    await vi.waitFor(() => expect(startRecording).toHaveBeenCalled());
+    window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: 7 }));
+    await vi.waitFor(() => expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Zoom', expect.any(String), 7));
     await vi.waitFor(() => expect(target.querySelector('[aria-label="App audio access"]')).toBeNull());
+    unmount(app);
+    target.remove();
+  });
+  it('reports the missing call app as a specific tray start failure', async () => {
+    getRecordingSource.mockResolvedValue({ location: 'onCall', targetApp: null });
+    const { target, app } = await renderRecordView();
+    window.dispatchEvent(new CustomEvent('tray-start-recording', { detail: 7 }));
+    await vi.waitFor(() => expect(notifyTrayStartFailure).toHaveBeenCalledExactlyOnceWith('Choose an app before recording a call.'));
+    expect(startRecording).not.toHaveBeenCalled();
     unmount(app);
     target.remove();
   });
@@ -233,7 +244,7 @@ describe('recording speaker-count prompt', () => {
     expect(setRecordingSource).toHaveBeenCalledWith({ location: 'onCall', targetApp: 'Playing Other App' });
     await vi.waitFor(() => expect(target.textContent).toContain('App: Playing Other App'));
     await clickButton(target, 'Start recording');
-    expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Playing Other App', expect.any(String));
+    expect(startRecording).toHaveBeenCalledWith('micAndSystem', 'Playing Other App', expect.any(String), undefined);
     unmount(app);
     target.remove();
   });

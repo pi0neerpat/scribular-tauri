@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    AppHandle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,8 @@ pub fn tray_model(recording: bool, multi_speaker: bool) -> Vec<TrayItem> {
 }
 
 pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use super::recording::{background, BackgroundAction::*};
+
     let idle = Image::from_bytes(include_bytes!("../../icons/tray-idle.png"))?;
     let menu = build_menu(app.handle(), false, false)?;
     TrayIconBuilder::with_id("main")
@@ -41,24 +43,11 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "show" => {
                 super::show_main(app);
             }
-            "start" => {
-                let _ = app.emit(crate::commands::TRAY_START_RECORDING_EVENT, ());
-            }
-            "stop" => {
-                stop(app, None);
-            }
-            "stop2" => {
-                stop(app, Some(2));
-            }
-            "stop3" => {
-                stop(app, Some(3));
-            }
-            "stop4" => {
-                stop(app, None);
-            }
-            "skip" => {
-                stop(app, Some(0));
-            }
+            "start" => background(app, Start),
+            "stop" | "stop4" => background(app, Stop(None)),
+            "stop2" => background(app, Stop(Some(2))),
+            "stop3" => background(app, Stop(Some(3))),
+            "skip" => background(app, Stop(Some(0))),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -66,30 +55,26 @@ pub fn install(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub(crate) fn stop(app: &AppHandle, speakers: Option<u8>) {
-    if let Some(recorder) = app.try_state::<std::sync::Arc<crate::jobs::Recorder>>() {
-        let recorder = std::sync::Arc::clone(&recorder);
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let result =
-                tauri::async_runtime::spawn_blocking(move || recorder.stop_with_speakers(speakers))
-                    .await;
-            let error = match result {
-                Ok(Ok(_)) => return,
-                Ok(Err(e)) => e.to_string(),
-                Err(e) => e.to_string(),
-            };
-            crate::diag::log::log("ERROR", "shell", "tray stop failed");
-            let _ = app.emit(crate::commands::TRAY_STOP_FAILED_EVENT, error.clone());
-            use tauri_plugin_notification::NotificationExt;
-            let _ = app
-                .notification()
-                .builder()
-                .title("Scribular")
-                .body(error)
-                .show();
-        });
+fn display_chord(chord: tauri_plugin_global_shortcut::Shortcut) -> String {
+    use tauri_plugin_global_shortcut::Modifiers;
+    let mut label = String::new();
+    for (modifier, glyph) in [
+        (Modifiers::CONTROL, '⌃'),
+        (Modifiers::ALT, '⌥'),
+        (Modifiers::SHIFT, '⇧'),
+        (Modifiers::SUPER, '⌘'),
+    ] {
+        if chord.mods.contains(modifier) {
+            label.push(glyph);
+        }
     }
+    let key = chord.key.to_string();
+    label.push_str(
+        key.strip_prefix("Key")
+            .or_else(|| key.strip_prefix("Digit"))
+            .unwrap_or(&key),
+    );
+    label
 }
 
 fn build_menu(
@@ -98,18 +83,8 @@ fn build_menu(
     multi_speaker: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let chord = crate::shortcuts::active(app)
-        .map(|chord| {
-            format!(
-                " ({})",
-                chord
-                    .replace("control+", "⌃")
-                    .replace("alt+", "⌥")
-                    .replace("shift+", "⇧")
-                    .replace("super+", "⌘")
-                    .replace("Key", "")
-                    .replace("Digit", "")
-            )
-        })
+        .and_then(|chord| chord.parse::<tauri_plugin_global_shortcut::Shortcut>().ok())
+        .map(|chord| format!(" ({})", display_chord(chord)))
         .unwrap_or_default();
     let mut items: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
     for item in tray_model(recording, multi_speaker) {
@@ -186,6 +161,11 @@ pub fn refresh(app: &AppHandle, recording: bool, multi_speaker: bool) {
     if let Ok(menu) = build_menu(app, recording, multi_speaker) {
         let _ = tray.set_menu(Some(menu));
     }
+    let _ = tray.set_tooltip(Some(if recording {
+        "Scribular — Recording"
+    } else {
+        "Scribular"
+    }));
     let (bytes, template): (&[u8], bool) = if recording {
         (include_bytes!("../../icons/tray-recording.png"), false)
     } else {
@@ -219,6 +199,14 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn chord_label_uses_mac_modifier_order() {
+        assert_eq!(
+            display_chord("Shift+Super+Alt+Control+KeyR".parse().unwrap()),
+            "⌃⌥⇧⌘R"
+        );
     }
 
     #[test]

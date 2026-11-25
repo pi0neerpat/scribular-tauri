@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import CoreGraphics
 import Foundation
 import Darwin
@@ -11,6 +12,8 @@ final class AXDriver: Driver {
     private let keychainPassword: String?
     private let player: Player
     private var application: NSRunningApplication?
+    private var claimedHotkey: EventHotKeyRef?
+    private var fixtureWriter: Int32?
     private var keychainHandled = false  // the runner retries .launch; handle each prompt once
 
     init(lifecycle: AppLifecycle, runDir: URL, keychainPassword: String?, player: Player) {
@@ -19,6 +22,11 @@ final class AXDriver: Driver {
         self.runDir = runDir
         self.keychainPassword = keychainPassword
         self.application = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first
+    }
+
+    deinit {
+        if let claimedHotkey { UnregisterEventHotKey(claimedHotkey) }
+        if let fixtureWriter { close(fixtureWriter) }
     }
 
     func perform(_ command: Command) throws(DriverError) -> String? {
@@ -31,6 +39,9 @@ final class AXDriver: Driver {
                 throw .retryable("app window not ready")
             }
             return detail
+        case .launchWithUnavailableHotkey:
+            _ = try lifecycle.launch(keepData: false, runDir: runDir, unavailableHotkey: true)
+            return try perform(.launch(keepData: false))
         case .play(let path, let loop):
             let file = try resolvePlayPath(path, cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
             do { try player.start(file, loop: loop) }
@@ -41,6 +52,7 @@ final class AXDriver: Driver {
             player.stop()
             return nil
         case .quit:
+            releaseFixtureWriter()
             player.stop()
             lifecycle.quit()
             application = nil
@@ -56,6 +68,9 @@ final class AXDriver: Driver {
             guard let frame = frame(of: element) else { throw .retryable("not found") }
             return try click(element, at: CGPoint(x: frame.midX, y: frame.midY))
         case .pickApp(let app):
+            if allElements().contains(where: { matches($0, exact: "Choose a call app") }) {
+                return try perform(.pickCallApp(app))
+            }
             if popupMenuOpen() {
                 _ = try perform(.key(KeyCombo(modifiers: [], key: "escape")))
                 let closed = waitUntil(timeout: 2) { !popupMenuOpen() }
@@ -129,6 +144,25 @@ final class AXDriver: Driver {
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
             return nil
+        case .claimHotkey(let combo):
+            guard claimedHotkey == nil else { throw .fatal("this run already claimed a hotkey") }
+            guard let code = keyCodes[combo.key] else { throw .fatal("unsupported key: \(combo.key)") }
+            let modifiers = combo.modifiers.reduce(UInt32(0)) { flags, modifier in
+                switch modifier {
+                case .cmd: flags | UInt32(cmdKey)
+                case .shift: flags | UInt32(shiftKey)
+                case .option: flags | UInt32(optionKey)
+                case .ctrl: flags | UInt32(controlKey)
+                }
+            }
+            let status = RegisterEventHotKey(
+                UInt32(code), modifiers, EventHotKeyID(signature: 0x55495453, id: 1),
+                GetApplicationEventTarget(), UInt32(kEventHotKeyExclusive), &claimedHotkey
+            )
+            guard status == noErr, claimedHotkey != nil else {
+                throw .fatal("macOS could not reserve the test hotkey (OSStatus \(status))")
+            }
+            return nil
         case .expect(let label):
             guard allElements().contains(where: { matches($0, substring: label) }) else { throw .retryable("not found") }
             return nil
@@ -158,6 +192,9 @@ final class AXDriver: Driver {
                   let rect = frame(of: close) else { throw .retryable("close button not found") }
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
+        case .reopenApp:
+            try lifecycle.reopen()
+            return nil
         case .handleKeychain:
             guard waitUntil(timeout: 5, { keychainWindow() != nil }) else { return "no prompt" }
             try answerKeychainPrompt()
@@ -178,8 +215,56 @@ final class AXDriver: Driver {
             guard let rect = frame(of: item) else { throw .retryable("status item \"\(help)\" has no accessibility frame") }
             try click(at: CGPoint(x: rect.midX, y: rect.midY))
             return nil
+        case .backgroundStatusItemClick(let help):
+            guard let item = statusItem(help), let rect = frame(of: item), !rect.isEmpty else {
+                throw .retryable("status item \"\(help)\" has no accessible frame")
+            }
+            try answerKeychainPrompt()
+            guard keychainWindow() == nil else { throw .retryable("keychain prompt covers the desktop") }
+            let point = CGPoint(x: rect.midX, y: rect.midY)
+            let system = AXUIElementCreateSystemWide()
+            var hit: AXUIElement?
+            guard AXUIElementCopyElementAtPosition(system, Float(point.x), Float(point.y), &hit) == .success,
+                  let hit else { throw .retryable("could not hit-test status item \"\(help)\"") }
+            var hitPID: pid_t = 0
+            _ = AXUIElementGetPid(hit, &hitPID)
+            let owner = NSRunningApplication(processIdentifier: hitPID)
+            let role = attribute(hit, kAXRoleAttribute) as? String
+            let menuBarProxy = owner?.bundleIdentifier == "com.apple.controlcenter"
+                && role == kAXMenuBarItemRole && frame(of: hit) == rect
+            guard CFEqual(item, hit) || menuBarProxy else {
+                throw .retryable("status item \"\(help)\" is covered by \(owner?.localizedName ?? "an unknown app") (\(role ?? "unknown role"))")
+            }
+            try postClick(at: point)
+            return nil
         case .expectNotification(let text):
             guard notificationTexts().contains(where: { $0.localizedCaseInsensitiveContains(text) }) else { throw .retryable("notification text not found: \"\(text)\"") }
+            return nil
+        case .expectFrontmost(let bundle):
+            let active = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            guard active == bundle else {
+                throw .retryable("expected frontmost bundle \(bundle), found \(active ?? "none")")
+            }
+            return nil
+        case .expectActiveApp(let bundle):
+            // NSWorkspace delivers activation updates on the run loop.
+            _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+            let active = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            guard active == bundle else {
+                throw .retryable("expected active bundle \(bundle), found \(active ?? "none")")
+            }
+            return nil
+        case .holdFixtureDatabaseWriter:
+            try holdFixtureWriter()
+            return nil
+        case .releaseFixtureDatabaseWriter:
+            releaseFixtureWriter()
+            return nil
+        case .observeNoNotification(let text, let seconds):
+            let found = waitUntil(timeout: seconds) {
+                notificationTexts().contains { $0.localizedCaseInsensitiveContains(text) }
+            }
+            if found { throw .fatal("unexpected notification matching \"\(text)\"") }
             return nil
         case .dockClick(let title):
             let items = processElements(bundleID: "com.apple.dock").filter {
@@ -197,6 +282,32 @@ final class AXDriver: Driver {
         case .screenshotScreen(let name):
             return try surfaceScreenshot(name: name ?? "screen", menubar: false)
         }
+    }
+
+    private func holdFixtureWriter() throws(DriverError) {
+        guard lifecycle.usesFreshProfile else { throw .fatal("database lock requires a fresh fixture launch") }
+        guard fixtureWriter == nil else { return }
+        let checkout = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).lastPathComponent
+        let appData = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            "Library/Application Support/com.app.scribular.tauri"
+        )
+        let paths = ["dev/\(checkout)/scribular.db-shm", "scribular.db-shm"].map(appData.appendingPathComponent)
+        guard let walIndex = paths.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+            throw .retryable("fixture WAL index is unavailable")
+        }
+        let fd = open(walIndex.path, O_RDWR | O_NOFOLLOW)
+        guard fd >= 0 else { throw .retryable("fixture WAL index is unavailable") }
+        // SQLite assigns the WAL writer the first POSIX lock byte in the index header.
+        guard lseek(fd, 120, SEEK_SET) == 120, lockf(fd, F_TLOCK, 1) == 0 else {
+            close(fd)
+            throw .retryable("fixture WAL writer is busy")
+        }
+        fixtureWriter = fd
+    }
+
+    private func releaseFixtureWriter() {
+        if let fixtureWriter { close(fixtureWriter) }
+        fixtureWriter = nil
     }
 
     private func statusItem(_ help: String) -> AXUIElement? {

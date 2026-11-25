@@ -28,6 +28,7 @@ pub struct FakeSummarizer {
     /// Tokens each sequence produces before its end-of-turn.
     pub reply_tokens: usize,
     pub token_delay: Duration,
+    pub hold: AtomicBool,
     /// Every request passed to `generate`, call by call.
     pub calls: Mutex<Vec<Vec<Generation>>>,
     active: AtomicUsize,
@@ -41,6 +42,7 @@ impl FakeSummarizer {
             context,
             reply_tokens: 5,
             token_delay: Duration::ZERO,
+            hold: AtomicBool::new(false),
             calls: Mutex::default(),
             active: AtomicUsize::new(0),
             max_active: AtomicUsize::new(0),
@@ -75,6 +77,9 @@ impl Summarizer for FakeSummarizer {
         on_event: &mut dyn FnMut(GenEvent<'_>),
     ) -> Result<Vec<String>> {
         self.calls.lock().unwrap().push(requests.to_vec());
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(now, Ordering::SeqCst);
         struct Leave<'a>(&'a AtomicUsize);
@@ -85,6 +90,12 @@ impl Summarizer for FakeSummarizer {
         }
         let _leave = Leave(&self.active);
 
+        while self.hold.load(Ordering::SeqCst) {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(LlmError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
         for r in requests {
             if self.prompt_tokens(&r.prompt)? + r.max_tokens > self.context {
                 return Err(LlmError::Engine("sequence exceeds the context".into()));
@@ -369,6 +380,18 @@ impl SystemAudio for FakeSystemAudio {
 mod tests {
     use super::*;
     use crate::audio::chunk_writer;
+
+    #[test]
+    fn empty_generation_bypasses_hold_and_cancellation() {
+        let summarizer = FakeSummarizer::new(32);
+        summarizer.hold.store(true, Ordering::SeqCst);
+        let cancelled = AtomicBool::new(true);
+        let mut on_event = |_: GenEvent<'_>| panic!("empty batch emitted an event");
+        assert!(summarizer
+            .generate(&[], &cancelled, &mut on_event)
+            .unwrap()
+            .is_empty());
+    }
 
     #[test]
     fn feed_rejects_a_block_larger_than_the_ring_without_retrying() {

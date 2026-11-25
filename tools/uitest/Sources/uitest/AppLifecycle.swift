@@ -30,11 +30,12 @@ final class AppLifecycle {
     private var launched = false
     private var launching: LaunchResult?
     private var dataMoved = false
+    private(set) var usesFreshProfile = false
     private var detail: String?
 
     init(appPath: URL, noTrust: Bool = false) { self.appPath = appPath; self.noTrust = noTrust }
 
-    func launch(keepData: Bool, runDir: URL) throws(DriverError) -> String {
+    func launch(keepData: Bool, runDir: URL, unavailableHotkey: Bool = false) throws(DriverError) -> String {
         if !launched {
             let trusted = try trustBuild(runDir: runDir)
             try terminateExisting()
@@ -47,6 +48,7 @@ final class AppLifecycle {
                 do { _ = try moveDataDir(from: source, intoRunDir: runDir) }
                 catch { throw .fatal("could not move app data: \(error.localizedDescription)") }
                 dataMoved = true
+                usesFreshProfile = true
             }
             try linkCache(source, cache)
             do {
@@ -61,6 +63,9 @@ final class AppLifecycle {
                 }
                 if let skip = ProcessInfo.processInfo.environment["SCRIBULAR_SKIP_LICENSE"], !skip.isEmpty {
                     configuration.environment["SCRIBULAR_SKIP_LICENSE"] = skip
+                }
+                if unavailableHotkey {
+                    configuration.environment["SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY"] = "1"
                 }
                 NSWorkspace.shared.openApplication(at: appPath, configuration: configuration) { application, error in
                     result.set(app: application, error: error)
@@ -87,6 +92,13 @@ final class AppLifecycle {
             detail = "\(appPath.path) (built \(date))" + (trusted.isEmpty ? "" : "\n  " + trusted.replacingOccurrences(of: "\n", with: "\n  "))
         }
         return detail ?? appPath.path
+    }
+
+    func reopen() throws(DriverError) {
+        guard let app, !app.isTerminated, !processHasExited(app.processIdentifier) else {
+            throw .fatal("reopen-app requires a running app launched by this script")
+        }
+        guard NSWorkspace.shared.open(appPath) else { throw .fatal("could not reopen the app bundle") }
     }
 
     /// Runs trust-build.sh so a rebuilt (new cdhash) app reads its keychain key without a prompt.
@@ -134,6 +146,7 @@ final class AppLifecycle {
         app = nil
         launching = nil
         launched = false
+        usesFreshProfile = false
     }
 
     private func linkCache(_ appDataDir: URL, _ cache: URL) throws(DriverError) {
@@ -150,8 +163,12 @@ final class AppLifecycle {
     }
 
     private func waitForTermination(_ app: NSRunningApplication, seconds: Double) -> Bool {
+        let pid = app.processIdentifier
         let deadline = Date().addingTimeInterval(seconds)
-        while !app.isTerminated && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
-        return app.isTerminated
+        // AppKit can cache isTerminated while the caller is waiting outside the main run loop.
+        while !app.isTerminated && !processHasExited(pid) && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return app.isTerminated || processHasExited(pid)
     }
 }
