@@ -224,7 +224,8 @@ private func runDoctor(_ args: [String]) -> Int32 {
         automation: { commandSucceeded("/usr/bin/osascript", ["-e", "tell application \"System Events\" to get name of first process"]) },
         ffmpeg: { Preflight.executable("ffmpeg") != nil },
         keychainPassword: { commandSucceeded("/usr/bin/security", ["find-generic-password", "-s", "scribular-uitest", "-a", "login-password"]) },
-        tmuxServer: tmuxServer
+        tmuxServer: tmuxServer,
+        foreignPrompt: foreignKeychainPrompt
     )
     let appCheck = appPath.map { appPath in
         let bundleURL = URL(fileURLWithPath: appPath, isDirectory: true)
@@ -239,6 +240,23 @@ private func runDoctor(_ args: [String]) -> Int32 {
         print("info after each rebuild run: bash tools/uitest/trust-build.sh \(quotedAppPath)")
     }
     return report.exitCode
+}
+
+/// Label text of an open SecurityAgent window that is not Scribular's; reads AX only, so it raises no prompt.
+private func foreignKeychainPrompt() -> String? {
+    guard let agent = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").first else { return nil }
+    func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+        var result: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, name as CFString, &result) == .success ? result : nil
+    }
+    func labels(_ element: AXUIElement) -> [String] {
+        let own = [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].compactMap {
+            (value(element, $0) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        return own + ((value(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []).flatMap(labels)
+    }
+    let windows = (value(AXUIElementCreateApplication(agent.processIdentifier), kAXWindowsAttribute) as? [AXUIElement]) ?? []
+    return windows.map { labels($0).joined(separator: " ") }.first { DoctorProbes.isForeign(text: $0) }
 }
 
 @_silgen_name("responsibility_get_pid_responsible_for_pid")

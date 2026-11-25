@@ -133,6 +133,7 @@ Use the native UI command first, then a surface screenshot, then a log or state 
 ### Doctor
 
 Run `swift run --package-path tools/uitest uitest doctor [--no-prompt] [--app /path/to/Scribular.app]` to check host permissions, System Events automation, `ffmpeg`, the stored keychain password, and optionally the app bundle. Use `--no-prompt` for preflight to skip the System Events automation check, which can prompt. Doctor prints each performed check as `ok` or `MISSING`, includes the fix command, exits 1 if any check is missing, and never prints the stored password. With `--app`, it also prints the per-build trust command; the current cdhash trust cannot be detected automatically.
+Doctor also fails while a keychain prompt that is not Scribular's is open (`MISSING Foreign keychain prompt`, with its text): answer or dismiss it. That check needs only Accessibility, so it runs under `--no-prompt` too.
 
 ### Keychain after rebuild
 
