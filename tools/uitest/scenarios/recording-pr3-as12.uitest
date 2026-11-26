@@ -1,15 +1,14 @@
 # AS12: a style rewrite can be undone from the note line; an edited note persists after reopening.
-# Enables a second style first (only one is in the style menu by default). Settings labels are best-guess.
+# Enables a second style first (only one is in the style menu by default).
 launch
 expect "Welcome to Scribular"
 key escape
 click "Continue"
 expect "Start recording" timeout 60s
-click "Settings"
-click "Note styles"
+click "Note Styles"
 click "Show Narrative Therapy in style menu"
 labels
-click "Record"
+click "New Recording"
 expect "Start recording" timeout 30s
 expect-not "Downloading the speech model" timeout 120s
 expect-not "Verifying the speech model" timeout 120s
@@ -24,15 +23,17 @@ wait 14s
 click "Stop"
 stop-audio
 expect "Ask Coach to change the note" timeout 400s
-click "Note style"
+click "Note style · Therapy (DORA)" index 1
 click "Narrative Therapy"
 expect "Note rewritten." timeout 400s
 click "Undo"
 expect-not "Note rewritten." timeout 30s
 click "Note" index 2
 type " AS12 marker edit"
+# Leave the tab (blur saves), open the next older session, then come back.
 click "Transcript"
-click "History"
+key cmd+option+down
+key cmd+option+up
 labels
 click "Note" index 1
 expect "AS12 marker edit"

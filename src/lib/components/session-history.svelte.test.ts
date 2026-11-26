@@ -235,7 +235,7 @@ it('hides (keeps mounted) the session page behind the delete confirmation, and c
   await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
   app.confirmDeleteSelected();
   await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).not.toBeNull());
-  expect(target.querySelector('[aria-label="Recover recording"]')?.closest('[hidden]')).not.toBeNull();
+  expect(target.querySelector('[aria-label="Recover recording"]')!.closest('[hidden]')).not.toBeNull();
   (target.querySelector('[role="alertdialog"] button:last-child') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).toBeNull());
   expect(target.querySelector('[aria-label="Recover recording"]')?.closest('[hidden]')).toBeNull();

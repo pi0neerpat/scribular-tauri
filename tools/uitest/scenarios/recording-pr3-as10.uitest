@@ -1,5 +1,4 @@
 # AS10: Stop opens the session at once; a second recording starts and stops while the first processes.
-# Labels are best-guess; run `labels` first in verify.
 launch
 expect "Welcome to Scribular"
 key escape
@@ -29,4 +28,8 @@ click "Stop"
 stop-audio
 expect "Audio" timeout 30s
 labels
+# Back to the first session (next older row): its transcript finished while the second recorded.
+key cmd+option+down
+click "Transcript"
+expect "Client:" timeout 400s
 quit

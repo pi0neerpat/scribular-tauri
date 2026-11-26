@@ -1,5 +1,5 @@
 # AS11: Note tab is initial; Transcript and Audio tabs open with kept audio; Copy Transcript works.
-# Unavailable/lapsed variants are covered by summary-panel.test.ts. Settings labels are best-guess.
+# Unavailable/lapsed variants are covered by summary-panel.test.ts.
 launch
 expect "Welcome to Scribular"
 key escape
@@ -7,9 +7,9 @@ click "Continue"
 expect "Start recording" timeout 60s
 click "Settings"
 click "Recording"
-click "On"
+click "On" index 1
 labels
-click "Record"
+click "New Recording"
 expect "Start recording" timeout 30s
 expect-not "Downloading the speech model" timeout 120s
 expect-not "Verifying the speech model" timeout 120s
