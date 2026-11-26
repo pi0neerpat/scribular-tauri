@@ -39,7 +39,7 @@ TAURI_CONFIG='{"bundle":{"macOS":{"frameworks":[]}}}' cargo build --locked --rel
 APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json
 export SCRIBULAR_SKIP_LICENSE=1
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
-swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
+swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke-57s.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
 ```
 
 Use `--record <name>` only for a happy path or an issue that cannot be reproduced reliably. The recorder uses libx264's ultrafast preset to keep CPU free for the app (files are larger). Use names like `04-system-audio-happy-path`; recordings are written as `<record-dir>/<name>.mp4` with a matching JSON metadata file. Failed recorded runs use `<name>-FAILED.mp4`. `--record-dir <dir>` overrides `CWF_RECORDINGS_DIR`; otherwise a clone with a sibling `scribular-tauri` checkout writes there, falling back to `./runs/`. Recordings are not committed.
