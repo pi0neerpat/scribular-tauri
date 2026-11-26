@@ -178,7 +178,8 @@
   async function persist(id: string, summary: string): Promise<boolean> {
     try {
       const updated = await updateSession(id, { summary });
-      if (id === sessionId) { lastSaved = updated.summary; undoLine = false; onUpdate?.(updated); }
+      // A manual save also cancels a pending rewrite's Undo line: the next note change is this edit.
+      if (id === sessionId) { lastSaved = updated.summary; undoLine = false; rewriteFrom = null; onUpdate?.(updated); }
       return true;
     } catch (e) { error = String(e); return false; }
   }
@@ -225,8 +226,9 @@
     if (!canRewrite) return;
     if (dirty && !(await save(session.id, draft))) return;
     error = null; preview = ''; busy = true; undoLine = false;
-    const from = session.summary;
-    try { await regenerateSummary(session.id, promptId); rewriteFrom = from; }
+    const { id, summary: from } = session;
+    // The user may navigate away while the request is in flight.
+    try { await regenerateSummary(id, promptId); if (session.id === id) rewriteFrom = from; }
     catch (e) { error = String(e); }
     finally { busy = false; }
   }

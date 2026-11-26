@@ -267,6 +267,64 @@ it('shows Undo after a rewrite whose job starts after regenerateSummary resolves
   }
 });
 
+function mountLive(initial: Session) {
+  api.delta = undefined;
+  const current = writable<Session>(initial);
+  const state = fromStore(current);
+  const coach: CoachContext = {
+    availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
+    open: vi.fn(), firstNoteTip: () => false, tipSaving: () => false, tipSaveFailed: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+  };
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { get session() { return state.current; }, onUpdate: (s: Session) => current.set(s) }, context: new Map([[COACH_CONTEXT, coach]]) });
+  flushSync();
+  return { current, target, app };
+}
+
+it('does not show Undo on another note when a rewrite resolves after navigation', async () => {
+  let resolve!: () => void;
+  api.regenerateSummary.mockClear().mockImplementation(() => new Promise<void>((r) => { resolve = r; }));
+  const { current, target, app } = mountLive(session);
+  try {
+    await vi.waitFor(() => expect(named(target, 'Style')?.disabled).toBe(false));
+    named(target, 'Style')!.click();
+    await vi.waitFor(() => expect(api.regenerateSummary).toHaveBeenCalled());
+    const other: Session = { ...session, id: 'session-2', summary: 'other note' };
+    current.set(other);
+    flushSync();
+    resolve();
+    await Promise.resolve(); await Promise.resolve();
+    current.set({ ...other, summary: 'other edited', previousSummary: 'other note' });
+    flushSync();
+    expect(target.textContent).not.toContain('Note rewritten.');
+  } finally {
+    unmount(app);
+  }
+});
+
+it('does not show Undo for a manual edit saved while a rewrite is queued', async () => {
+  api.regenerateSummary.mockClear().mockResolvedValue(undefined);
+  api.updateSession.mockReset().mockImplementation(async (_id: string, patch: { summary: string }) => ({ ...session, summary: patch.summary, previousSummary: session.summary }));
+  const { target, app } = mountLive(session);
+  try {
+    await vi.waitFor(() => expect(named(target, 'Style')?.disabled).toBe(false));
+    named(target, 'Style')!.click();
+    await vi.waitFor(() => expect(api.regenerateSummary).toHaveBeenCalled());
+    await vi.waitFor(() => expect(named(target, 'Style')?.disabled).toBe(false));
+    // The job is only queued: status is still 'done' and the note is editable.
+    const box = noteBox(target)!;
+    box.value = 'my manual edit';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    box.dispatchEvent(new Event('blur'));
+    await vi.waitFor(() => expect(api.updateSession).toHaveBeenCalledWith(session.id, { summary: 'my manual edit' }));
+    await vi.waitFor(() => expect(noteBox(target)!.value).toBe('my manual edit'));
+    flushSync();
+    expect(target.textContent).not.toContain('Note rewritten.');
+  } finally {
+    unmount(app);
+  }
+});
+
 it('uses the panel copy action for menu requests', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   api.listSummaryModels.mockResolvedValue([]);

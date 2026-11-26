@@ -21,7 +21,7 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 - Before a run, check `pgrep -fl "Scribular.app|codex"`, make sure no unrelated GUI automation covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
 - Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
-- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `since we last met`).
+- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `neighborhood library` from `keyboard-pr3-synthetic-speech.m4a`).
 - On a slow VM, allow at least 400 seconds for the summary.
 - Concurrent uitest runs queue on the desktop lock; do not run other GUI automation at the same time.
 
@@ -78,7 +78,7 @@ Use a recording only for a happy path or an issue that cannot be reproduced reli
 
 1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
 2. In Settings choose `App audio`, then run `pick-app "afplay" timeout 60s`. Each attempt closes any open menu, refreshes the list, waits 2.5 seconds, and opens the App picker. It waits for the menu to open and close, detected through the window server, types `afplay`, presses Return, waits 1 second, and verifies the picker's value; a mismatch is retried. The native menu does not update while open, and its items are not exposed to Accessibility, so selection cannot rely on reading its menu items. The 1-second wait accounts for the first click after the menu closes being swallowed.
-3. Go to Record and run `play "fixture.wav"` once more without `loop`, immediately before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
+3. Go to Record and run `play` once more without `loop`, immediately before `Start recording`, with a clip long enough to transcribe at least 10 words (the smoke test uses the 57 s `tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a`; the 12 s clip can end in "Audio capture insufficient"). Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
 4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
 5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists. On an 8 GB VM, allow `expect "Summary·" timeout 400s` or longer.
 
