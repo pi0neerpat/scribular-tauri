@@ -21,10 +21,11 @@ click "Start recording"
 wait 60s
 click "Stop"
 stop-audio
-# first sentence of the fixture, from a whisper ggml-base transcription (2026-11-26); assert fixture words, never summary wording
-# the note is ready when Copy Note shows
-expect "Copy Note" timeout 400s
+# the session coach renders only once the summary is saved (status done); Copy Note renders earlier, disabled, so it is no gate
+expect "Ask Coach to change the note" timeout 400s
+expect "Copy Note"
 expect-not "Audio capture insufficient" timeout 10s
 click "Transcript"
-expect "sunny wall" timeout 60s
+# first sentence of the fixture, from whisper ggml-base transcriptions (2026-11-26); assert fixture words, never summary wording
+expect "neighborhood library" timeout 60s
 quit
