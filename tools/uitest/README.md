@@ -21,7 +21,7 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 - Before a run, check `pgrep -fl "Scribular.app|codex"`, make sure no unrelated GUI automation covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
 - Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
-- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `neighborhood library` from `keyboard-pr3-synthetic-speech.m4a`).
+- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `neighborhood` from `keyboard-pr3-synthetic-speech.m4a`; Whisper writes both "library" and "libraries" after it).
 - On a slow VM, allow at least 400 seconds for the summary.
 - Concurrent uitest runs queue on the desktop lock; do not run other GUI automation at the same time.
 
@@ -80,7 +80,7 @@ Use a recording only for a happy path or an issue that cannot be reproduced reli
 2. On the Record screen, `click "On a call" index 1`, `click "Choose an app to try recording"`, then `pick-call-app "afplay" timeout 60s` and `expect "App: afplay"`.
 3. Run `play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"` (no `loop`) immediately before `Start recording`. Use a clip long enough to transcribe at least 10 words: this 57 s fixture is what the smoke test uses; the 12 s clip can end in "Audio capture insufficient". Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
 4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
-5. Wait for the saved note with `expect "Ask Coach to change the note" timeout 400s` (longer on an 8 GB VM); it renders only once the summary is saved. `Copy Note` renders earlier, disabled, so it does not prove a summary exists. Then `click "Transcript"` and `expect` a phrase that appeared identically in several transcriptions of the fixture (`neighborhood library` for the 57 s fixture). Do not assert summary wording, which varies.
+5. Wait for the saved note with `expect "Ask Coach to change the note" timeout 400s` (longer on an 8 GB VM); it renders only once the summary is saved. `Copy Note` renders earlier, disabled, so it does not prove a summary exists. Then `click "Transcript"` and `expect` a phrase that appeared identically in several transcriptions of the fixture (`neighborhood` for the 57 s fixture). Do not assert summary wording, which varies.
 
 The runner uses AVFoundation's `Capture screen 0` device (`0:none`). Check that device with `ffmpeg -f avfoundation -list_devices true -i ""` if screen capture does not start. Keychain typing and the Accessibility labels still need verification in a live desktop session after a rebuild.
 

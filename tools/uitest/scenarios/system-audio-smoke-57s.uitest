@@ -26,6 +26,6 @@ expect "Ask Coach to change the note" timeout 400s
 expect "Copy Note"
 expect-not "Audio capture insufficient" timeout 10s
 click "Transcript"
-# first sentence of the fixture, from whisper ggml-base transcriptions (2026-11-26); assert fixture words, never summary wording
-expect "neighborhood library" timeout 60s
+# a word from the fixture's first sentence, from whisper ggml-base transcriptions (2026-11-26: "library" and "libraries" both occur, so assert only "neighborhood"); assert fixture words, never summary wording
+expect "neighborhood" timeout 60s
 quit
