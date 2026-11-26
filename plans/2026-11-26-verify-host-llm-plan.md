@@ -1,6 +1,6 @@
 # Verify sessions use the host llama-server (plan)
 
-Date: 2026-11-26. Status: plan only, nothing implemented.
+Date: 2026-11-26. Status: implemented on `feat/verify-host-llm`; this document records the design and verification plan.
 
 ## Problem
 
@@ -56,7 +56,7 @@ This is safe on the host and in shipping builds:
   on-device. This is the explicit override, and it needs no new flag.
 - Otherwise, if `sysctl kern.hv_vmm_present` is `1` (VM; it is `0` on the host): GET
   `http://192.168.64.1:5801/health` with a 2 s timeout.
-  - `200` with `"ok"`: use `http://192.168.64.1:5801` and print
+  - `200` with a JSON body whose `status` is exactly `"ok"`: use `http://192.168.64.1:5801` and print
     `info host llama-server: http://192.168.64.1:5801`.
   - Otherwise: print
     `WARN host llama-server unreachable at 192.168.64.1:5801; summaries run on the VM CPU (see README "Host llama-server (VM)")`
@@ -73,9 +73,11 @@ them from the env if a second VM network is ever used.
 
 `tools/uitest/Sources/uitest/main.swift:183` copies `scribular.log` to `<runDir>/app.log` after the
 run. After that copy:
-- If `resolveLLMURL()` returned a URL and `app.log` lacks `SCRIBULAR_LLM_URL set: summaries use`, fail
-  the run (exit 1) with
+- If `resolveLLMURL()` returned a URL and the lines this run added to `app.log` lack
+  `SCRIBULAR_LLM_URL set: summaries use <that URL>`, fail the run (exit 1) with
   `app ignored SCRIBULAR_LLM_URL: build lacks --features remote-llm (tools/uitest/tauri-debug-overlay.json)`.
+  Lines from earlier runs (kept by `launch --keep-data`) do not count.
+- If `app.log` is missing, fail with `app.log missing: cannot confirm SCRIBULAR_LLM_URL was honoured`.
 
 This check catches a regression in the overlay, in `lib.rs:64-69`, or in the forwarding. It runs on
 every remote-URL run, so no scenario needs to change. The log line is written at setup
@@ -139,6 +141,7 @@ It is an info line so that a host server that is down does not hold verify. The 
 ## Security
 
 The server has no auth and receives transcript text over plain HTTP. Keep it bound to
-`192.168.64.1` (the Softnet bridge exists only while a VM runs). Never bind `0.0.0.0`. uitest only
-ever probes that fixed bridge address, and only inside a VM, so host runs never send transcripts off
-the device. Test fixtures are synthetic speech; no real user audio goes to the server.
+`192.168.64.1` (the Softnet bridge exists only while a VM runs). Never bind `0.0.0.0`. By default
+uitest only probes that fixed bridge address, and only inside a VM, so host runs never send
+transcripts off the device. A nonempty `SCRIBULAR_LLM_URL` override is honoured on any machine,
+host included, and sends transcript text to that URL; set it only to a server you control. Test fixtures are synthetic speech; no real user audio goes to the server.

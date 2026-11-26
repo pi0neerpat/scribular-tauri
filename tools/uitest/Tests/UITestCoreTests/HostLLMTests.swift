@@ -44,9 +44,39 @@ struct HostLLMTests {
         #expect(result.url == nil && result.runLine == nil && result.doctorLine == nil)
     }
 
-    @Test func logCheckNeedsTheAppMarker() {
-        #expect(HostLLM.logConfirms("x\nINFO SCRIBULAR_LLM_URL set: summaries use http://192.168.64.1:5801\n"))
-        #expect(!HostLLM.logConfirms("INFO summarizer loaded on device"))
-        #expect(!HostLLM.logConfirms(nil))
+    @Test func logCheckNeedsTheAppMarkerWithTheResolvedURL() {
+        let url = "http://192.168.64.1:5801"
+        #expect(HostLLM.logConfirms("x\nINFO SCRIBULAR_LLM_URL set: summaries use http://192.168.64.1:5801\n", url: url))
+        #expect(!HostLLM.logConfirms("INFO SCRIBULAR_LLM_URL set: summaries use http://other:5801\n", url: url))
+        #expect(!HostLLM.logConfirms("INFO SCRIBULAR_LLM_URL set: summaries use http://192.168.64.1:58011\n", url: url))
+        #expect(!HostLLM.logConfirms("INFO summarizer loaded on device", url: url))
+        #expect(!HostLLM.logConfirms(nil, url: url))
+    }
+
+    @Test func logCheckIgnoresLinesFromEarlierRuns() {
+        let url = "http://192.168.64.1:5801"
+        let stale = "INFO SCRIBULAR_LLM_URL set: summaries use \(url)\n"
+        let log = Data((stale + "INFO summarizer loaded on device\n").utf8)
+        let before = HostLLM.LogMark(fileID: 7, size: stale.utf8.count)
+        #expect(!HostLLM.logConfirms(HostLLM.currentRun(log, fileID: 7, since: before), url: url))
+        // replaced or truncated log: the whole file is this run's
+        #expect(HostLLM.logConfirms(HostLLM.currentRun(log, fileID: 8, since: before), url: url))
+        #expect(HostLLM.logConfirms(HostLLM.currentRun(log, fileID: 7, since: HostLLM.LogMark(fileID: 7, size: 10_000)), url: url))
+        #expect(HostLLM.logConfirms(HostLLM.currentRun(log, fileID: 7, since: nil), url: url))
+    }
+
+    @Test func doctorOverrideLineRedactsSecrets() {
+        let result = HostLLM.resolve(environment: ["SCRIBULAR_LLM_URL": "http://user:pw@h:1/v1?key=abc&x"], isVM: noProbe("isVM"),
+                                     healthOK: { _ in false })
+        #expect(result.doctorLine == "info host llama-server: not probed, SCRIBULAR_LLM_URL=http://***@h:1/v1?key=***&x")
+        #expect(HostLLM.resolve(environment: ["SCRIBULAR_LLM_URL": "http://h:1"], isVM: { false }, healthOK: { _ in false }).doctorLine
+            == "info host llama-server: not probed, SCRIBULAR_LLM_URL=http://h:1")
+    }
+
+    @Test func healthNeedsStatusExactlyOK() {
+        #expect(HostLLM.healthBodyOK(Data(#"{"status":"ok"}"#.utf8)))
+        #expect(!HostLLM.healthBodyOK(Data(#"{"status":"not ok"}"#.utf8)))
+        #expect(!HostLLM.healthBodyOK(Data("ok".utf8)))
+        #expect(!HostLLM.healthBodyOK(nil))
     }
 }
