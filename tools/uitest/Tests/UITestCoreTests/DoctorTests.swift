@@ -139,4 +139,11 @@ struct DoctorTests {
         #expect(!DoctorProbes.isForeign(text: ""))
         #expect(DoctorProbes.isForeign(text: "Agent Token Monitor wants to use Claude Code-credentials"))
     }
+
+    @Test func hostLLMIsInfoNotACheck() {
+        let report = doctorReport(probes: probes, noPrompt: true, appCheck: nil, hostLLM: LLMResolution.hostDown.doctorLine)
+        #expect(report.lines.contains("info host llama-server: unreachable (summaries on VM CPU)"))
+        #expect(report.exitCode == 0)
+        #expect(!doctorReport(probes: probes, noPrompt: true, appCheck: nil).lines.contains { $0.contains("llama-server") })
+    }
 }

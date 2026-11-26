@@ -9,5 +9,5 @@
 - Recording tests use App audio + `play "fixture.wav"`, never the microphone. Start from `tools/uitest/scenarios/system-audio-smoke.uitest`.
 - Assert phrases from the fixture's transcript, never summary wording (the LLM output varies).
 - Models come from `~/Library/Caches/scribular-uitest/models`. Never delete it to fix a failing test: that is a 1.85 GB re-download, not a different result.
-- Slow summaries on the Tart VM: build with `--features remote-llm` and set `SCRIBULAR_LLM_URL` to a host `llama-server`; see "Host llama-server (VM)" in `tools/uitest/README.md`.
+- In the Tart VM, uitest uses the host llama-server automatically (debug overlay enables `remote-llm`; uitest probes `192.168.64.1:5801`). Set `SCRIBULAR_LLM_URL=` (empty) to force on-device. See "Host llama-server (VM)" in `tools/uitest/README.md`.
 - Details: `tools/uitest/README.md`.

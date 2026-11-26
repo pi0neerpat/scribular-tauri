@@ -61,10 +61,12 @@ Summaries on the VM's CPU are slow. A `remote-llm` test build sends summary gene
 
 1. On the host, serve the same GGUF the app manifest uses (otherwise results won't match on-device): `llama-server -m gemma-4-E2B-it-GGUF-Q4_K_M.gguf --host 192.168.64.1 --port 5801 -np 4 -c 32768`. `-c 32768` is 8192 × 4: llama-server splits `-c` across the `-np` slots, so each slot keeps the 8192-token context the on-device summarizer uses. Bind the Softnet bridge address: the default loopback address is unreachable from the VM, and Softnet already allows `192.168.64.1/32`. Avoid `0.0.0.0`: the server has no auth and receives transcript text over plain HTTP, so it would be open to the whole LAN. The bridge address exists only while a VM is running; start the VM first.
 2. In the VM, check it: `curl http://192.168.64.1:5801/health`.
-3. Build with the feature: `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app --features remote-llm`.
-4. Run with the URL set; uitest forwards it to the app: `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`.
+3. Build with the debug overlay as usual (`--config tools/uitest/tauri-debug-overlay.json`): it enables `remote-llm`. For a build without the overlay, add `--features remote-llm`: `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<password if set>" npm run tauri -- build --bundles app --features remote-llm`.
+4. Run uitest as usual. In a VM (`sysctl kern.hv_vmm_present` is 1) it checks `http://192.168.64.1:5801/health` (2 s timeout) and passes `SCRIBULAR_LLM_URL=http://192.168.64.1:5801` to the app, printing `info host llama-server: http://192.168.64.1:5801`. On the host it stays on-device and probes nothing.
 
-The app logs `SCRIBULAR_LLM_URL set: summaries use <url>` at launch. Unset or empty, the app uses the on-device model as usual. The model still has to be downloaded and verified (onboarding is unchanged).
+- Server down: uitest prints `WARN host llama-server unreachable at 192.168.64.1:5801; summaries run on the VM CPU` and runs on-device (allow `expect "Summary·" timeout 400s`). `uitest doctor` shows the same state as an `info host llama-server:` line; it never fails doctor.
+- Override: a `SCRIBULAR_LLM_URL` already in uitest's environment wins and nothing is probed. Set it empty (`SCRIBULAR_LLM_URL= swift run ...`) to force on-device in the VM.
+- Log check: the app logs `SCRIBULAR_LLM_URL set: summaries use <url>` at launch. When uitest passed a URL and `<runDir>/app.log` lacks that line, the run fails with `app ignored SCRIBULAR_LLM_URL: build lacks --features remote-llm`. Unset or empty, the app uses the on-device model as usual. The model still has to be downloaded and verified (onboarding is unchanged).
 
 ### Model cache
 
