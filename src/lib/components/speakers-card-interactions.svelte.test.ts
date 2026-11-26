@@ -75,7 +75,9 @@ it('refreshes the parent summary after renaming a confirmed speaker', async () =
 
 it('keeps pending speaker names across a reopen until Done (R14)', async () => {
   const target = document.createElement('div');
-  let app = mount(SpeakersCard, { target, props: { session: session('confirmed') } });
+  // A distinct id: the R14 draft map is module-level and would leak into later tests.
+  const r14 = { ...session('confirmed'), id: 'session-r14' };
+  let app = mount(SpeakersCard, { target, props: { session: r14 } });
   flushSync();
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Edit Speakers')!.click();
   flushSync();
@@ -84,7 +86,7 @@ it('keeps pending speaker names across a reopen until Done (R14)', async () => {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
   unmount(app);
-  app = mount(SpeakersCard, { target, props: { session: session('confirmed') } });
+  app = mount(SpeakersCard, { target, props: { session: r14 } });
   flushSync();
   expect(target.querySelector('input')?.value).toBe('Client');
   expect(updateSpeakerMap).not.toHaveBeenCalled();

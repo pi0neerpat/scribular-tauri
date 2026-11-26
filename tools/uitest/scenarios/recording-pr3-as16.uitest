@@ -1,0 +1,32 @@
+# AS16: a recording killed mid-capture is offered on its Recover page and recovers.
+# Injected-failure branch is covered by Rust tests (recovery keeps chunks on failure).
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+force-quit
+launch --keep-data
+expect "failed Recover" timeout 60s
+click "Search sessions" index 1
+key tab
+key tab
+key tab
+key tab
+key enter
+expect "Recover recording"
+click "Recover Recording"
+expect "Ask Coach to change the note" timeout 400s
+click "Transcript"
+expect "Client:"
+quit

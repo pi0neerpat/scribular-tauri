@@ -1,0 +1,25 @@
+# AS12: an edited note persists; a style rewrite can be undone from the note line.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+click "Stop"
+stop-audio
+expect "Ask Coach to change the note" timeout 400s
+click "Note" index 2
+type " AS12 marker edit"
+click "Transcript"
+click "Note" index 1
+expect "AS12 marker edit"
+quit

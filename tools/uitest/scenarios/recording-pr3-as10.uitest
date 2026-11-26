@@ -1,0 +1,26 @@
+# AS10: Stop opens the session at once; another recording can start while it processes.
+# Labels are best-guess from source; run `labels` first in verify.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+click "Stop"
+stop-audio
+expect "Audio" timeout 30s
+labels
+click "Transcript"
+expect "Client:" timeout 60s
+click "New Recording"
+expect "Start recording" timeout 30s
+quit

@@ -152,7 +152,9 @@ final class AppLifecycle {
     /// Kills the app with no chance to clean up, like a crash, so a recording in progress is left interrupted.
     func forceQuit() {
         guard let running = app ?? launching?.get().0 else { return }
-        kill(running.processIdentifier, SIGKILL)
+        if !running.isTerminated && !processHasExited(running.processIdentifier) {
+            kill(running.processIdentifier, SIGKILL)
+        }
         _ = waitForTermination(running, seconds: 5)
         app = nil
         launching = nil

@@ -169,6 +169,11 @@
 
   function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
     if (coach || navigationDisabled(navigationLocked, next, view)) return;
+    go(next, opener, after);
+  }
+
+  // Skips the navigation lock: Stop must open the stopped session even while a model downloads (R10).
+  function go(next: AppView, opener?: HTMLElement, after?: () => void) {
     const action = () => { navigation.update((n) => ({ ...n, view: next })); after?.(); };
     if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
     else action();
@@ -398,7 +403,7 @@
         onStartFailed={() => (pendingCoachInterruption = false)}
         active={view === 'record'}
         onEnterLicense={openLicense}
-        onStopped={(id) => navigate('history', undefined, () => history?.openSession(id))}
+        onStopped={(id) => go('history', undefined, () => history?.openSession(id))}
       />
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}

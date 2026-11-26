@@ -307,3 +307,46 @@ it('shows and retries an availability error in the normal record view', async ()
   await vi.waitFor(() => expect(target.textContent).not.toContain("Couldn't check summary availability."));
   unmount(app);
 });
+
+it('copies nothing when saving an unsaved edit fails (R13)', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  api.listSummaryModels.mockResolvedValue([]);
+  api.markNoteCopied.mockClear();
+  api.updateSession.mockReset().mockRejectedValue('disk full');
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session, management: true, prompts, models: [] } });
+  flushSync();
+  const box = noteBox(target)!;
+  box.value = 'unsaved edit';
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  await app.copy();
+  expect(writeText).not.toHaveBeenCalled();
+  expect(api.markNoteCopied).not.toHaveBeenCalled();
+  expect(target.textContent).toContain('disk full');
+  unmount(app);
+});
+
+it('runs Undo only after an in-flight save of the draft finishes (R12)', async () => {
+  let finishSave!: () => void;
+  const rewritten = { ...session, previousSummary: 'older note' };
+  api.updateSession.mockReset().mockImplementation((_id: string, patch: { summary: string }) =>
+    new Promise((resolve) => { finishSave = () => resolve({ ...rewritten, summary: patch.summary }); }));
+  api.undoSummary.mockReset().mockResolvedValue({ ...session, summary: 'older note', canRedo: true });
+  api.listSummaryModels.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session: rewritten, management: true, prompts, models: [] } });
+  const box = noteBox(target)!;
+  box.value = 'typed';
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  box.dispatchEvent(new Event('blur'));
+  const undone = app.undo();
+  await Promise.resolve();
+  expect(api.undoSummary).not.toHaveBeenCalled();
+  finishSave();
+  expect(await undone).toBe(true);
+  expect(api.updateSession).toHaveBeenCalledTimes(1);
+  expect(api.updateSession.mock.invocationCallOrder[0]).toBeLessThan(api.undoSummary.mock.invocationCallOrder[0]);
+  unmount(app);
+});

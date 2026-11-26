@@ -76,7 +76,7 @@
   /** Shows a session's page, such as the one Stop just returned (R10). */
   export function openSession(id: string) {
     confirmingDelete = null;
-    void getSession(id).then((session) => { if (session) selected = session; void refresh(); }).catch((e) => (error = String(e)));
+    void getSession(id).then((session) => { selected = session; void refresh(); }).catch((e) => (error = String(e)));
   }
 
   export async function focusSearch() {
@@ -141,12 +141,15 @@
   async function recover(id: string) {
     error = null;
     recovering = true;
+    let failure: string | null = null;
     try { await recoverSession(id); }
-    catch (e) { error = String(e); }
+    catch (e) { failure = String(e); }
     finally {
       recovering = false;
       await refresh();
       if (selected?.id === id) selected = await getSession(id).catch(() => selected);
+      // refresh() clears error on success; keep the recovery failure visible.
+      if (failure) error = failure;
     }
   }
 
@@ -258,8 +261,7 @@
           <button onclick={() => remove(id)}>Delete Session</button>
           <button onclick={() => (confirmingDelete = null)}>Cancel</button>
         </div>
-      {/if}
-      {#if selected && needsRecovery(selected)}
+      {:else if selected && needsRecovery(selected)}
         {@const id = selected.id}
         <article aria-label="Recover recording">
           <h3>{selected.title}</h3>

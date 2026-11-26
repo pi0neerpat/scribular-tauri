@@ -104,10 +104,11 @@
         </div>
       {/each}
       {#if session.diarizationState === 'pending' || addingLater}
-        <button onclick={confirm} disabled={busy || !writable}>Confirm speakers</button>
-        <button onclick={skip} disabled={busy || !writable}>Skip</button>
+        {@const gated = addingLater && !writable}
+        <button onclick={confirm} disabled={busy || gated}>Confirm speakers</button>
+        <button onclick={skip} disabled={busy || gated}>Skip</button>
       {:else}
-        <button onclick={done} disabled={busy || locked}>Done</button>
+        <button onclick={done} disabled={busy || (locked && overrides !== null)}>Done</button>
       {/if}
     </section>
   {/if}

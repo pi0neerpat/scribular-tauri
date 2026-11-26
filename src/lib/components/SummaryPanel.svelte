@@ -156,7 +156,22 @@
     };
   });
 
-  async function save(id: string, summary: string): Promise<boolean> {
+  // The in-flight save, so history actions run after it instead of racing it.
+  let saving: Promise<boolean> | null = null;
+  function save(id: string, summary: string): Promise<boolean> {
+    const pending = persist(id, summary);
+    saving = pending;
+    void pending.finally(() => { if (saving === pending) saving = null; });
+    return pending;
+  }
+
+  /** Waits for any in-flight save, then saves an unsaved draft; false when a save failed. */
+  async function flushDraft(): Promise<boolean> {
+    if (saving && !(await saving)) return false;
+    return !dirty || save(session.id, draft);
+  }
+
+  async function persist(id: string, summary: string): Promise<boolean> {
     try {
       const updated = await updateSession(id, { summary });
       if (id === sessionId) { lastSaved = updated.summary; undoLine = false; onUpdate?.(updated); }
@@ -176,7 +191,7 @@
   /** Copies the final note; copied_at is set only after the clipboard write succeeds (R13). */
   export async function copy() {
     if (working || !session.summary) return;
-    if (dirty && writable) await commitEdit();
+    if (writable && !working && !(await flushDraft())) return;
     const { id, summary } = session;
     copied = false;
     try {
@@ -220,12 +235,14 @@
   /** Note Undo: true when a step was undone. */
   export async function undo(): Promise<boolean> {
     if (!session.previousSummary || !writable || working) return false;
+    if (!(await flushDraft()) || !session.previousSummary) return false;
     try { const updated = await undoSummary(session.id); preview = ''; undoLine = false; onUpdate?.(updated); return true; }
     catch (e) { error = String(e); return false; }
   }
 
   export async function redo(): Promise<boolean> {
     if (!session.canRedo || !writable || working) return false;
+    if (!(await flushDraft()) || !session.canRedo) return false;
     try { const updated = await redoSummary(session.id); onUpdate?.(updated); return true; }
     catch (e) { error = String(e); return false; }
   }

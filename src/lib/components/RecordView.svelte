@@ -229,7 +229,8 @@
       if (p.state === 'recording') firstCall = false;
       else askSpeakerCount = false;
       // A background or menu-bar Stop also hands the session to its page.
-      if (p.state !== 'recording') { release(); return; }
+      // busy: a direct Stop is in flight and calls onStopped itself.
+      if (p.state !== 'recording') { release(); if (active && !busy) onStopped(p.sessionId); return; }
       progress = p;
       status = p.state;
     });

@@ -23,6 +23,7 @@
   let id = $derived(session.hasAudio && active && !expired ? session.id : null);
   let view = $state<AudioView>({ kind: 'hidden' });
   let lines = $state<TranscriptSegment[]>([]);
+  let linesFailed = $state(false);
   let audio = $state<HTMLAudioElement | undefined>();
   let playing = $state(false);
   let position = $state(0);
@@ -40,12 +41,13 @@
       if (live) view = v;
       else if (url) URL.revokeObjectURL(url);
     });
-    getSessionSegments(id).then((l) => { if (live) lines = l; }).catch(() => {});
+    getSessionSegments(id).then((l) => { if (live) lines = l; }).catch(() => { if (live) linesFailed = true; });
     return () => {
       live = false;
       if (url) URL.revokeObjectURL(url);
       view = { kind: 'hidden' };
       lines = [];
+      linesFailed = false;
       playing = false;
       position = 0;
     };
@@ -93,6 +95,8 @@
           </button></li>
         {/each}
       </ol>
+    {:else if linesFailed}
+      <p role="alert">The timed transcript couldn't load. Playback still works.</p>
     {/if}
   </section>
 {:else if view.kind === 'message'}
@@ -102,6 +106,7 @@
 <style>
   .lines { list-style: none; padding: 0; }
   .lines button { all: unset; display: block; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+  .lines button:focus-visible { outline: 2px solid Highlight; outline-offset: 1px; }
   .lines button[aria-current='true'] { background: #8884; font-weight: 600; }
   .lines time { opacity: .7; font-variant-numeric: tabular-nums; }
 </style>

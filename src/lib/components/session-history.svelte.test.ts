@@ -210,3 +210,34 @@ it('opens an interrupted session on its Recover page (R16)', async () => {
   await vi.waitFor(() => expect(api.recoverSession).toHaveBeenCalledWith('Lost'));
   unmount(app);
 });
+
+it('keeps a failed recovery error visible after the list refreshes (R16)', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
+  api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
+  api.recoverSession.mockRejectedValue('no speech found');
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { view: 'history', onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
+  [...target.querySelectorAll('button')].find((b) => b.textContent === 'Recover Recording')!.click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('no speech found'));
+  unmount(app);
+});
+
+it('shows the delete confirmation instead of the session page, and clears a vanished session', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
+  api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { view: 'history', onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
+  app.confirmDeleteSelected();
+  await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).not.toBeNull());
+  expect(target.querySelector('[aria-label="Recover recording"]')).toBeNull();
+  api.getSession.mockResolvedValue(null);
+  app.openSession('Lost');
+  await vi.waitFor(() => expect(target.textContent).toContain('Select a session'));
+  unmount(app);
+});
