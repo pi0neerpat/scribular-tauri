@@ -236,6 +236,37 @@ it('streams a rewrite after the first summary arrives in place', async () => {
   }
 });
 
+it('shows Undo after a rewrite whose job starts after regenerateSummary resolves', async () => {
+  api.delta = undefined;
+  api.regenerateSummary.mockClear().mockResolvedValue(undefined);
+  const current = writable<Session>({ ...session, previousSummary: null });
+  const state = fromStore(current);
+  const coach: CoachContext = {
+    availability: () => ({ reason: null, message: null, sessionMessage: null, retry: null }),
+    open: vi.fn(), firstNoteTip: () => false, tipSaving: () => false, tipSaveFailed: () => false, dismissTip: vi.fn(), styles: () => prompts, updateStyles: vi.fn(),
+  };
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { get session() { return state.current; } }, context: new Map([[COACH_CONTEXT, coach]]) });
+  flushSync();
+  try {
+    await vi.waitFor(() => expect(named(target, 'Style')?.disabled).toBe(false));
+    named(target, 'Style')!.click();
+    await vi.waitFor(() => expect(api.regenerateSummary).toHaveBeenCalled());
+    await vi.waitFor(() => expect(named(target, 'Style')?.disabled).toBe(false));
+    flushSync();
+    // Status is still 'done' here: the job has not started yet.
+    expect(target.textContent).not.toContain('Note rewritten.');
+    current.set({ ...session, status: 'summarizing', previousSummary: null });
+    flushSync();
+    current.set({ ...session, summary: 'rewritten summary', previousSummary: session.summary });
+    flushSync();
+    expect(target.textContent).toContain('Note rewritten.');
+    expect(named(target, 'Undo')).toBeDefined();
+  } finally {
+    unmount(app);
+  }
+});
+
 it('uses the panel copy action for menu requests', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   api.listSummaryModels.mockResolvedValue([]);

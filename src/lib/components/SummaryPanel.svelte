@@ -48,7 +48,8 @@
   let lastSaved = untrack(() => session.summary);
   // R12: the Undo line shows after a rewrite or Coach acceptance until edit, copy or navigation.
   let undoLine = $state(false);
-  let rewriting = $state(false);
+  /** The note a pending rewrite replaces; null when no rewrite is pending. */
+  let rewriteFrom = $state<string | null>(null);
   let summaryAvailability = $state<SummaryAvailability>('downloading');
   let summaryAvailabilityError = $state(false);
   let summaryAvailabilityRetrying = $state(false);
@@ -98,7 +99,7 @@
       copied = false;
       transcriptCopied = false;
       undoLine = false;
-      rewriting = false;
+      rewriteFrom = null;
       error = null;
       busy = false;
       clearTimeout(copyTimer);
@@ -116,7 +117,10 @@
   });
 
   $effect(() => {
-    if (rewriting && !working && session.status === 'done') { rewriting = false; undoLine = Boolean(session.previousSummary); }
+    // The job may not have started when regenerateSummary resolves (status still 'done'), so wait for the saved note to change.
+    if (rewriteFrom === null || working) return;
+    if (session.status !== 'done') rewriteFrom = null;
+    else if (session.summary !== rewriteFrom) { rewriteFrom = null; undoLine = Boolean(session.previousSummary); }
   });
 
   onMount(() => {
@@ -221,7 +225,8 @@
     if (!canRewrite) return;
     if (dirty && !(await save(session.id, draft))) return;
     error = null; preview = ''; busy = true; undoLine = false;
-    try { await regenerateSummary(session.id, promptId); rewriting = true; }
+    const from = session.summary;
+    try { await regenerateSummary(session.id, promptId); rewriteFrom = from; }
     catch (e) { error = String(e); }
     finally { busy = false; }
   }
@@ -257,7 +262,7 @@
     try {
       await cancelJob(session.id);
       preview = '';
-      rewriting = false;
+      rewriteFrom = null;
       const updated = await getSession(session.id);
       if (updated) onUpdate?.(updated);
     }
