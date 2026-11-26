@@ -149,6 +149,17 @@ final class AppLifecycle {
         usesFreshProfile = false
     }
 
+    /// Kills the app with no chance to clean up, like a crash, so a recording in progress is left interrupted.
+    func forceQuit() {
+        guard let running = app ?? launching?.get().0 else { return }
+        kill(running.processIdentifier, SIGKILL)
+        _ = waitForTermination(running, seconds: 5)
+        app = nil
+        launching = nil
+        launched = false
+        usesFreshProfile = false
+    }
+
     private func linkCache(_ appDataDir: URL, _ cache: URL) throws(DriverError) {
         do { try linkModelCache(appDataDir: appDataDir, cache: cache) }
         catch { throw .fatal("could not link model cache: \(error.localizedDescription)") }

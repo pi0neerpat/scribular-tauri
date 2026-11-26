@@ -6,7 +6,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { Session } from '../types/Session';
 
 const requestSessionAudio = vi.fn();
-vi.mock('../api', () => ({ requestSessionAudio }));
+const getSessionSegments = vi.fn(async () => []);
+vi.mock('../api', () => ({ requestSessionAudio, getSessionSegments }));
 const { default: SessionAudio } = await import('./SessionAudio.svelte');
 
 let urls = 0;

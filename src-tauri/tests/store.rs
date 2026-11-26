@@ -1005,3 +1005,28 @@ fn ipc_types_serialize_camel_case() {
         serde_json::to_value(&store.get_session(&s.id).unwrap().unwrap()).unwrap()["copiedAt"]
     );
 }
+
+/// Recording spec R15: the Audio tab's timed lines merge both sources by start
+/// time and skip silent segments.
+#[test]
+fn session_segments_merge_sources_in_time_order() {
+    let db = TempDb::new();
+    let store = db.open();
+    let s = store.create_session(&new_session("lines")).unwrap();
+    for (source, at, text) in [
+        (AudioSource::Mic, 4000, "third"),
+        (AudioSource::System, 0, "first"),
+        (AudioSource::Mic, 1000, "  second "),
+        (AudioSource::System, 2000, "   "),
+    ] {
+        store
+            .add_segment(&s.id, source, &segment(at, text))
+            .unwrap();
+    }
+    let lines = scribular_lib::commands::session_segments(&store, &s.id).unwrap();
+    let got: Vec<_> = lines
+        .iter()
+        .map(|l| (l.start_ms, l.text.as_str()))
+        .collect();
+    assert_eq!(got, [(0, "first"), (1000, "second"), (4000, "third")]);
+}

@@ -91,3 +91,24 @@ Shipped in PR #34 (merge `328915c`, "move recording controls onto record screen"
 - Selected app is matched by name; the capture follows the process running at Start (see the uitest README on `afplay` loops).
 - The auto-fold needs 20 active seconds of visible text, so a transcript never hides sooner, even at 20 words per source.
 - Native behaviour of the new screen (picker, meters, pause, fold) is covered by component tests only, not by a signed-app uitest.
+
+## Stop handoff, session tabs and playback (PR3)
+
+Spec: R10 to R16, AS7 and AS10 to AS16.
+
+### What it does
+
+- **Stop handoff**: Stop opens the returned session in history at once. Its progress and transcript update there while the Record screen is free to start another recording (`RecordView.svelte` `onStopped`).
+- **Style at Stop** (AS7): the style active when Stop is pressed is used for the note, even if the global style changes while the session waits for the summary model.
+- **Note-first tabs** (`src/lib/components/note-tabs.ts`, `SummaryPanel.svelte`): Note, Transcript and Audio. Note is always the initial tab. Copy Transcript stays available when the note is unavailable.
+- **Edit, rewrite, Undo/Redo**: the note textarea saves on blur and before a rewrite. Picking a style rewrites the note. Undo and Redo are on the note line and in Edit > Undo/Redo (`shell-undo`/`shell-redo` in `src-tauri/src/shell/menu.rs`; a focused text field keeps native undo). Lapsed access allows view and copy only.
+- **Copy**: "Copied" shows only after a successful Copy Note; any edit, rewrite or Undo clears it. Copy Transcript never sets it.
+- **Speakers**: Edit Speakers opens the form; pending names survive closing and reopening and apply only on Done.
+- **Playback** (`SessionAudio.svelte`, AS15): Play/Pause, Back/Forward 15 seconds, a Playback position slider, Speed, and a Timed transcript list that highlights the current line and seeks on click. Lines come from `get_session_segments` (both sources merged in time order).
+
+### How to test
+
+- `npm test` (`summary-panel.test.ts`, `speakers-card-interactions.svelte.test.ts`, `session-history.svelte.test.ts`, `session-audio.test.ts`); `npm run check`.
+- Rust: `session_job.rs::as7_a_later_global_style_change_leaves_the_queued_note_alone`, `store.rs::session_segments_merge_sources_in_time_order`.
+- Native: scenarios AS10 to AS16 live in the cwf task's `scenarios/` folder. AS16 uses the new uitest `force-quit` command to leave an interrupted recording.
+- AS15 playback (audible audio, speed, seeking) needs a real-app check.

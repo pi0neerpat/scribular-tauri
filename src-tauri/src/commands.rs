@@ -546,6 +546,34 @@ pub fn get_session(store: State<Arc<Store>>, id: String) -> Result<Option<Sessio
     store.get_session(&id).map_err(|e| e.to_string())
 }
 
+/// Timed transcript lines from both sources, in time order, for playback (R15).
+#[tauri::command]
+pub fn get_session_segments(
+    store: State<Arc<Store>>,
+    id: String,
+) -> Result<Vec<TranscriptSegment>, String> {
+    session_segments(&store, &id).map_err(|e| e.to_string())
+}
+
+pub fn session_segments(store: &Store, id: &str) -> crate::store::Result<Vec<TranscriptSegment>> {
+    let mut lines = Vec::new();
+    for source in [
+        crate::store::AudioSource::Mic,
+        crate::store::AudioSource::System,
+    ] {
+        lines.extend(store.segments(id, source)?.into_iter().filter_map(|s| {
+            let text = s.text?.trim().to_string();
+            (!text.is_empty()).then_some(TranscriptSegment {
+                start_ms: s.start_ms,
+                end_ms: s.end_ms,
+                text,
+            })
+        }));
+    }
+    lines.sort_by_key(|s| s.start_ms);
+    Ok(lines)
+}
+
 #[tauri::command]
 pub fn update_session(
     store: State<Arc<Store>>,

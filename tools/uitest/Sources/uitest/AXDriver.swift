@@ -51,6 +51,13 @@ final class AXDriver: Driver {
         case .stopAudio:
             player.stop()
             return nil
+        case .forceQuit:
+            releaseFixtureWriter()
+            player.stop()
+            lifecycle.forceQuit()
+            application = nil
+            keychainHandled = false
+            return nil
         case .quit:
             releaseFixtureWriter()
             player.stop()

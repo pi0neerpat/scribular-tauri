@@ -50,6 +50,7 @@ public enum Command: Equatable {
     case play(path: String, loop: Bool)
     case stopAudio
     case quit
+    case forceQuit
 }
 
 public struct Step: Equatable {
@@ -240,6 +241,9 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
         case "reopen-app":
             guard args.isEmpty else { throw fail("usage: reopen-app") }
             command = .reopenApp
+        case "force-quit":
+            guard args.isEmpty else { throw fail("usage: force-quit") }
+            command = .forceQuit
         case "close-window", "handle-keychain", "quit":
             guard args.isEmpty else { throw fail("unexpected argument: \(args[0].text)") }
             command = first.text == "close-window" ? .closeWindow : first.text == "handle-keychain" ? .handleKeychain : .quit

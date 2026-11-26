@@ -127,7 +127,9 @@ describe('AS6 first-note tip', () => {
     const row = () => target.querySelector<HTMLButtonElement>(`[data-session-id="${id}"]`);
     await vi.waitFor(() => expect(row()?.disabled).toBe(false));
     row()!.click();
-    await vi.waitFor(() => expect([...target.querySelectorAll('pre')].some((el) => el.textContent === summary)).toBe(true));
+    // The note is an editable textarea (R12); a lapsed licence shows it read-only in a <pre>.
+    await vi.waitFor(() => expect([...target.querySelectorAll<HTMLTextAreaElement | HTMLPreElement>('[aria-label="Note"]')]
+      .some((el) => ('value' in el ? el.value : el.textContent) === summary)).toBe(true));
   }
 
   it.each(['dismiss', 'open coach'])('persists after %s and relaunch', async (action) => {

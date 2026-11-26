@@ -112,6 +112,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `play "file.wav" [loop]` | Play the file through `/usr/bin/afplay` in the background, so the app can record it in App-audio mode (`afplay` in the App picker). Relative paths resolve against the directory uitest runs from; a missing file fails the step. `loop` restarts it when it ends. Stops at `stop-audio`, `quit`, or the end of the run (pass or fail). |
 | `stop-audio` | Stop `play` playback. |
 | `quit` | Quit the app and stop `play` playback. |
+| `force-quit` | Kill the app with SIGKILL (no clean shutdown, like a crash) and stop `play` playback. A recording in progress is left interrupted for the next `launch --keep-data`. |
 | `expect-status-item "Scribular"` | Wait for the app status item whose Accessibility help equals the text. |
 | `status-item click "Scribular"` | Press the matching app status item. Native menu items are not exposed to Accessibility. |
 | `status-item-mouse-click "Scribular"` | Mouse-click the status item whose Accessibility help matches. |

@@ -11,6 +11,7 @@ const getSummaryAvailability = vi.fn().mockResolvedValue('ready');
 const onSummaryAvailability = vi.fn(async () => () => {});
 vi.mock('../api', () => ({
   confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap, getSummaryAvailability, onSummaryAvailability,
+  onSummaryDelta: async () => () => {},
   subscribeSummaryAvailability: async (callback: (state: string) => void) => { callback(await getSummaryAvailability()); return () => {}; },
 }));
 const { default: SpeakersCard } = await import('./SpeakersCard.svelte');
@@ -39,7 +40,7 @@ it('Add speakers after Skip confirms labels and refreshes the card to confirmed'
   expect(target.textContent).toContain('Confirm speakers');
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Confirm speakers')!.click();
   await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('session-1'));
-  await vi.waitFor(() => expect(target.textContent).toContain('Edit speakers'));
+  await vi.waitFor(() => expect(target.textContent).toContain('Edit Speakers'));
   expect(confirmSpeakerLabels).toHaveBeenCalledWith('session-1', { SPEAKER_0: 'Alice' });
   unmount(app);
 });
@@ -55,7 +56,7 @@ it('refreshes the parent summary after renaming a confirmed speaker', async () =
   });
   const target = document.createElement('div');
   const app = mount(SummaryPanel, { target, props });
-  const edit = () => [...target.querySelectorAll('button')].find((button) => button.textContent === 'Edit speakers');
+  const edit = () => [...target.querySelectorAll('button')].find((button) => button.textContent === 'Edit Speakers');
   await vi.waitFor(() => expect(edit()).toBeDefined());
   edit()!.click();
   flushSync();
@@ -64,8 +65,29 @@ it('refreshes the parent summary after renaming a confirmed speaker', async () =
   input.value = 'Therapist';
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new FocusEvent('blur'));
-  await vi.waitFor(() => expect(target.textContent).toContain('Therapist spoke'));
+  flushSync();
+  expect(updateSpeakerMap).not.toHaveBeenCalled();
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Done')!.click();
+  await vi.waitFor(() => expect(target.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]')?.value).toBe('Therapist spoke'));
   expect(updateSpeakerMap).toHaveBeenCalledWith('session-1', { SPEAKER_0: 'Therapist' });
+  unmount(app);
+});
+
+it('keeps pending speaker names across a reopen until Done (R14)', async () => {
+  const target = document.createElement('div');
+  let app = mount(SpeakersCard, { target, props: { session: session('confirmed') } });
+  flushSync();
+  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Edit Speakers')!.click();
+  flushSync();
+  const input = target.querySelector('input')!;
+  input.value = 'Client';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  unmount(app);
+  app = mount(SpeakersCard, { target, props: { session: session('confirmed') } });
+  flushSync();
+  expect(target.querySelector('input')?.value).toBe('Client');
+  expect(updateSpeakerMap).not.toHaveBeenCalled();
   unmount(app);
 });
 

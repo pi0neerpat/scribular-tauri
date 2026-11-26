@@ -281,3 +281,8 @@ import Testing
         .click(label: "Start Recording", index: nil, within: nil)
     ])
 }
+
+@Test func parsesForceQuit() throws {
+    #expect(try parseScript("force-quit").first?.command == .forceQuit)
+    #expect(throws: ScriptError(line: 1, message: "usage: force-quit")) { try parseScript("force-quit now") }
+}

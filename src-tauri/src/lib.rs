@@ -171,6 +171,7 @@ pub fn run() {
             commands::count_sessions,
             commands::search_sessions,
             commands::get_session,
+            commands::get_session_segments,
             commands::update_session,
             commands::delete_session,
             commands::clear_all_sessions,
