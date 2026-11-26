@@ -1,10 +1,16 @@
-# AS11: Note tab is initial; Transcript and Audio tabs open; Copy Transcript works.
-# Unavailable/lapsed variants are covered by summary-panel.test.ts.
+# AS11: Note tab is initial; Transcript and Audio tabs open with kept audio; Copy Transcript works.
+# Unavailable/lapsed variants are covered by summary-panel.test.ts. Settings labels are best-guess.
 launch
 expect "Welcome to Scribular"
 key escape
 click "Continue"
 expect "Start recording" timeout 60s
+click "Settings"
+click "Recording"
+click "On"
+labels
+click "Record"
+expect "Start recording" timeout 30s
 expect-not "Downloading the speech model" timeout 120s
 expect-not "Verifying the speech model" timeout 120s
 play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
@@ -23,4 +29,7 @@ click "Transcript"
 expect "Client:"
 click "Copy Transcript"
 expect-clipboard-matches "Client:"
+click "Audio"
+expect "Play" timeout 30s
+labels
 quit

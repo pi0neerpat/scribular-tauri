@@ -184,13 +184,15 @@
   }
 
   /** Edit > Undo/Redo: a focused text field keeps its own undo; otherwise undo the note (R12). */
-  function editUndo(redo: boolean) {
+  function textUndo(redo: boolean): boolean {
     const el = document.activeElement;
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) {
-      document.execCommand(redo ? 'redo' : 'undo');
-      return;
-    }
-    void (redo ? history?.redoNote() : history?.undoNote());
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable))) return false;
+    document.execCommand(redo ? 'redo' : 'undo');
+    return true;
+  }
+
+  function editUndo(redo: boolean) {
+    if (!textUndo(redo)) void (redo ? history?.redoNote() : history?.undoNote());
   }
 
   async function refreshInterrupted() {
@@ -225,6 +227,8 @@
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
+      // A focused text field keeps native undo even inside a modal; only note undo waits for it to close.
+      if ((id === 'shell-undo' || id === 'shell-redo') && textUndo(id === 'shell-redo')) return;
       if (coach || welcomeOpen || modalOpen()) return;
       switch (id) {
         case 'shell-example-style':

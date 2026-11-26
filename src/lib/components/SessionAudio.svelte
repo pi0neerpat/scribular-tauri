@@ -41,7 +41,6 @@
       if (live) view = v;
       else if (url) URL.revokeObjectURL(url);
     });
-    getSessionSegments(id).then((l) => { if (live) lines = l; }).catch(() => { if (live) linesFailed = true; });
     return () => {
       live = false;
       if (url) URL.revokeObjectURL(url);
@@ -51,6 +50,16 @@
       playing = false;
       position = 0;
     };
+  });
+
+  // Refetched on each status step so lines saved during finalization appear.
+  let status = $derived(session.status);
+  $effect(() => {
+    if (!id) return;
+    void status;
+    let live = true;
+    getSessionSegments(id).then((l) => { if (live) { lines = l; linesFailed = false; } }).catch(() => { if (live) linesFailed = true; });
+    return () => { live = false; };
   });
 
   $effect(() => { if (audio) audio.playbackRate = speed; });

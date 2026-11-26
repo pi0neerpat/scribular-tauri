@@ -56,6 +56,17 @@ describe('SessionAudio component (AS19)', () => {
     unmount(app);
   });
 
+  it('refetches timed lines when processing advances, without reopening the audio', async () => {
+    const props = $state({ session: { ...session('a'), status: 'summarizing' } as Session, active: true });
+    const { app } = await render(props);
+    const before = getSessionSegments.mock.calls.length;
+    props.session = { ...session('a'), status: 'done' } as Session;
+    flushSync();
+    await vi.waitFor(() => expect(getSessionSegments.mock.calls.length).toBe(before + 1));
+    expect(requestSessionAudio).toHaveBeenCalledTimes(1);
+    unmount(app);
+  });
+
   it('revokes and removes the player while hidden', async () => {
     const props = $state({ session: session('a'), active: true });
     const { target, app } = await render(props);

@@ -23,4 +23,8 @@ click "Note" index 2
 type " AS13 edit"
 click "Transcript"
 expect-not "Copied"
+click "Copy Transcript"
+expect-clipboard-matches "Client:"
+click "Note" index 1
+expect "Copy Note"
 quit

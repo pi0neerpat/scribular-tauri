@@ -342,7 +342,7 @@ it('runs Undo only after an in-flight save of the draft finishes (R12)', async (
   box.dispatchEvent(new Event('input', { bubbles: true }));
   box.dispatchEvent(new Event('blur'));
   const undone = app.undo();
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   expect(api.undoSummary).not.toHaveBeenCalled();
   finishSave();
   expect(await undone).toBe(true);

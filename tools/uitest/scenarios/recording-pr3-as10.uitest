@@ -1,5 +1,5 @@
-# AS10: Stop opens the session at once; another recording can start while it processes.
-# Labels are best-guess from source; run `labels` first in verify.
+# AS10: Stop opens the session at once; a second recording starts and stops while the first processes.
+# Labels are best-guess; run `labels` first in verify.
 launch
 expect "Welcome to Scribular"
 key escape
@@ -19,8 +19,14 @@ click "Stop"
 stop-audio
 expect "Audio" timeout 30s
 labels
-click "Transcript"
-expect "Client:" timeout 60s
 click "New Recording"
 expect "Start recording" timeout 30s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+expect "Stop" timeout 30s
+wait 6s
+click "Stop"
+stop-audio
+expect "Audio" timeout 30s
+labels
 quit

@@ -80,10 +80,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function renderRecordView() {
+async function renderRecordView(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.append(target);
-  const app = mount(RecordView, { target, props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } } });
+  const app = mount(RecordView, { target, props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null }, ...extra } });
   await vi.waitFor(() => expect(target.querySelector('button')).not.toBeNull());
   return { target, app };
 }
@@ -409,6 +409,21 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(sessionStorage.getItem('scribular.inFlightSession')).toBe(recording.id));
     unmount(fresh.app);
     fresh.target.remove();
+  });
+
+  it('opens the session after an external Stop even while another view is shown (R10)', async () => {
+    onSessionProgress.mockImplementation(async (callback) => {
+      emitProgress = callback;
+      return () => {};
+    });
+    const onStopped = vi.fn();
+    const { target, app } = await renderRecordView({ onStopped, active: false });
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    emitProgress!({ sessionId: recording.id, state: 'finalizing', stepIndex: 1, stepCount: 3, message: 'Finalizing' });
+    expect(onStopped).toHaveBeenCalledWith(recording.id);
+    unmount(app);
+    target.remove();
   });
 
   it('keeps a new attempt marker when an older session finishes', async () => {

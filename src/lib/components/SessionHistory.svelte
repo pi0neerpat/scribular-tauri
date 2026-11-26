@@ -261,18 +261,24 @@
           <button onclick={() => remove(id)}>Delete Session</button>
           <button onclick={() => (confirmingDelete = null)}>Cancel</button>
         </div>
-      {:else if selected && needsRecovery(selected)}
-        {@const id = selected.id}
-        <article aria-label="Recover recording">
-          <h3>{selected.title}</h3>
-          <p>This recording stopped before it finished. Its audio is saved on this Mac, so Scribular can recover it and write the transcript and note.</p>
-          <button disabled={recovering || !allows($accessState)} onclick={() => recover(id)}>Recover Recording</button>
-          <button disabled={recovering} onclick={confirmDeleteSelected}>Delete</button>
-        </article>
-      {:else if selected}
-        <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history'} management prompts={prompts} models={models}
-          progress={progress[selected.id]}
-          onUpdate={(s) => { selected = s; void refresh(); }} onCopied={() => { void refresh(); }} />
+      {/if}
+      {#if selected}
+        <!-- Hidden, not unmounted, behind the dialog so Undo line, tab and unsaved note survive Cancel (R12). -->
+        <div hidden={confirmingDelete === selected.id}>
+          {#if needsRecovery(selected)}
+            {@const id = selected.id}
+            <article aria-label="Recover recording">
+              <h3>{selected.title}</h3>
+              <p>This recording stopped before it finished. Its audio is saved on this Mac, so Scribular can recover it and write the transcript and note.</p>
+              <button disabled={recovering || !allows($accessState)} onclick={() => recover(id)}>Recover Recording</button>
+              <button disabled={recovering} onclick={confirmDeleteSelected}>Delete</button>
+            </article>
+          {:else}
+            <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history' && confirmingDelete !== selected.id} management prompts={prompts} models={models}
+              progress={progress[selected.id]}
+              onUpdate={(s) => { selected = s; void refresh(); }} onCopied={() => { void refresh(); }} />
+          {/if}
+        </div>
       {:else}<p>Select a session or start a new recording.</p>{/if}
     </div>
     {@render children?.()}

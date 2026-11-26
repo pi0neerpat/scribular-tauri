@@ -1,4 +1,4 @@
-# AS14: renamed speakers apply on Done; Edit Speakers reopens the form.
+# AS14: renamed speakers apply on Done; Edit Speakers reopens the form; names persist.
 launch
 expect "Welcome to Scribular"
 key escape
@@ -17,6 +17,17 @@ wait 14s
 click "Stop"
 stop-audio
 expect "Ask Coach to change the note" timeout 400s
-click "Edit Speakers"
 labels
+click "Confirm speakers"
+expect "Edit Speakers" timeout 30s
+click "Edit Speakers"
+click "Client" index 1
+click "Done"
+expect "Edit Speakers" timeout 30s
+click "Transcript"
+expect "Client:"
+click "History"
+labels
+click "Edit Speakers"
+expect "Who's speaking in this session?"
 quit

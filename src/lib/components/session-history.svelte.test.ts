@@ -225,7 +225,7 @@ it('keeps a failed recovery error visible after the list refreshes (R16)', async
   unmount(app);
 });
 
-it('shows the delete confirmation instead of the session page, and clears a vanished session', async () => {
+it('hides (keeps mounted) the session page behind the delete confirmation, and clears a vanished session', async () => {
   api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
   api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
   const target = document.createElement('div');
@@ -235,7 +235,10 @@ it('shows the delete confirmation instead of the session page, and clears a vani
   await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
   app.confirmDeleteSelected();
   await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).not.toBeNull());
-  expect(target.querySelector('[aria-label="Recover recording"]')).toBeNull();
+  expect(target.querySelector('[aria-label="Recover recording"]')?.closest('[hidden]')).not.toBeNull();
+  (target.querySelector('[role="alertdialog"] button:last-child') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).toBeNull());
+  expect(target.querySelector('[aria-label="Recover recording"]')?.closest('[hidden]')).toBeNull();
   api.getSession.mockResolvedValue(null);
   app.openSession('Lost');
   await vi.waitFor(() => expect(target.textContent).toContain('Select a session'));

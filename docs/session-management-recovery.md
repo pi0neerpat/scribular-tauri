@@ -11,7 +11,7 @@ Spec: `plans/parity/09-session-management-recovery.md`. Recovery and waiting-ses
 - **Undo**: one snapshot per session. A successful regenerate stores the old summary, style and model; Undo restores them.
 - **Delete / Delete all**: single delete and Delete all, each with a confirm step (a second click within 3 s for single delete). Delete all also removes samples and runs `VACUUM`.
 - **Recover page** (recording spec PR3, R16): opening an interrupted session shows its Recover page ("Recover recording") with Recover Recording and Delete. Only that session processes; a failed recovery keeps its chunks and the Recover action. Test natively with uitest `force-quit` then `launch --keep-data`.
-- **Recover interrupted recordings**: each interrupted row shows a Recover marker and a Recover action in its menu; there is no aggregate banner. Recovery re-transcribes the kept audio, then summarizes.
+- **Recover interrupted recordings**: each interrupted row with kept audio shows a Recover marker and a Recover action in its menu; there is no aggregate banner. Recovery re-transcribes the kept audio, then summarizes. An interrupted row whose audio was swept shows "Audio no longer available" and only Delete.
 - **Cancel awaitingModel**: a session waiting for the summary model download can be cancelled and returns to a stopped state.
 - A session with too little speech (under `MIN_WORDS`) stays `Failed(InsufficientAudio)` with a Delete action; it is not silently deleted as in Electron.
 
