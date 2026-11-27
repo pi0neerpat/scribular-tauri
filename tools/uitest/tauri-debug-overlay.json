@@ -1,4 +1,7 @@
 {
-  "build": { "beforeBuildCommand": "NODE_ENV=development npm run build -- --mode development" },
+  "build": {
+    "beforeBuildCommand": "NODE_ENV=development npm run build -- --mode development",
+    "features": ["remote-llm"]
+  },
   "bundle": { "createUpdaterArtifacts": false }
 }

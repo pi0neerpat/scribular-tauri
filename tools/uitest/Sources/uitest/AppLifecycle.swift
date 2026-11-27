@@ -33,7 +33,9 @@ final class AppLifecycle {
     private(set) var usesFreshProfile = false
     private var detail: String?
 
-    init(appPath: URL, noTrust: Bool = false) { self.appPath = appPath; self.noTrust = noTrust }
+    private let llmURL: String?
+
+    init(appPath: URL, noTrust: Bool = false, llmURL: String? = nil) { self.appPath = appPath; self.noTrust = noTrust; self.llmURL = llmURL }
 
     func launch(keepData: Bool, runDir: URL, unavailableHotkey: Bool = false, environment: [String: String] = [:]) throws(DriverError) -> String {
         if !launched {
@@ -58,7 +60,7 @@ final class AppLifecycle {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.createsNewApplicationInstance = true
                 // remote-llm test builds send summaries to this host llama-server (README "Host llama-server (VM)").
-                if let url = ProcessInfo.processInfo.environment["SCRIBULAR_LLM_URL"], !url.isEmpty {
+                if let url = llmURL {
                     configuration.environment = ["SCRIBULAR_LLM_URL": url]
                 }
                 if let skip = ProcessInfo.processInfo.environment["SCRIBULAR_SKIP_LICENSE"], !skip.isEmpty {
