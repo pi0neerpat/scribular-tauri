@@ -156,6 +156,21 @@ it('opens on Note, copies the transcript without marking the note, and disables 
   unmount(app);
 });
 
+it('keeps Audio enabled while the transcript is still processing (R15)', () => {
+  api.listSummaryModels.mockResolvedValue([]);
+  const target = document.createElement('div');
+  const app = mount(SummaryPanel, { target, props: { session: { ...session, status: 'finalizing', summary: '' }, management: true, prompts, models: [] } });
+  flushSync();
+  const audioTab = [...target.querySelectorAll<HTMLButtonElement>('[role="tab"]')][2];
+  expect(audioTab.disabled).toBe(false);
+  expect(target.textContent).not.toContain('No audio was kept');
+  app.showTab('audio');
+  flushSync();
+  expect(target.querySelector('[role="tabpanel"]')?.getAttribute('aria-label')).toBe('Audio');
+  expect(target.textContent).toContain('Audio will be ready when the transcript is saved.');
+  unmount(app);
+});
+
 it('does not mark a failed clipboard copy as copied', async () => {
   const writeText = vi.fn().mockRejectedValue(new Error('clipboard denied'));
   api.markNoteCopied.mockClear();

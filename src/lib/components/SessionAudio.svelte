@@ -5,7 +5,7 @@
   import { getSessionSegments } from '../api';
   import type { Session } from '../types/Session';
   import type { TranscriptSegment } from '../types/TranscriptSegment';
-  import { currentLine, formatTime, openAudio, retentionLine, SPEEDS, type AudioView } from './session-audio';
+  import { audioPending, currentLine, formatTime, openAudio, retentionLine, SPEEDS, type AudioView } from './session-audio';
 
   let { session, active = true }: { session: Session; active?: boolean } = $props();
 
@@ -110,6 +110,8 @@
   </section>
 {:else if view.kind === 'message'}
   <p role="alert">{view.text}</p>
+{:else if audioPending(session)}
+  <p>Audio will be ready when the transcript is saved.</p>
 {/if}
 
 <style>
