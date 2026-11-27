@@ -33,7 +33,7 @@
   - `-np 4`: four slots, which `-c` is divided by. The README does not give a separate reason for the count of four.
   - Check from the VM: `curl http://192.168.64.1:5801/health`.
 - Build: `APPLE_SIGNING_IDENTITY="Scribular Local Dev" TAURI_SIGNING_PRIVATE_KEY="<throwaway key>" npm run tauri -- build --bundles app --features remote-llm` (also set `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if the key has one).
-- Run: in the VM no `SCRIBULAR_LLM_URL` variable is needed; use `SCRIBULAR_SKIP_LICENSE=1 swift run --package-path tools/uitest uitest <scenario> --app <path>`. Elsewhere, or for another server: `SCRIBULAR_LLM_URL=http://192.168.64.1:5801 swift run --package-path tools/uitest uitest <scenario> --app <path>`.
+- Run: in the VM no `SCRIBULAR_LLM_URL` variable is needed; use `SCRIBULAR_SKIP_LICENSE=1 swift run --package-path tools/uitest uitest <scenario> --app <path>`. Elsewhere, or for another server: `SCRIBULAR_LLM_URL=<server-url> swift run --package-path tools/uitest uitest <scenario> --app <path>`.
 - No data is stored by this feature: no settings, files, or session fields were added.
 
 ## How to test it
