@@ -23,7 +23,7 @@
   - On the host it stays on-device and probes nothing.
   - `tools/uitest/tauri-debug-overlay.json` sets `build.features: ["remote-llm"]`, so debug builds made with the overlay include the feature.
   - **Log check** (`main.swift`): when uitest passed a URL, the lines this run added to `<runDir>/app.log` must contain `SCRIBULAR_LLM_URL set: summaries use <same url>`. Otherwise the run fails with `app ignored SCRIBULAR_LLM_URL: build lacks --features remote-llm`; a missing `app.log` also fails.
-  - `uitest doctor` prints an `info host llama-server:` line (ok, unreachable, or not probed with the override, credentials and query values hidden). It never fails doctor.
+  - `uitest doctor` prints an `info host llama-server:` line (ok, unreachable, or not probed with the override, credentials and query values hidden). It never fails doctor. The app logs a non-empty URL verbatim at launch, so do not include credentials or sensitive query values in `SCRIBULAR_LLM_URL`.
 
 ## Config and data
 - Env var: `SCRIBULAR_LLM_URL`, e.g. `http://192.168.64.1:5801`.
