@@ -18,6 +18,7 @@ use rusqlite::Connection;
 
 use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Plan};
 
+pub(crate) use appearance::valid_owned_id;
 pub use appearance::{
     Accent, Appearance, Background, Mode, MyTheme, Preset, Selection, ThemeValues, Tint,
 };
@@ -268,7 +269,7 @@ impl Store {
         })
     }
 
-    fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    pub(crate) fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         // A panic while holding the lock can't leave SQLite inconsistent
         // (statements are atomic), so a poisoned lock is safe to reuse.
         let mut conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());

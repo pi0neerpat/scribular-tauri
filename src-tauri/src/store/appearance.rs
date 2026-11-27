@@ -133,7 +133,7 @@ fn valid_color(color: &str) -> bool {
     color.len() == 7 && color.starts_with('#') && color[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn valid_owned_id(id: &str) -> bool {
+pub(crate) fn valid_owned_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 

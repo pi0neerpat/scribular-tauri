@@ -59,6 +59,13 @@ Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md
 
 ## Known limits
 
-- No UI controls: `App.svelte` and `Settings.svelte` start the store, but the Appearance pane has no controls for it and nothing applies the resolved colors yet (PR2).
-- No picture import. `set_appearance` accepts any well-formed `owned` background id, including ids that do not exist, until PR2 adds picture storage.
-- No CSP or asset-loading work for backgrounds yet (PR2/PR3).
+- Minimal controls only: the Appearance pane (`AppearancePane.svelte`) has theme radios, Customize/Reset, and the background picture controls. Accent, tint and mode controls, and applying the resolved colors, come in PR3.
+
+## Background pictures (PR2)
+
+- Bundled pictures: `src/assets/backgrounds/{dawn,sea-glass,linen}.jpg`, resolved by `backgroundSource` in `src/lib/appearance.ts`. Stars draws on a canvas; None shows the solid background.
+- Import: `choose_background_picture` (native Open panel) and `import_background_picture` (Settings drop) in `src-tauri/src/commands.rs`, backed by `src-tauri/src/backgrounds.rs`. Scribular sniffs JPEG, PNG, HEIC or WebP content, decodes it with macOS `sips`, downsizes it to cover the largest display (never upscales), and writes an owned copy to `<db dir>/Backgrounds/<id>.jpg|png` (folder mode 0700). Import needs a My Theme and selects it. Undecodable or other files show the unsupported-picture error and leave the theme unchanged.
+- Cleanup: after every appearance save or import, `Backgrounds::sweep` removes owned copies that the saved My Theme no longer references. Sessions never reference pictures, so deleting sessions leaves the selected picture alone. `set_appearance` refuses an owned id whose file is missing.
+- Loading: the custom `scribular-bg://localhost/<id>` scheme serves only valid ids from the owned folder (`Cache-Control: no-store`, 404 otherwise). The CSP adds only `img-src scribular-bg:`; the Tauri asset protocol stays off. A picture that fails to load falls back to the solid background.
+- Stars motion: `starsState` in `src/lib/components/background-animation.ts`. Only Stars mounts the canvas; its Animated motion switch, a hidden window and Reduce Motion keep it still, and recording speeds it up. Choosing Stars turns motion on.
+- Tests: `src-tauri/src/backgrounds.rs` (AS6 import, AS7 cleanup, failed commit, scheme), `src/lib/components/background-animation.test.ts` and `theme-background.svelte.test.ts` (AS8), `src/lib/appearance.test.ts` (sources).

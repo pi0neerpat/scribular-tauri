@@ -29,6 +29,7 @@
   } from '../api';
   import { appSettings } from '../app-settings';
   import { startAppearance } from '../appearance-store';
+  import AppearancePane from './AppearancePane.svelte';
   import LicenseSettings from './LicenseSettings.svelte';
   import ShortcutsSettings from './ShortcutsSettings.svelte';
   import SummaryUnavailable from './SummaryUnavailable.svelte';
@@ -294,7 +295,7 @@
     </fieldset>
   {/if}
   {#if category === 'Appearance'}
-    <label><input type="checkbox" checked={$appSettings.showBackgroundAnimation} disabled={!persistedAppSettings || appSettingsSaving} onchange={(e) => saveAppSettings('showBackgroundAnimation', e.currentTarget.checked)} /> Show background animation</label>
+    <AppearancePane />
   {/if}
 
   {#if category === 'Recording'}

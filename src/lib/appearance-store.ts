@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { getAppearance, onAppearanceChanged, setAppearance } from './api';
+import { chooseBackgroundPicture, getAppearance, importBackgroundPicture, onAppearanceChanged, setAppearance } from './api';
 import { defaultAppearance, resolveAppearance, watchSystemAppearance } from './appearance';
 import type { Appearance } from './types/Appearance';
 
@@ -31,6 +31,25 @@ export function saveAppearance(next: Appearance): Promise<void> {
   });
   return saves;
 }
+
+// Theme R6/R7: Rust copies the picture and commits it to My Theme. A failure
+// or cancel leaves the current picture; Rust errors are safe user text.
+function savePicture(run: () => Promise<Appearance>): Promise<void> {
+  saves = saves.then(async () => {
+    const version = changeVersion;
+    appearanceError.set(null);
+    try {
+      const saved = await run();
+      if (version === changeVersion) apply(saved);
+    } catch (error) {
+      appearanceError.set(String(error));
+    }
+  });
+  return saves;
+}
+
+export function chooseBackground(): Promise<void> { return savePicture(chooseBackgroundPicture); }
+export function dropBackground(path: string): Promise<void> { return savePicture(() => importBackgroundPicture(path)); }
 
 export async function startAppearance(): Promise<() => void> {
   const stopSystem = watchSystemAppearance((dark, accent) => {

@@ -1,13 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { shouldAnimate } from './background-animation';
-  let { enabled, recording }: { enabled: boolean; recording: boolean } = $props();
+  import { starsState } from './background-animation';
+  let { motion, recording }: { motion: boolean; recording: boolean } = $props();
   let canvas: HTMLCanvasElement;
   let raf = 0;
-  let render = () => {};
+  let draw = (_advance: boolean) => {};
+  const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
   function update() {
     cancelAnimationFrame(raf);
-    if (shouldAnimate(enabled, document.hidden, matchMedia('(prefers-reduced-motion: reduce)').matches)) raf = requestAnimationFrame(render);
+    const state = starsState('stars', motion, recording, document.hidden, reducedMotion());
+    if (state.animate) {
+      const frame = () => { draw(true); raf = requestAnimationFrame(frame); };
+      raf = requestAnimationFrame(frame);
+    } else {
+      draw(false);
+    }
   }
 
   onMount(() => {
@@ -17,15 +24,15 @@
     const stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), size: Math.random() * 1.5 + .5 }));
     let width = 0;
     let height = 0;
-    const resize = () => { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = innerHeight * devicePixelRatio; };
-    render = () => {
+    const resize = () => { width = canvas.width = innerWidth * devicePixelRatio; height = canvas.height = innerHeight * devicePixelRatio; draw(false); };
+    draw = (advance) => {
+      const { speed } = starsState('stars', motion, recording, false, false);
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = 'rgba(120, 150, 190, .6)';
       for (const star of stars) {
         ctx.fillRect(star.x * width, star.y * height, star.size * devicePixelRatio, star.size * devicePixelRatio);
-        star.y = (star.y + (recording ? .0018 : .00045)) % 1;
+        if (advance) star.y = (star.y + speed) % 1;
       }
-      raf = requestAnimationFrame(render);
     };
     const refresh = () => { resize(); update(); };
     resize(); update();
@@ -34,14 +41,13 @@
   });
 
   $effect(() => {
-    void enabled; void recording;
+    void motion; void recording;
     if (canvas) update();
   });
 </script>
 
-<canvas bind:this={canvas} aria-hidden="true" class:off={!enabled}></canvas>
+<canvas bind:this={canvas} aria-hidden="true"></canvas>
 
 <style>
   canvas { position: fixed; inset: 0; width: 100%; height: 100vh; pointer-events: none; opacity: .6; z-index: -1; }
-  canvas.off { display: none; }
 </style>
