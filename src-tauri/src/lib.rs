@@ -383,7 +383,8 @@ pub fn run() {
                     Arc::new(license::api::HttpLicenseApi::new(&license::api::api_root())?),
                     Arc::new(license::SystemClock),
                 )
-                .with_skip(license::dev_skip()),
+                .with_skip(license::dev_skip())
+                .with_forced_state(license::dev_forced_state()),
             );
             app.manage(Arc::clone(&licensing));
             spawn_license_checks(app.handle().clone(), licensing);

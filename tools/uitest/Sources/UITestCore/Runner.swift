@@ -161,7 +161,7 @@ public func runSteps(_ steps: [Step], driver: Driver, options: RunOptions, out: 
         let changed = switch step.command {
         case .backgroundStatusItemClick: true
         case .reopenApp: true
-        case .click, .pickApp, .pickCallApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .statusItemMouseClick, .dockClick: true
+        case .click, .clickChild, .pickApp, .pickCallApp, .type, .key, .closeWindow, .handleKeychain, .statusItemClick, .statusItemMouseClick, .dockClick: true
         default: false
         }
         if changed {

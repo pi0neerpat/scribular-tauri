@@ -17,6 +17,10 @@ public struct KeyCombo: Equatable {
 public enum Command: Equatable {
     case launch(keepData: Bool)
     case launchWithUnavailableHotkey
+    case launchWithEnv([String: String])
+    case clickChild(index: Int, within: String)
+    case expectPlayhead(slider: String, within: String)
+    case expectDisabled(label: String, index: Int?)
     case click(label: String, index: Int?, within: String?)
     case pickApp(String)
     case pickCallApp(String)
@@ -124,6 +128,35 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 }
             }
             command = .launchWithUnavailableHotkey
+        case "launch-with-env":
+            var env = [String: String]()
+            for arg in args {
+                guard arg.quoted, let pair = launchEnvPair(arg.text), env.updateValue(pair.1, forKey: pair.0) == nil else {
+                    throw fail("usage: launch-with-env \"SCRIBULAR_UITEST_NAME=value\" ...")
+                }
+            }
+            guard !env.isEmpty else { throw fail("usage: launch-with-env \"SCRIBULAR_UITEST_NAME=value\" ...") }
+            try requireFreshLaunch(steps, fail: fail, name: first.text)
+            command = .launchWithEnv(env)
+        case "click-child":
+            guard args.count == 3, !args[0].quoted, let index = Int(args[0].text), index > 0,
+                  !args[1].quoted, args[1].text == "in", let scope = quoted(args[2]), !scope.isEmpty else {
+                throw fail("usage: click-child N in \"Scope\"")
+            }
+            command = .clickChild(index: index, within: scope)
+        case "expect-playhead":
+            guard args.count == 3, let slider = quoted(args[0]), !slider.isEmpty,
+                  !args[1].quoted, args[1].text == "in", let scope = quoted(args[2]), !scope.isEmpty else {
+                throw fail("usage: expect-playhead \"Slider\" in \"Line list\"")
+            }
+            command = .expectPlayhead(slider: slider, within: scope)
+        case "expect-disabled":
+            guard let label = quoted(args.first), !label.isEmpty,
+                  args.count == 1 || (args.count == 3 && !args[1].quoted && args[1].text == "index" && !args[2].quoted),
+                  args.count == 1 || Int(args[2].text).map({ $0 > 0 }) == true else {
+                throw fail("usage: expect-disabled \"label\" [index N]")
+            }
+            command = .expectDisabled(label: label, index: args.count == 3 ? Int(args[2].text) : nil)
         case "click":
             guard let label = quoted(args.first), !label.isEmpty else { throw fail("usage: click \"label\" [index N] [in \"Scope\"]") }
             var index: Int?
@@ -256,6 +289,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
                 "launch", "click", "pick-app", "pick-call-app", "expect", "expect-not",
                 "expect-clipboard-matches", "expect-status-item", "expect-notification",
                 "expect-frontmost", "expect-active-app", "close-window",
+                "launch-with-env", "click-child", "expect-playhead", "expect-disabled",
             ]
             guard retrying.contains(first.text) else {
                 throw fail("timeout only applies to \(retrying.joined(separator: ", "))")
@@ -268,6 +302,28 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
     }
     guard !steps.isEmpty else { throw ScriptError(line: 0, message: "script has no steps") }
     return steps
+}
+
+/// `NAME=value` for `launch-with-env`; only debug-build test hooks (`SCRIBULAR_UITEST_*`) may be set.
+public func launchEnvPair(_ text: String) -> (String, String)? {
+    guard let equals = text.firstIndex(of: "=") else { return nil }
+    let name = String(text[..<equals])
+    let value = String(text[text.index(after: equals)...])
+    let suffix = name.dropFirst("SCRIBULAR_UITEST_".count)
+    guard name.hasPrefix("SCRIBULAR_UITEST_"), !suffix.isEmpty,
+          suffix.allSatisfy({ $0.isASCII && ($0.isUppercase || $0.isNumber || $0 == "_") }), !value.isEmpty else { return nil }
+    return (name, value)
+}
+
+private func requireFreshLaunch(_ steps: [Step], fail: (String) -> ScriptError, name: String) throws(ScriptError) {
+    for prior in steps.reversed() {
+        if prior.command == .quit || prior.command == .forceQuit { break }
+        switch prior.command {
+        case .launch, .launchWithUnavailableHotkey, .launchWithEnv:
+            throw fail("\(name) requires a fresh launch; quit first")
+        default: break
+        }
+    }
 }
 
 private func screenshotCommand(_ args: [Token], steps: [Step], fail: (String) -> ScriptError, kind: String) throws(ScriptError) -> Command {
