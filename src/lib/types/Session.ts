@@ -16,7 +16,7 @@ hasAudio: boolean,
 /**
  * When the sweep deletes the kept audio, in ms since the Unix epoch.
  */
-audioExpiresAt: number | null, previousSummary: string | null, previousPromptId: string | null, previousModelId: string | null, canRedo: boolean,
+audioExpiresAt: number | null, previousSummary: string | null, previousPromptId: string | null, previousModelId: string | null, canRedo: boolean, 
 /**
  * Milliseconds since the Unix epoch when the saved note was copied.
  */
