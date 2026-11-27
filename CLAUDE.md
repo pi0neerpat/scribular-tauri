@@ -4,7 +4,7 @@
 - Run `SCRIBULAR_SKIP_LICENSE=1 swift run --package-path tools/uitest uitest <scenario> --app <path to Scribular.app>` from the repo root. Release builds ignore `SCRIBULAR_SKIP_LICENSE`.
 - Concurrent uitest runs queue on the desktop lock for up to 30 minutes; use `--lock-timeout 0` to refuse immediately.
 - Launch answers Scribular keychain prompts with the stored login password and fails within 15 seconds with a fix command if it cannot; trust-build output is saved in the run folder.
-- Recording is opt-in: use `--record <NN-slug-happy-path>` only for a happy path or an issue that cannot be reproduced reliably. It writes an MP4 and JSON metadata; failed runs use `-FAILED.mp4`. Recordings are not committed.
+- Recording is opt-in: use `--record <NN-slug-happy-path>` only for a happy path or an issue that cannot be reproduced reliably. It writes an MP4 and JSON metadata; failed runs use `-FAILED.mp4`. Add `--record-window` to crop the video to the app windows (reviewer demos). Recordings are not committed.
 - Recorded runs pace UI actions by 2.5s by default; use `--pace 2s` to override, or `--pace 0` to disable. Scripts can use `pause 3s` for read time and `pace 2s` to change pacing.
 - Recording tests use App audio + `play "fixture.wav"`, never the microphone. Start from `tools/uitest/scenarios/system-audio-smoke-57s.uitest`.
 - Assert phrases from the fixture's transcript, never summary wording (the LLM output varies).

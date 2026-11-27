@@ -56,7 +56,7 @@ private func runCLI() -> Int32 {
     let cli: UITestOptions
     do { cli = try UITestOptions.parse(args) }
     catch {
-        print("usage: uitest <script> [--app <path to .app>] [--record <name>] [--record-dir <dir>] [--pace <duration>] [--lock-timeout <duration>] [--no-trust]")
+        print("usage: uitest <script> [--app <path to .app>] [--record <name>] [--record-dir <dir>] [--record-window] [--pace <duration>] [--lock-timeout <duration>] [--no-trust]")
         print("argument error: \(error.localizedDescription)")
         return 2
     }
@@ -112,7 +112,7 @@ private func runCLI() -> Int32 {
         return 2
     }
 
-    let recorder = finalizer.map { Recorder(output: $0.temporaryURL) }
+    let recorder = finalizer.map { Recorder(output: $0.temporaryURL, windowOnly: cli.recordWindow) }
     if let recorder {
         do { try recorder.start() }
         catch {

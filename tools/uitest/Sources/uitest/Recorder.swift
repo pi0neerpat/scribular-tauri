@@ -1,3 +1,5 @@
+import AppKit
+import ApplicationServices
 import Foundation
 import Darwin
 import UITestCore
@@ -14,6 +16,10 @@ final class Recorder {
     private let finished = DispatchSemaphore(value: 0)
     private let output: URL
     private let marker: URL
+    private let windowOnly: Bool
+    private var windowTracker: DispatchSourceTimer?
+    private let cropLock = NSLock()
+    nonisolated(unsafe) private var crop = WindowCrop()
 
     private static func screenIndex() -> String {
         let probe = Process()
@@ -32,8 +38,9 @@ final class Recorder {
         return "0"
     }
 
-    init(output: URL) {
+    init(output: URL, windowOnly: Bool = false) {
         self.output = output
+        self.windowOnly = windowOnly
         self.marker = output.deletingLastPathComponent().appendingPathComponent(".uitest-recorder-\(UUID().uuidString).json")
         process.executableURL = Preflight.executable("ffmpeg")
         process.arguments = ["-n", "-f", "avfoundation", "-framerate", "15", "-capture_cursor", "1", "-i", "\(Recorder.screenIndex()):none",
@@ -51,11 +58,70 @@ final class Recorder {
         process.terminationHandler = { [finished] _ in finished.signal() }
     }
 
+    /// `--record-window`: remember where the app's windows are so `stop` can crop the video to them.
+    private func sampleWindows() {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.app.scribular.tauri").first else { return }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(app.processIdentifier), kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return }
+        let frames = windows.compactMap { window -> CGRect? in
+            var position: CFTypeRef?
+            var size: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &position) == .success,
+                  AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &size) == .success,
+                  let position, let size, CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+            var origin = CGPoint.zero
+            var dimensions = CGSize.zero
+            guard AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &origin),
+                  AXValueGetValue(unsafeDowncast(size, to: AXValue.self), .cgSize, &dimensions) else { return nil }
+            return CGRect(origin: origin, size: dimensions)
+        }
+        cropLock.lock()
+        crop.add(frames)
+        cropLock.unlock()
+    }
+
+    /// Re-encodes the finished recording cropped to the union of the app windows seen during the run.
+    /// Keeps the full-display recording (with a warning) if no window was seen or ffmpeg fails.
+    private func cropToWindows() {
+        guard windowOnly, FileManager.default.fileExists(atPath: output.path) else { return }
+        cropLock.lock()
+        let seen = crop
+        cropLock.unlock()
+        let display = CGMainDisplayID()
+        let bounds = CGDisplayBounds(display)
+        let scale = CGDisplayCopyDisplayMode(display).map { CGFloat($0.pixelWidth) / max(bounds.width, 1) } ?? 1
+        guard let filter = seen.filter(display: bounds.size, scale: scale), let ffmpeg = Preflight.executable("ffmpeg") else {
+            FileHandle.standardError.write(Data("warning: --record-window saw no app window; keeping the full-display recording\n".utf8))
+            return
+        }
+        let cropped = output.deletingLastPathComponent().appendingPathComponent(".uitest-crop-\(UUID().uuidString).mp4")
+        let pass = Process()
+        pass.executableURL = ffmpeg
+        pass.arguments = ["-n", "-i", output.path, "-vf", filter, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                          "-movflags", "+frag_keyframe+empty_moov", cropped.path]
+        pass.standardInput = FileHandle.nullDevice
+        pass.standardOutput = FileHandle.nullDevice
+        pass.standardError = FileHandle.nullDevice
+        guard (try? pass.run()) != nil else { return }
+        pass.waitUntilExit()
+        if pass.terminationStatus == 0, (try? FileManager.default.replaceItemAt(output, withItemAt: cropped)) != nil { return }
+        try? FileManager.default.removeItem(at: cropped)
+        FileHandle.standardError.write(Data("warning: --record-window crop failed (ffmpeg status \(pass.terminationStatus)); keeping the full-display recording\n".utf8))
+    }
+
     func start() throws {
         guard process.executableURL != nil else { throw NSError(domain: "uitest.recorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "ffmpeg is not on PATH"]) }
         try process.run()
         Thread.sleep(forTimeInterval: 0.25)
         guard process.isRunning else { throw NSError(domain: "uitest.recorder", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "ffmpeg could not start screen recording"]) }
+        if windowOnly {
+            let tracker = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "uitest.recorder.windows"))
+            tracker.schedule(deadline: .now(), repeating: .milliseconds(250))
+            tracker.setEventHandler { [weak self] in self?.sampleWindows() }
+            tracker.resume()
+            windowTracker = tracker
+        }
         let data = try JSONEncoder().encode(Marker(pid: process.processIdentifier, parentPID: getpid(),
                                                   executablePath: process.executableURL?.resolvingSymlinksInPath().standardizedFileURL.path,
                                                   outputPath: output.standardizedFileURL.path))
@@ -68,6 +134,8 @@ final class Recorder {
     }
 
     func stop(logURL: URL? = nil) {
+        windowTracker?.cancel()
+        windowTracker = nil
         guard process.isRunning else {
             try? FileManager.default.removeItem(at: marker)
             let logPath = logURL?.path ?? output.deletingPathExtension().appendingPathExtension("ffmpeg.log").path
@@ -83,7 +151,10 @@ final class Recorder {
                 _ = finished.wait(timeout: .now() + 2)
             }
         }
-        if !process.isRunning { try? FileManager.default.removeItem(at: marker) }
+        if !process.isRunning {
+            try? FileManager.default.removeItem(at: marker)
+            cropToWindows()
+        }
     }
 
     static func reapOrphans(in roots: [URL]) {
