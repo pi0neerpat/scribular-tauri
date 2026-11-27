@@ -9,8 +9,6 @@ public struct UITestOptions {
     public let lockTimeout: Double
     public let lockTimeoutLabel: String
     public let noTrust: Bool
-    /// Crop the recording to the app's windows instead of the whole display (requires `--record`).
-    public let recordWindow: Bool
 
     public func makeRecorder<T>(using factory: (String) -> T) -> T? {
         recordingName.map(factory)
@@ -25,17 +23,12 @@ public struct UITestOptions {
         var lockTimeout: Double?
         var lockTimeoutLabel = "30m"
         var noTrust = false
-        var recordWindow = false
         var index = 1
         while index < arguments.count {
             let flag = arguments[index]
             if flag == "--no-trust" {
                 guard !noTrust else { throw UITestOptionsError("unexpected or duplicate option: \(flag)") }
                 noTrust = true; index += 1; continue
-            }
-            if flag == "--record-window" {
-                guard !recordWindow else { throw UITestOptionsError("unexpected or duplicate option: \(flag)") }
-                recordWindow = true; index += 1; continue
             }
             guard index + 1 < arguments.count else { throw UITestOptionsError("missing value for \(flag)") }
             let value = arguments[index + 1]
@@ -53,11 +46,10 @@ public struct UITestOptions {
             }
             index += 2
         }
-        if recordWindow && name == nil { throw UITestOptionsError("--record-window requires --record <name>") }
-        return UITestOptions(scriptPath: script, appPath: app, recordingName: name, recordingDirectory: directory, pace: pace ?? (name == nil ? 0 : 2.5), lockTimeout: lockTimeout ?? 1800, lockTimeoutLabel: lockTimeoutLabel, noTrust: noTrust, recordWindow: recordWindow)
+        return UITestOptions(scriptPath: script, appPath: app, recordingName: name, recordingDirectory: directory, pace: pace ?? (name == nil ? 0 : 2.5), lockTimeout: lockTimeout ?? 1800, lockTimeoutLabel: lockTimeoutLabel, noTrust: noTrust)
     }
 
-    private init(scriptPath: String, appPath: String?, recordingName: String?, recordingDirectory: String?, pace: Double, lockTimeout: Double, lockTimeoutLabel: String, noTrust: Bool, recordWindow: Bool) {
+    private init(scriptPath: String, appPath: String?, recordingName: String?, recordingDirectory: String?, pace: Double, lockTimeout: Double, lockTimeoutLabel: String, noTrust: Bool) {
         self.scriptPath = scriptPath
         self.appPath = appPath
         self.recordingName = recordingName
@@ -66,7 +58,6 @@ public struct UITestOptions {
         self.lockTimeout = lockTimeout
         self.lockTimeoutLabel = lockTimeoutLabel
         self.noTrust = noTrust
-        self.recordWindow = recordWindow
     }
 
     private static func duration(_ value: String) throws -> Double {
