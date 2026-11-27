@@ -269,7 +269,13 @@ impl Store {
         })
     }
 
-    pub(crate) fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+    /// Raw SQL for tests that need to fault the store (e.g. a failing trigger).
+    #[cfg(test)]
+    pub(crate) fn execute_batch_for_test(&self, sql: &str) -> Result<()> {
+        self.with(|c| Ok(c.execute_batch(sql)?))
+    }
+
+    fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         // A panic while holding the lock can't leave SQLite inconsistent
         // (statements are atomic), so a poisoned lock is safe to reuse.
         let mut conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());

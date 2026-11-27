@@ -283,9 +283,11 @@ it('keeps notification permission guidance through unrelated saves and shows it 
   await vi.waitFor(() => expect(requestNotificationPermission).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(alerts()).toHaveLength(1));
   const updates = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Check for updates automatically'))!;
+  await vi.waitFor(() => expect(updates.disabled).toBe(false));
+  setAppSettings.mockClear();
   updates.checked = false;
   updates.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalled());
+  await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalledWith(expect.objectContaining({ checkForUpdatesAutomatically: false })));
 
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
   flushSync();

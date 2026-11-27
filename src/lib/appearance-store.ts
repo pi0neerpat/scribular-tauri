@@ -18,23 +18,9 @@ const apply = (next: Appearance) => {
   effectiveAppearance.set(resolveAppearance(next, systemDark, systemAccent));
 };
 
-export function saveAppearance(next: Appearance): Promise<void> {
-  saves = saves.then(async () => {
-    const version = changeVersion;
-    appearanceError.set(null);
-    try {
-      const saved = await setAppearance(next);
-      if (version === changeVersion) apply(saved);
-    } catch (error) {
-      if (version === changeVersion) appearanceError.set(`Could not save Appearance. Try again. ${String(error)}`);
-    }
-  });
-  return saves;
-}
-
-// Theme R6/R7: Rust copies the picture and commits it to My Theme. A failure
-// or cancel leaves the current picture; Rust errors are safe user text.
-function savePicture(run: () => Promise<Appearance>): Promise<void> {
+// Saves run one at a time in order. A result or failure from a save that a
+// newer appearance://changed event overtook is dropped.
+function queueSave(run: () => Promise<Appearance>, failure: (error: unknown) => string): Promise<void> {
   saves = saves.then(async () => {
     const version = changeVersion;
     appearanceError.set(null);
@@ -42,14 +28,31 @@ function savePicture(run: () => Promise<Appearance>): Promise<void> {
       const saved = await run();
       if (version === changeVersion) apply(saved);
     } catch (error) {
-      appearanceError.set(String(error));
+      if (version === changeVersion) appearanceError.set(failure(error));
     }
   });
   return saves;
 }
 
+// An updater is applied to the latest appearance when its turn comes, so an
+// edit queued behind a picture import keeps the new picture.
+export function saveAppearance(next: Appearance | ((latest: Appearance) => Appearance)): Promise<void> {
+  return queueSave(
+    () => setAppearance(typeof next === 'function' ? next(current) : next),
+    (error) => `Could not save Appearance. Try again. ${String(error)}`,
+  );
+}
+
+// Theme R6/R7: Rust copies the picture and commits it to My Theme. A failure
+// or cancel leaves the current picture; Rust errors are safe user text.
+const savePicture = (run: () => Promise<Appearance>) => queueSave(run, String);
+
 export function chooseBackground(): Promise<void> { return savePicture(chooseBackgroundPicture); }
 export function dropBackground(path: string): Promise<void> { return savePicture(() => importBackgroundPicture(path)); }
+
+// Theme R12: shown when the selected owned picture cannot be displayed.
+export const PICTURE_UNAVAILABLE = 'The background picture is missing or damaged. Choose it again or reset My Theme.';
+export function reportPictureUnavailable(): void { appearanceError.set(PICTURE_UNAVAILABLE); }
 
 export async function startAppearance(): Promise<() => void> {
   const stopSystem = watchSystemAppearance((dark, accent) => {

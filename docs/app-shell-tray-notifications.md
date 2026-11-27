@@ -31,7 +31,7 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
   - `src/lib/api.ts` wraps the commands and events.
   - `src/main.ts` holds the global link-click handler.
   - `src/lib/navigation.ts` holds `navigationLockedBy`.
-  - `src/lib/components/BackgroundAnimation.svelte` and `background-animation.ts` (`shouldAnimate`) run the starfield.
+  - `src/lib/components/BackgroundAnimation.svelte` and `background-animation.ts` (`starsState`) run the starfield.
   - `src/lib/components/Settings.svelte` has the two toggles.
 - Window: `src-tauri/tauri.conf.json` sets `titleBarStyle: Overlay` and a 670x552 minimum.
 

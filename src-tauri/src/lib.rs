@@ -135,12 +135,21 @@ pub fn run() {
                 })
                 .build(),
         )
-        .register_uri_scheme_protocol(backgrounds::SCHEME, |ctx, request| {
-            let owned = ctx
-                .app_handle()
-                .try_state::<Arc<backgrounds::Backgrounds>>();
-            backgrounds::respond(owned.as_deref().map(|b| b.as_ref()), request.uri().path())
-        })
+        // The picture is read off the handler thread so a large file never
+        // stalls the webview.
+        .register_asynchronous_uri_scheme_protocol(
+            backgrounds::SCHEME,
+            |ctx, request, responder| {
+                let owned = ctx
+                    .app_handle()
+                    .try_state::<Arc<backgrounds::Backgrounds>>()
+                    .map(|b| Arc::clone(&b));
+                let path = request.uri().path().to_string();
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(backgrounds::respond(owned.as_deref(), &path));
+                });
+            },
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

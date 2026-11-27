@@ -1610,7 +1610,8 @@ pub fn set_appearance(
     Ok(saved)
 }
 
-/// Largest connected display in physical pixels, so an imported picture
+/// Largest reported width and height across connected displays (taken
+/// independently) in physical pixels, so an imported picture
 /// stays sharp on any screen the window moves to.
 fn display_pixels(app: &AppHandle) -> (u32, u32) {
     app.available_monitors()

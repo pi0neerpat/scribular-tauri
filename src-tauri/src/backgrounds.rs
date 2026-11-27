@@ -18,7 +18,7 @@ use std::{
 
 use sha2::{Digest, Sha256};
 
-use crate::store::{Appearance, Background, Selection, Store};
+use crate::store::{Appearance, Background, Selection, Store, StoreError};
 
 pub const SCHEME: &str = "scribular-bg";
 pub const UNSUPPORTED: &str =
@@ -26,6 +26,7 @@ pub const UNSUPPORTED: &str =
 pub const NEEDS_MY_THEME: &str = "Customize a theme before choosing a picture.";
 pub const SAVE_FAILED: &str = "Could not save the picture. Try again.";
 pub const MISSING: &str = "The background picture is missing. Choose it again.";
+pub const APPEARANCE_SAVE_FAILED: &str = "The settings could not be written.";
 /// Fallback display size when no monitor is reported (5K-class retina).
 pub const FALLBACK_DISPLAY: (u32, u32) = (5120, 2880);
 const MAX_BYTES: u64 = 100 * 1024 * 1024;
@@ -194,10 +195,12 @@ impl Backgrounds {
             return Err(unsupported());
         }
         fs::create_dir_all(&self.dir).map_err(|_| SAVE_FAILED.to_string())?;
+        // The owned folder must be private before any copy is written.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&self.dir, fs::Permissions::from_mode(0o700));
+            fs::set_permissions(&self.dir, fs::Permissions::from_mode(0o700))
+                .map_err(|_| SAVE_FAILED.to_string())?;
         }
         let (ext, sips_format) = match format {
             Format::Png | Format::Webp => ("png", "png"),
@@ -279,16 +282,22 @@ impl Backgrounds {
         }
     }
 
-    /// Saves `appearance` after checking its owned picture exists, then
-    /// deletes copies no saved theme uses.
+    /// Saves `appearance`, then deletes copies no saved theme uses. Selecting
+    /// My Theme needs its owned picture to exist; a built-in stays selectable
+    /// while My Theme keeps a missing reference.
     pub fn save(&self, store: &Store, appearance: &Appearance) -> Result<Appearance, String> {
         let _guard = self.guard();
-        if owned_id(appearance).is_some_and(|id| !self.exists(id)) {
+        if appearance.selected == Selection::MyTheme
+            && owned_id(appearance).is_some_and(|id| !self.exists(id))
+        {
             return Err(MISSING.into());
         }
-        let saved = store
-            .set_appearance(appearance)
-            .map_err(|e| e.to_string())?;
+        // Only deliberate validation text reaches the UI, never SQLite or
+        // JSON details.
+        let saved = store.set_appearance(appearance).map_err(|e| match e {
+            StoreError::InvalidAppearance => e.to_string(),
+            _ => APPEARANCE_SAVE_FAILED.to_string(),
+        })?;
         self.sweep(owned_id(&saved));
         Ok(saved)
     }
@@ -524,10 +533,7 @@ mod tests {
         let backgrounds = temp.backgrounds();
         store.set_appearance(&my_theme(Background::Stars)).unwrap();
         store
-            .with(|c| {
-                c.execute_batch("CREATE TEMP TRIGGER reject_appearance BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'test write failure'); END;")?;
-                Ok(())
-            })
+            .execute_batch_for_test("CREATE TEMP TRIGGER reject_appearance BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'test write failure'); END;")
             .unwrap();
         let source = temp.source("a.png", &fixture("picture.png"));
         assert_eq!(
@@ -606,6 +612,57 @@ mod tests {
             .save(&store, &my_theme(Background::None))
             .unwrap();
         assert!(temp.owned().is_empty());
+    }
+
+    #[test]
+    fn missing_my_theme_picture_only_blocks_selecting_my_theme() {
+        let temp = Temp::new();
+        let store = temp.store();
+        let backgrounds = temp.backgrounds();
+        store.set_appearance(&my_theme(Background::None)).unwrap();
+        let saved = backgrounds
+            .import_and_select(
+                &store,
+                &temp.source("a.png", &fixture("picture.png")),
+                (32, 32),
+            )
+            .unwrap();
+        let id = owned_id(&saved).unwrap().to_string();
+        fs::remove_file(backgrounds.file(&id).unwrap()).unwrap();
+
+        // Built-ins stay selectable and My Theme keeps its reference.
+        let sage = Appearance {
+            selected: Selection::Sage,
+            ..saved.clone()
+        };
+        assert_eq!(backgrounds.save(&store, &sage).unwrap(), sage);
+        assert_eq!(backgrounds.save(&store, &saved).unwrap_err(), MISSING);
+        assert_eq!(store.appearance().unwrap(), sage);
+    }
+
+    #[test]
+    fn save_errors_never_expose_store_details() {
+        let temp = Temp::new();
+        let store = temp.store();
+        let backgrounds = temp.backgrounds();
+        store.set_appearance(&my_theme(Background::Stars)).unwrap();
+        let invalid = Appearance {
+            version: 2,
+            ..my_theme(Background::Stars)
+        };
+        assert_eq!(
+            backgrounds.save(&store, &invalid).unwrap_err(),
+            StoreError::InvalidAppearance.to_string()
+        );
+        store
+            .execute_batch_for_test("CREATE TEMP TRIGGER reject_appearance BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'test write failure'); END;")
+            .unwrap();
+        assert_eq!(
+            backgrounds
+                .save(&store, &my_theme(Background::None))
+                .unwrap_err(),
+            APPEARANCE_SAVE_FAILED
+        );
     }
 
     #[test]

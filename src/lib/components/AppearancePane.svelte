@@ -19,10 +19,13 @@
   let pictureRow = $state<HTMLElement>();
   let dropping = $state(false);
 
+  // Edits apply to the latest saved appearance, so a picture import still in
+  // flight is not reverted by an edit made meanwhile.
   function edit(change: Partial<ThemeValues>) {
-    const theme = $appearance.myTheme;
-    if (!editable || !theme) return;
-    void saveAppearance({ ...$appearance, myTheme: { ...theme, values: { ...theme.values, ...change } } });
+    if (!editable) return;
+    void saveAppearance((latest) => latest.myTheme
+      ? { ...latest, myTheme: { ...latest.myTheme, values: { ...latest.myTheme.values, ...change } } }
+      : latest);
   }
   function choosePicture(key: string) {
     const background = pictures.find(([value]) => value === key)?.[0];
@@ -31,10 +34,11 @@
     edit(background === 'stars' ? { background, starsMotion: true } : { background });
   }
   function customizeTheme(replace = false) {
-    if (selected === 'myTheme') return;
+    if (selected === 'myTheme') { confirmReplace = false; return; }
     if ($appearance.myTheme && !replace) { confirmReplace = true; return; }
     confirmReplace = false;
-    void saveAppearance(customize($appearance, selected, true));
+    const preset = selected;
+    void saveAppearance((latest) => customize(latest, preset, true));
   }
   const inside = (x: number, y: number) => {
     const rect = pictureRow?.getBoundingClientRect();
@@ -56,12 +60,12 @@
   <legend>Theme</legend>
   {#each themes as [value, label]}
     <label><input type="radio" name="theme" checked={selected === value} disabled={value === 'myTheme' && !$appearance.myTheme}
-      onchange={() => saveAppearance(selectPreset($appearance, value))} /> {label}</label>
+      onchange={() => saveAppearance((latest) => selectPreset(latest, value))} /> {label}</label>
   {/each}
   {#if selected !== 'myTheme'}
     <button onclick={() => customizeTheme()}>Customize</button>
   {:else}
-    <button onclick={() => saveAppearance(resetMyTheme($appearance))}>Reset</button>
+    <button onclick={() => saveAppearance(resetMyTheme)}>Reset</button>
   {/if}
   {#if confirmReplace}
     <div role="alertdialog" aria-label="Replace My Theme?">Replace My Theme with a copy of this theme?

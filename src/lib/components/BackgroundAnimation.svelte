@@ -6,8 +6,11 @@
   let raf = 0;
   let draw = (_advance: boolean) => {};
   const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let ready = false;
   function update() {
     cancelAnimationFrame(raf);
+    // No 2D context means nothing to draw, so never start the frame loop.
+    if (!ready) return;
     const state = starsState('stars', motion, recording, document.hidden, reducedMotion());
     if (state.animate) {
       const frame = () => { draw(true); raf = requestAnimationFrame(frame); };
@@ -34,15 +37,17 @@
         if (advance) star.y = (star.y + speed) % 1;
       }
     };
+    ready = true;
     const refresh = () => { resize(); update(); };
     resize(); update();
     addEventListener('resize', resize); document.addEventListener('visibilitychange', refresh); reduced.addEventListener('change', update);
-    return () => { cancelAnimationFrame(raf); removeEventListener('resize', resize); document.removeEventListener('visibilitychange', refresh); reduced.removeEventListener('change', update); };
+    return () => { ready = false; cancelAnimationFrame(raf); removeEventListener('resize', resize); document.removeEventListener('visibilitychange', refresh); reduced.removeEventListener('change', update); };
   });
 
   $effect(() => {
     void motion; void recording;
     if (canvas) update();
+    return () => cancelAnimationFrame(raf);
   });
 </script>
 
