@@ -1,6 +1,6 @@
 # Theme PR1: appearance state
 
-Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md` (PR1 covers AS1-AS5 only). This page covers the persisted appearance state, its IPC contract, and preset resolution. There is no visible UI for it yet.
+Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md` (PR1 covers AS1-AS5 only). This page covers the persisted appearance state, its IPC contract, and preset resolution. PR2 added the Appearance pane controls and the window background picture (see Background pictures below).
 
 ## What it does
 
@@ -41,7 +41,7 @@ Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md
   - `resetMyTheme` restores the origin preset's values, keeps `origin`, and keeps the mode from `copiedMode`. A legacy My Theme with `copiedMode` null keeps its current `values.mode`.
 - **Frontend store** (`src/lib/appearance-store.ts`): `appearance` and `effectiveAppearance` Svelte stores, plus `appearanceError`.
   - `startAppearance` subscribes to the event first, then loads a snapshot. A snapshot that arrives after an event is ignored. It also watches the Mac's light/dark and accent (`watchSystemAppearance`, polled every second because WebKit has no accent event).
-  - `saveAppearance` chains saves on one promise, so overlapping saves run one at a time in order. A response or failure from a save that was overtaken by a newer `appearance://changed` event is dropped, so a stale result cannot overwrite newer state or show an obsolete error.
+  - `saveAppearance` takes a value or an updater `(latest) => next`; the pane passes updaters so an edit queued behind a picture import builds on the imported picture. It chains saves on one promise, so overlapping saves run one at a time in order. A response or failure from a save that was overtaken by a newer `appearance://changed` event is dropped, so a stale result cannot overwrite newer state or show an obsolete error.
 
 ## Config and data
 
@@ -55,10 +55,17 @@ Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md
 - Frontend: `npm test`. Appearance files: `src/lib/appearance.test.ts` (built-in resolution, My Theme preserve/replace/reset, accents and tints) and `src/lib/appearance-store.test.ts` (serialized saves, stale responses and errors).
 - Type and Svelte check: `npm run check`.
 - Rust: `cargo test --lib` from `src-tauri`. Tests in `src-tauri/src/store/appearance.rs` cover fallback for fresh, legacy, and unknown values, loading a My Theme saved before `copiedMode` existed, and atomic saves that reject invalid values.
-- Real app (uitest): release builds show "Trial ended" on this Mac, so build a debug bundle with `npm run tauri -- build --debug --bundles app` and launch with `SCRIBULAR_SKIP_LICENSE=1`. Other build and run steps are in `CLAUDE.md` and `tools/uitest/README.md`. `App.svelte` and `Settings.svelte` call `startAppearance`, but no control or style reads the state yet, so there is no uitest scenario for it.
+- Real app (uitest): release builds show "Trial ended" on this Mac, so build a debug bundle with `npm run tauri -- build --debug --bundles app` and launch with `SCRIBULAR_SKIP_LICENSE=1`. Other build and run steps are in `CLAUDE.md` and `tools/uitest/README.md`. `App.svelte` and `Settings.svelte` call `startAppearance`. The Appearance pane edits the state, and `App.svelte` mounts `ThemeBackground` from `effectiveAppearance`.
 
 ## Known limits
 
-- No UI controls: `App.svelte` and `Settings.svelte` start the store, but the Appearance pane has no controls for it and nothing applies the resolved colors yet (PR2).
-- No picture import. `set_appearance` accepts any well-formed `owned` background id, including ids that do not exist, until PR2 adds picture storage.
-- No CSP or asset-loading work for backgrounds yet (PR2/PR3).
+- Minimal controls only: the Appearance pane (`AppearancePane.svelte`) has theme radios, Customize/Reset, and the background picture controls. Accent, tint and mode controls, and applying the resolved colors, come in PR3.
+
+## Background pictures (PR2)
+
+- Bundled pictures: `src/assets/backgrounds/{dawn,sea-glass,linen}.jpg`, resolved by `backgroundSource` in `src/lib/appearance.ts`. Stars draws on a canvas; None shows the solid background.
+- Import: `choose_background_picture` (native Open panel) and `import_background_picture` (Settings drop) in `src-tauri/src/commands.rs`, backed by `src-tauri/src/backgrounds.rs`. Scribular sniffs JPEG, PNG, HEIC or WebP content, decodes it with macOS `sips`, downsizes it to cover the largest reported width and the largest reported height across connected displays, taken independently (never upscales), and writes an owned copy to `<db dir>/Backgrounds/<id>.jpg|png` (folder mode 0700). Import needs a My Theme and selects it. Undecodable or other files show the unsupported-picture error and leave the theme unchanged.
+- Cleanup: after every appearance save or import, `Backgrounds::sweep` removes owned copies that the saved My Theme no longer references. Sessions never reference pictures, so deleting sessions leaves the selected picture alone. `set_appearance` refuses to select My Theme when its owned picture file is missing; built-ins stay selectable and My Theme keeps the reference. Unexpected store failures return "The settings could not be written." instead of SQLite or JSON details.
+- Loading: the custom `scribular-bg://localhost/<id>` scheme serves only valid ids from the owned folder (`Cache-Control: no-store`, 404 otherwise). The CSP directive is `img-src 'self' data: scribular-bg:`; PR2 added only `scribular-bg:`, and the Tauri asset protocol stays off. The handler reads the file off the webview thread. A picture that fails to load falls back to the solid background; for an owned picture the Appearance pane also shows "The background picture is missing or damaged. Choose it again or reset My Theme."
+- Stars motion: `starsState` in `src/lib/components/background-animation.ts`. Only Stars mounts the canvas; its Animated motion switch, a hidden window and Reduce Motion keep it still, and recording speeds it up. Choosing Stars turns motion on.
+- Tests: `src-tauri/src/backgrounds.rs` (AS6 import, AS7 cleanup, failed commit, scheme), `src/lib/components/background-animation.test.ts` and `theme-background.svelte.test.ts` (AS8), `src/lib/appearance.test.ts` (sources).

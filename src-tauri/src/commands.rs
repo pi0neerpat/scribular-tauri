@@ -11,6 +11,8 @@ use std::{
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::backgrounds::Backgrounds;
 use ts_rs::TS;
 
 use crate::audio::{AudioApp, Privacy};
@@ -1605,13 +1607,85 @@ pub fn get_appearance(store: State<Arc<Store>>) -> Result<Appearance, String> {
 pub fn set_appearance(
     app: AppHandle,
     store: State<Arc<Store>>,
+    backgrounds: State<Arc<Backgrounds>>,
     appearance: Appearance,
 ) -> Result<Appearance, String> {
-    let saved = store
-        .set_appearance(&appearance)
-        .map_err(|e| e.to_string())?;
+    let saved = backgrounds.save(&store, &appearance)?;
     let _ = app.emit(APPEARANCE_CHANGED_EVENT, &saved);
     Ok(saved)
+}
+
+/// Largest reported width and height across connected displays (taken
+/// independently) in physical pixels, so an imported picture
+/// stays sharp on any screen the window moves to.
+fn display_pixels(app: &AppHandle) -> (u32, u32) {
+    app.available_monitors()
+        .ok()
+        .and_then(|monitors| {
+            monitors
+                .iter()
+                .map(|m| (m.size().width, m.size().height))
+                .reduce(|a, b| (a.0.max(b.0), a.1.max(b.1)))
+        })
+        .filter(|(w, h)| *w > 0 && *h > 0)
+        .unwrap_or(crate::backgrounds::FALLBACK_DISPLAY)
+}
+
+async fn import_picture(
+    app: AppHandle,
+    store: Arc<Store>,
+    backgrounds: Arc<Backgrounds>,
+    path: std::path::PathBuf,
+) -> Result<Appearance, String> {
+    let display = display_pixels(&app);
+    // Decoding runs off the UI thread and never on the recording path.
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        backgrounds.import_and_select(&store, &path, display)
+    })
+    .await
+    .map_err(|_| crate::backgrounds::SAVE_FAILED.to_string())??;
+    let _ = app.emit(APPEARANCE_CHANGED_EVENT, &saved);
+    Ok(saved)
+}
+
+/// Theme R6: the native Open panel. Cancel returns the unchanged snapshot.
+#[tauri::command]
+pub async fn choose_background_picture(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    backgrounds: State<'_, Arc<Backgrounds>>,
+) -> Result<Appearance, String> {
+    let store = Arc::clone(&store);
+    let current = store.appearance().map_err(|e| e.to_string())?;
+    if current.my_theme.is_none() {
+        return Err(crate::backgrounds::NEEDS_MY_THEME.into());
+    }
+    #[cfg(target_os = "macos")]
+    let chosen = crate::backgrounds::choose(&app).await?;
+    #[cfg(not(target_os = "macos"))]
+    let chosen: Option<std::path::PathBuf> = None;
+    match chosen {
+        Some(path) => import_picture(app, store, Arc::clone(&backgrounds), path).await,
+        None => Ok(current),
+    }
+}
+
+/// Theme R6: a file dropped on the picture row. The webview passes only the
+/// OS-provided path; Rust reads and validates the file.
+#[tauri::command]
+pub async fn import_background_picture(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    backgrounds: State<'_, Arc<Backgrounds>>,
+    path: String,
+) -> Result<Appearance, String> {
+    import_picture(
+        app,
+        Arc::clone(&store),
+        Arc::clone(&backgrounds),
+        std::path::PathBuf::from(path),
+    )
+    .await
 }
 
 #[tauri::command]

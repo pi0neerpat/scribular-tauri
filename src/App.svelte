@@ -6,10 +6,10 @@
   import NoteStyles from './lib/components/NoteStyles.svelte';
   import UpdateAlert from './lib/components/UpdateAlert.svelte';
   import SessionHistory from './lib/components/SessionHistory.svelte';
-  import BackgroundAnimation from './lib/components/BackgroundAnimation.svelte';
+  import ThemeBackground from './lib/components/ThemeBackground.svelte';
   import QuitConfirm from './lib/components/QuitConfirm.svelte';
   import { appSettings } from './lib/app-settings';
-  import { startAppearance } from './lib/appearance-store';
+  import { effectiveAppearance, startAppearance } from './lib/appearance-store';
   import { navigation, navigationDisabled, navigationLockedBy, type AppView } from './lib/navigation';
   import { downloadModels, modelsStatus, onModelsProgress, setMainWindowVisible } from './lib/api';
   import { mergeSnapshot } from './lib/models';
@@ -377,7 +377,7 @@
   <LockedScreen reason={gate.locked} />
 {:else if gate === 'open'}
 <main>
-  <BackgroundAnimation enabled={$appSettings.showBackgroundAnimation} {recording} />
+  <ThemeBackground background={$effectiveAppearance.background} motion={$effectiveAppearance.starsMotion} {recording} blur={$effectiveAppearance.blur} brightness={$effectiveAppearance.brightness} />
   <header data-tauri-drag-region><span data-tauri-drag-region>Scribular</span></header>
   {#if quitIntent}<QuitConfirm restart={quitIntent === 'restart'} close={() => (quitIntent = null)} />{/if}
   <UpdateAlert recording={recording || !recordingKnown} />

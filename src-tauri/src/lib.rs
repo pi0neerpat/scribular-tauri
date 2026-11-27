@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod backgrounds;
 pub mod coach;
 
 pub mod commands;
@@ -134,6 +135,21 @@ pub fn run() {
                 })
                 .build(),
         )
+        // The picture is read off the handler thread so a large file never
+        // stalls the webview.
+        .register_asynchronous_uri_scheme_protocol(
+            backgrounds::SCHEME,
+            |ctx, request, responder| {
+                let owned = ctx
+                    .app_handle()
+                    .try_state::<Arc<backgrounds::Backgrounds>>()
+                    .map(|b| Arc::clone(&b));
+                let path = request.uri().path().to_string();
+                tauri::async_runtime::spawn_blocking(move || {
+                    responder.respond(backgrounds::respond(owned.as_deref(), &path));
+                });
+            },
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -226,6 +242,8 @@ pub fn run() {
             commands::set_shortcut_capture,
             commands::get_appearance,
             commands::set_appearance,
+            commands::choose_background_picture,
+            commands::import_background_picture,
             commands::request_notification_permission,
             commands::confirm_quit,
             commands::notify_tray_start_failure,
@@ -374,6 +392,9 @@ pub fn run() {
             // Parity spec 03 R9: built-in styles follow the shipped JSON.
             store.sync_builtins()?;
             app.manage(Arc::clone(&store));
+            app.manage(Arc::new(backgrounds::Backgrounds::new(
+                db_dir.join("Backgrounds"),
+            )));
             jobs::spawn_retention(&store, jobs::SWEEP_EVERY, store::now_ms);
 
             let licensing = Arc::new(

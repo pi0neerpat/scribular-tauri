@@ -1,4 +1,8 @@
+import dawn from '../assets/backgrounds/dawn.jpg';
+import linen from '../assets/backgrounds/linen.jpg';
+import seaGlass from '../assets/backgrounds/sea-glass.jpg';
 import type { Accent } from './types/Accent';
+import type { Background } from './types/Background';
 import type { Appearance } from './types/Appearance';
 import type { Mode } from './types/Mode';
 import type { Preset } from './types/Preset';
@@ -57,7 +61,16 @@ export function resolveAppearance(state: Appearance, systemDark: boolean, system
   return {
     dark, modeEditable: preset !== 'scribularV1', accent, tint,
     text: palette === 'scribularV1' && dark ? '#e8eef1' : dark ? '#f5f5f7' : '#1c1c1e', record: '#e53935', background: values.background,
+    blur: values.blur, brightness: values.brightness, starsMotion: values.starsMotion,
   };
+}
+
+// Theme R10: pictures come only from bundled files or the app-owned scheme.
+const bundled = { dawn, seaGlass, linen } as const;
+export function backgroundPictureUrl(id: string): string { return `scribular-bg://localhost/${encodeURIComponent(id)}`; }
+export function backgroundSource(background: Background): string | null {
+  if (typeof background === 'object') return backgroundPictureUrl(background.owned);
+  return background in bundled ? bundled[background as keyof typeof bundled] : null;
 }
 
 // macOS updates its CSS AccentColor; sample it while a window is open because WebKit has no accent event.

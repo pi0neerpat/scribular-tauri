@@ -32,6 +32,7 @@ vi.mock('../api', () => ({
   setAppSettings, setRecordingSettings, setRecordingPreferences, getTelemetrySetting,
   getSummaryAvailability, onSummaryAvailability, subscribeSummaryAvailability, retrySummaryModel,
   onSettingsPane: vi.fn().mockResolvedValue(() => {}),
+  onFileDrop: vi.fn().mockResolvedValue(() => {}),
 }));
 import { appSettings } from '../app-settings';
 // Covered by their own tests; stubbed so they don't share the progress mock.
@@ -62,12 +63,13 @@ it('opens on General and keeps recording and appearance controls in their panes'
   const app = mount(Settings, { target });
   await vi.waitFor(() => expect(target.textContent).toContain('Show summarization complete alert'));
   expect(target.textContent).not.toContain('Identify speakers');
-  expect(target.textContent).not.toContain('Show background animation');
+  expect(target.textContent).not.toContain('Background picture');
   expect(target.textContent).not.toContain('Restore sample session');
   expect(target.textContent).not.toContain("Summaries aren't available on this Mac.");
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
   flushSync();
-  expect(target.textContent).toContain('Show background animation');
+  expect(target.textContent).toContain('Background picture');
+  expect(target.textContent).not.toContain('Show background animation');
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Recording')!.click();
   flushSync();
   expect(target.textContent).toContain('Multi-speaker');
@@ -280,13 +282,15 @@ it('keeps notification permission guidance through unrelated saves and shows it 
   notification.dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(requestNotificationPermission).toHaveBeenCalledOnce());
   await vi.waitFor(() => expect(alerts()).toHaveLength(1));
+  const updates = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Check for updates automatically'))!;
+  await vi.waitFor(() => expect(updates.disabled).toBe(false));
+  setAppSettings.mockClear();
+  updates.checked = false;
+  updates.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalledWith(expect.objectContaining({ checkForUpdatesAutomatically: false })));
 
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Appearance')!.click();
   flushSync();
-  const animation = [...target.querySelectorAll('input')].find((input) => input.parentElement?.textContent?.includes('Show background animation'))!;
-  animation.checked = false;
-  animation.dispatchEvent(new Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(setAppSettings).toHaveBeenCalled());
   expect(alerts()).toHaveLength(1);
   [...target.querySelectorAll('button')].find((button) => button.textContent === 'Recording')!.click();
   await vi.waitFor(() => expect(target.textContent).toContain('Notifications are disabled. Allow them for Scribular in System Settings.'));

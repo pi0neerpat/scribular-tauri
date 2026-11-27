@@ -18,6 +18,7 @@ use rusqlite::Connection;
 
 use key::{apply_key, new_key, plan_open, DbState, Key, KeyStore, LockReason, Plan};
 
+pub(crate) use appearance::valid_owned_id;
 pub use appearance::{
     Accent, Appearance, Background, Mode, MyTheme, Preset, Selection, ThemeValues, Tint,
 };
@@ -266,6 +267,12 @@ impl Store {
         self.with(|c| {
             Ok(c.execute("DELETE FROM settings WHERE key = ?1", [ENCRYPTION_NOTICE])? > 0)
         })
+    }
+
+    /// Raw SQL for tests that need to fault the store (e.g. a failing trigger).
+    #[cfg(test)]
+    pub(crate) fn execute_batch_for_test(&self, sql: &str) -> Result<()> {
+        self.with(|c| Ok(c.execute_batch(sql)?))
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {

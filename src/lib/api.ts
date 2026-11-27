@@ -3,6 +3,7 @@
 // registered command and emitted event has a wrapper here.
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { AccessState } from './types/AccessState';
 import type { ActivationResult } from './types/ActivationResult';
 import type { AppSettings } from './types/AppSettings';
@@ -427,6 +428,20 @@ export function setShortcutCapture(capturing: boolean): Promise<ShortcutRegistra
 export function setAppSettings(settings: AppSettings): Promise<void> { return invoke<void>('set_app_settings', { settings }); }
 export function getAppearance(): Promise<Appearance> { return invoke<Appearance>('get_appearance'); }
 export function setAppearance(appearance: Appearance): Promise<Appearance> { return invoke<Appearance>('set_appearance', { appearance }); }
+// Theme R6/R10: Rust opens, validates and copies the picture; the webview never reads it.
+export function chooseBackgroundPicture(): Promise<Appearance> { return invoke<Appearance>('choose_background_picture'); }
+export function importBackgroundPicture(path: string): Promise<Appearance> { return invoke<Appearance>('import_background_picture', { path }); }
+export type FileDrop = { type: 'over' | 'drop' | 'leave'; paths: string[]; x: number; y: number };
+/** Files dragged onto this webview, in CSS pixels. Only the OS-provided paths are passed on. */
+export function onFileDrop(handler: (drop: FileDrop) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().onDragDropEvent(({ payload }) => {
+    if (payload.type === 'leave') { handler({ type: 'leave', paths: [], x: 0, y: 0 }); return; }
+    const scale = window.devicePixelRatio || 1;
+    const x = payload.position.x / scale;
+    const y = payload.position.y / scale;
+    handler({ type: payload.type === 'drop' ? 'drop' : 'over', paths: 'paths' in payload ? payload.paths : [], x, y });
+  });
+}
 export function requestNotificationPermission(): Promise<boolean> { return invoke<boolean>('request_notification_permission'); }
 
 export function setRecordingSettings(settings: RecordingSettings): Promise<void> {

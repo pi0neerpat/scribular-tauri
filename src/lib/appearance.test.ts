@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { customize, defaultAppearance, presetValues, resetMyTheme, resolveAppearance, selectPreset } from './appearance';
+import { backgroundSource, customize, defaultAppearance, presetValues, resetMyTheme, resolveAppearance, selectPreset } from './appearance';
 import type { Appearance } from './types/Appearance';
 import type { Tint } from './types/Tint';
 
@@ -77,5 +77,14 @@ describe('appearance state', () => {
       const edited: Appearance = { ...copied, myTheme: { ...copied.myTheme!, values: { ...copied.myTheme!.values, accent: 'purple', tint: 'rose', mode: 'light' } } };
       expect(resolveAppearance(edited, true, '#123456')).toMatchObject({ dark: false, modeEditable: true, accent: '#af52de', tint: '#fff0f3' });
     }
+  });
+});
+
+describe('background sources', () => {
+  it('uses bundled assets, the scoped owned-picture scheme, and nothing for None or Stars', () => {
+    expect(backgroundSource('none')).toBeNull();
+    expect(backgroundSource('stars')).toBeNull();
+    for (const name of ['dawn', 'seaGlass', 'linen'] as const) expect(backgroundSource(name)).toMatch(/\.jpg$/);
+    expect(backgroundSource({ owned: 'a1b2' })).toBe('scribular-bg://localhost/a1b2');
   });
 });
