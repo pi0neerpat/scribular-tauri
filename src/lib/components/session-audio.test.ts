@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const requestSessionAudio = vi.fn();
 vi.mock('../api', () => ({ requestSessionAudio }));
-const { audioUnavailable, currentLine, formatTime, openAudio, retentionLine } = await import('./session-audio');
+const { audioPending, audioUnavailable, currentLine, formatTime, openAudio, retentionLine } = await import('./session-audio');
 
 describe('session audio (AS19)', () => {
   afterEach(() => requestSessionAudio.mockReset());
@@ -45,8 +45,18 @@ describe('player helpers (R15)', () => {
   });
 
   it('explains why the Audio tab is disabled', () => {
-    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000 }, 1000)).toBeNull();
-    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000 }, 2000)).toContain('deleted after seven days');
-    expect(audioUnavailable({ hasAudio: false, audioExpiresAt: null })).toContain('No audio was kept');
+    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000, status: 'done' }, 1000)).toBeNull();
+    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000, status: 'done' }, 2000)).toContain('deleted after seven days');
+    expect(audioUnavailable({ hasAudio: false, audioExpiresAt: null, status: 'done' })).toContain('No audio was kept');
+    expect(audioUnavailable({ hasAudio: false, audioExpiresAt: null, status: 'summarizing' })).toContain('No audio was kept');
+  });
+
+  it('does not claim audio was not kept before the transcript is saved (R15)', () => {
+    for (const status of ['recording', 'finalizing'] as const) {
+      expect(audioPending({ hasAudio: false, audioExpiresAt: null, status })).toBe(true);
+      expect(audioUnavailable({ hasAudio: false, audioExpiresAt: null, status })).toBeNull();
+    }
+    expect(audioPending({ hasAudio: true, audioExpiresAt: 2000, status: 'finalizing' })).toBe(false);
+    expect(audioPending({ hasAudio: false, audioExpiresAt: null, status: 'done' })).toBe(false);
   });
 });

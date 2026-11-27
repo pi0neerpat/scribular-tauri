@@ -455,7 +455,10 @@ fn cancelled_session_coach_drops_late_result() {
         result.recv_timeout(WAIT),
         Err(mpsc::RecvTimeoutError::Disconnected)
     ));
-    assert_eq!(next_result.recv_timeout(WAIT).unwrap().unwrap(), "Real summary.");
+    assert_eq!(
+        next_result.recv_timeout(WAIT).unwrap().unwrap(),
+        "Real summary."
+    );
     assert!(queue.wait_idle(WAIT));
 }
 
@@ -510,4 +513,131 @@ fn real_summary_preempts_running_session_coach() {
         store.get_session(&session.id).unwrap().unwrap().summary,
         "Real summary."
     );
+}
+
+/// Blocks `load` until released, standing in for a slow summary model load.
+struct SlowLoader {
+    engine: Arc<Scripted>,
+    arrived: Mutex<Option<mpsc::Sender<()>>>,
+    release: Mutex<mpsc::Receiver<()>>,
+}
+
+impl SummarizerLoader for SlowLoader {
+    fn model_id(&self) -> String {
+        "fixture".into()
+    }
+
+    fn load(&self, _: &str) -> crate::llm::Result<Arc<dyn Summarizer>> {
+        if let Some(arrived) = self.arrived.lock().unwrap().take() {
+            arrived.send(()).unwrap();
+            self.release.lock().unwrap().recv_timeout(WAIT).unwrap();
+        }
+        Ok(self.engine.clone())
+    }
+}
+
+/// Starts a mic recording on another thread; the model job must not hold it up.
+fn start_mic_promptly(store: Arc<Store>, queue: Arc<JobQueue>) {
+    use crate::engines::fake::{
+        FakeMicrophone, FakeSource, FakeSystemAudio, FakeTranscriber, FakeTranscriberLoader,
+    };
+    let format = crate::audio::Format {
+        sample_rate: 48_000,
+        channels: 2,
+    };
+    let mic = Arc::new(FakeSource::new(format));
+    let recorder = crate::jobs::Recorder::new(
+        store,
+        queue,
+        Arc::new(FakeTranscriberLoader(Arc::new(FakeTranscriber::new(
+            Vec::new(),
+        )))),
+        Arc::new(Silent),
+        Arc::new(FakeMicrophone(mic.clone())),
+        Arc::new(FakeSystemAudio {
+            source: Arc::new(FakeSource::new(format)),
+            app: "Zoom".into(),
+        }),
+    );
+    let (started, result) = mpsc::channel();
+    let (checked, hold) = mpsc::channel::<()>();
+    let worker = std::thread::spawn(move || {
+        let outcome = recorder
+            .start(InputMode::Mic, None, "Session")
+            .map(|s| s.id);
+        started.send(outcome.is_ok()).unwrap();
+        // Keep the recorder alive until the test has checked the mic.
+        let _ = hold.recv();
+    });
+    assert!(
+        result.recv_timeout(Duration::from_secs(2)).unwrap(),
+        "mic Start failed"
+    );
+    assert!(mic.is_open());
+    checked.send(()).unwrap();
+    worker.join().unwrap();
+}
+
+/// AS18: a Coach generation stuck in the model cannot block mic Start.
+#[test]
+fn as18_in_flight_session_coach_cannot_block_mic_start() {
+    let (_db, store) = TestStore::new();
+    let (engine, started, release) = engine(true);
+    let queue = Arc::new(JobQueue::new(
+        store.clone(),
+        Arc::new(Loader(engine)),
+        Arc::new(Silent),
+    ));
+    let (done, result) = mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    queue
+        .enqueue_session_coach(SessionCoachJob {
+            prompt: format!("{INSTRUCTIONS}\nCombine them into a single"),
+            cancel: cancel.clone(),
+            complete: Box::new(move |result| done.send(result).unwrap()),
+        })
+        .unwrap();
+    started.recv_timeout(WAIT).unwrap();
+    start_mic_promptly(store, queue.clone());
+    assert!(
+        cancel.load(Ordering::Relaxed),
+        "Start cancels the Coach job"
+    );
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
+}
+
+/// AS18: a practice job waiting on a slow summary model load cannot block mic Start.
+#[test]
+fn as18_summary_model_load_in_flight_cannot_block_mic_start() {
+    let (_db, store) = TestStore::new();
+    let (engine, _started, engine_gate) = engine(true);
+    // Open the engine's first-call gate up front: only the loader is slow here,
+    // and a model call that runs anyway must not hang or panic.
+    engine_gate.send(()).unwrap();
+    let (arrived, loading) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let queue = Arc::new(JobQueue::new(
+        store.clone(),
+        Arc::new(SlowLoader {
+            engine,
+            arrived: Mutex::new(Some(arrived)),
+            release: Mutex::new(wait),
+        }),
+        Arc::new(Silent),
+    ));
+    let (job, result) = fixture_job();
+    let cancel = job.cancel.clone();
+    queue.enqueue_practice(job).unwrap();
+    loading.recv_timeout(WAIT).unwrap();
+    start_mic_promptly(store, queue.clone());
+    assert!(cancel.load(Ordering::Relaxed), "Start cancels practice");
+    release.send(()).unwrap();
+    assert!(matches!(
+        result.recv_timeout(WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    ));
 }

@@ -1,6 +1,7 @@
 // Kept-audio playback (parity spec 01 R19/R22): what the player shows.
 import { requestSessionAudio } from '../api';
 import type { PlaybackError } from '../types/PlaybackError';
+import type { SessionStatus } from '../types/SessionStatus';
 
 export type AudioView =
   | { kind: 'hidden' }
@@ -49,9 +50,21 @@ export function formatTime(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** Why the Audio tab is disabled (R15), or null when audio can play. */
-export function audioUnavailable(session: { hasAudio: boolean; audioExpiresAt: number | null }, now: number = Date.now()): string | null {
+type AudioState = { hasAudio: boolean; audioExpiresAt: number | null; status: SessionStatus };
+
+/**
+ * True while the transcript is still being saved: the keep-or-delete decision
+ * (R13a/b) happens at that save, so a missing `hasAudio` does not yet mean
+ * the audio was not kept.
+ */
+export function audioPending(session: AudioState): boolean {
+  return !session.hasAudio && (session.status === 'recording' || session.status === 'finalizing');
+}
+
+/** Why the Audio tab is disabled (R15), or null when audio can play or is still pending. */
+export function audioUnavailable(session: AudioState, now: number = Date.now()): string | null {
   if (session.audioExpiresAt !== null && now >= session.audioExpiresAt) return "This session's audio was deleted after seven days. The note and transcript are still here.";
+  if (audioPending(session)) return null;
   if (!session.hasAudio) return 'No audio was kept for this session. Turn on Keep audio in Settings to keep future recordings on this Mac for seven days.';
   return null;
 }

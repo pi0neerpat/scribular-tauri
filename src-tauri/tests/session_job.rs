@@ -1185,11 +1185,15 @@ fn mic_starts_without_waiting_for_an_in_flight_app_attach() {
     assert_eq!(h.get(&id).duration_ms, Some(4_000));
 }
 
+/// Tests that point the process-wide diagnostics log at their own directory.
+static LOG_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn capture_faults_log_metadata_and_keep_committed_audio() {
     use scribular_lib::diag::log;
     use scribular_lib::store::key::apply_key;
 
+    let _log = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let h = Harness::new();
     let log_dir = h.db.0.with_extension("logs");
     log::init(&log_dir).unwrap();
@@ -1233,6 +1237,109 @@ fn capture_faults_log_metadata_and_keep_committed_audio() {
     h.events.wait_for(&id, SessionStatus::Done);
     assert!(!h.get(&id).summary.is_empty());
     std::fs::remove_dir_all(log_dir).unwrap();
+}
+
+/// AS18: attach, pause and store faults log only metadata, surface no
+/// session content, and keep committed chunks and earlier notes.
+#[test]
+fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
+    use scribular_lib::diag::log;
+    use scribular_lib::store::key::apply_key;
+    use scribular_lib::store::{SessionPatch, StoreError};
+
+    let _log = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let h = Harness::new();
+    let earlier = h.start(InputMode::Mic);
+    h.feed(12);
+    assert_eq!(h.recorder.stop().unwrap(), earlier);
+    h.events.wait_for(&earlier, SessionStatus::Done);
+    assert!(h.queue.wait_idle(WAIT));
+    let note = "PRIVATE-NOTE Client discussed violet lanterns.";
+    let patch = |summary: &str| SessionPatch {
+        title: None,
+        transcript: None,
+        summary: Some(summary.into()),
+    };
+    h.store.update_session(&earlier, &patch(note)).unwrap();
+
+    let log_dir = h.db.0.with_extension("as18-logs");
+    log::init(&log_dir).unwrap();
+    let read_log = || std::fs::read_to_string(log_dir.join("scribular.log")).unwrap_or_default();
+    // Attach fault: the chosen app is not playing audio.
+    let app = "PRIVATE-CALL-TARGET";
+    let id = h
+        .recorder
+        .start(InputMode::MicAndSystem, Some(app), "PRIVATE-SESSION-TITLE")
+        .unwrap()
+        .id;
+    h.feed(5);
+    h.wait_chunks(&id, 1);
+    wait_until("app attach failure reported", || {
+        read_log().contains("app_source_unavailable")
+    });
+
+    // Pause fault: the chunk flushed by Pause cannot be stored.
+    let connection = rusqlite::Connection::open(&h.db.0).unwrap();
+    apply_key(&connection, &[7; 32]).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER fail_chunk BEFORE INSERT ON audio_chunks
+             WHEN NEW.seq = 1 BEGIN SELECT RAISE(FAIL, 'injected fault'); END;
+             CREATE TRIGGER fail_note BEFORE UPDATE OF summary ON sessions
+             WHEN NEW.summary <> OLD.summary BEGIN SELECT RAISE(FAIL, 'injected fault'); END;
+             CREATE TRIGGER fail_copy BEFORE UPDATE OF copied_at ON sessions
+             BEGIN SELECT RAISE(FAIL, 'injected fault'); END;",
+        )
+        .unwrap();
+    h.feed(2);
+    let paused = h.recorder.pause().unwrap_err();
+    assert!(matches!(paused, RecordError::Interrupted));
+    assert_eq!(h.chunks(&id), 1);
+    assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
+
+    // Store faults on the earlier note: an edit and a copy mark.
+    let edit = h
+        .store
+        .update_session(&earlier, &patch("PRIVATE-EDIT replacement note"))
+        .unwrap_err();
+    let copy = h
+        .store
+        .mark_note_copied(&earlier, note)
+        .unwrap_err();
+    assert!(
+        !matches!(copy, StoreError::StaleCandidate),
+        "copy mark must hit the injected store fault, got {copy:?}"
+    );
+    let kept = h.get(&earlier);
+    assert_eq!(kept.summary, note);
+    assert_eq!(kept.copied_at, None);
+
+    let db_path = h.db.0.display().to_string();
+    let surfaced = [paused.to_string(), edit.to_string(), copy.to_string()];
+    let diagnostics = read_log();
+    assert!(diagnostics.contains("database_error"));
+    for text in surfaced.iter().chain([&diagnostics]) {
+        for private in [
+            app,
+            "PRIVATE-SESSION-TITLE",
+            "PRIVATE-NOTE",
+            "PRIVATE-EDIT",
+            "violet lanterns",
+            TRANSCRIPT,
+            db_path.as_str(),
+        ] {
+            assert!(!text.contains(private), "{private:?} in {text:?}");
+        }
+    }
+
+    connection
+        .execute_batch("DROP TRIGGER fail_chunk; DROP TRIGGER fail_note; DROP TRIGGER fail_copy;")
+        .unwrap();
+    h.recorder.recover(&id).unwrap();
+    h.events.wait_for(&id, SessionStatus::Done);
+    assert!(!h.get(&id).summary.is_empty());
+    assert_eq!(h.get(&earlier).summary, note);
+    let _ = std::fs::remove_dir_all(log_dir);
 }
 
 #[test]

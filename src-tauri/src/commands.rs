@@ -679,8 +679,13 @@ pub fn mark_note_copied(
 
 #[tauri::command]
 pub fn copy_text(text: String) -> Result<(), String> {
+    copy_with(std::path::Path::new("/usr/bin/pbcopy"), &text)
+}
+
+/// Pipes `text` to a clipboard program. Errors name the step only, never the text (AS18).
+fn copy_with(program: &std::path::Path, text: &str) -> Result<(), String> {
     use std::io::Write;
-    let mut child = std::process::Command::new("/usr/bin/pbcopy")
+    let mut child = std::process::Command::new(program)
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("start clipboard: {e}"))?;
@@ -1832,6 +1837,19 @@ impl JobEvents for TauriJobEvents {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AS18: a failed clipboard write reports the failing step, never the copied note.
+    #[test]
+    fn as18_clipboard_faults_report_no_note_text() {
+        let note = "PRIVATE-NOTE Client discussed violet lanterns at /Users/someone/notes";
+        let missing = std::env::temp_dir().join("scribular-no-such-clipboard-program");
+        for program in [missing.as_path(), std::path::Path::new("/usr/bin/false")] {
+            let error = copy_with(program, note).unwrap_err();
+            assert!(!error.contains("PRIVATE-NOTE"), "{error}");
+            assert!(!error.contains("violet lanterns"), "{error}");
+            assert!(!error.contains("/Users/someone"), "{error}");
+        }
+    }
 
     #[test]
     fn tray_start_notice_preserves_safe_reasons_and_hides_raw_errors() {

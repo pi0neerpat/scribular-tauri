@@ -23,6 +23,11 @@ use crate::{
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+/// Consecutive permission failures before the UI is told permission is
+/// required. AudioCapCLI also exits silently on transient failures, which
+/// reads as a denial; a single one is retried as pending so the permission
+/// notice does not flash before a late attach succeeds.
+const PERMISSION_CONFIRMATIONS: u32 = 2;
 const CALL_WARNING_MS: u32 = 20_000;
 const MIC_LOST: &str = "Recording stopped: the microphone was lost.";
 const WRITE_FAILED: &str = "Recording stopped: couldn't save audio.";
@@ -241,6 +246,7 @@ pub(super) struct Recording {
     elapsed: Duration,
     last_call_heard_ms: u32,
     last_attach_error: Option<AttachFailure>,
+    permission_failures: u32,
     /// Dropped with the recording, which ends its watchdog.
     _watched: mpsc::Sender<()>,
 }
@@ -267,6 +273,7 @@ impl Recording {
             elapsed: Duration::ZERO,
             last_call_heard_ms: 0,
             last_attach_error: None,
+            permission_failures: 0,
             _watched: watched,
         };
         {
@@ -313,15 +320,11 @@ impl Recording {
             active_elapsed_ms: self.elapsed_ms(),
             target_app: self.target_app.clone(),
             app_audio_status: self.target_app.as_ref().map(|_| {
-                if self.system.span.is_some() {
-                    AppAudioStatus::Capturing
-                } else if self.last_attach_error == Some(AttachFailure::PermissionRequired) {
-                    AppAudioStatus::PermissionRequired
-                } else if self.last_attach_error.is_some() {
-                    AppAudioStatus::Unavailable
-                } else {
-                    AppAudioStatus::Pending
-                }
+                app_audio_status(
+                    self.system.span.is_some(),
+                    self.last_attach_error,
+                    self.permission_failures,
+                )
             }),
         }
     }
@@ -402,7 +405,10 @@ impl Recording {
                         Some(align),
                         &self.transcription,
                     ) {
-                        Ok(()) => self.last_attach_error = None,
+                        Ok(()) => {
+                            self.last_attach_error = None;
+                            self.permission_failures = 0;
+                        }
                         Err(_) => self.log_attach_failure(AttachFailure::AudioWorkerFailed),
                     }
                 }
@@ -467,6 +473,11 @@ impl Recording {
     }
 
     fn log_attach_failure(&mut self, kind: AttachFailure) {
+        self.permission_failures = if kind == AttachFailure::PermissionRequired {
+            self.permission_failures.saturating_add(1)
+        } else {
+            0
+        };
         if self.last_attach_error != Some(kind) {
             self.last_attach_error = Some(kind);
             crate::diag::log::log("WARN", "recording", kind.log_kind());
@@ -506,12 +517,43 @@ impl Recording {
             events.level(SessionLevel {
                 session_id: self.session_id.clone(),
                 source,
-                level,
+                level: meter_level(level),
                 hearing,
                 active_elapsed_ms: elapsed,
             });
         }
     }
+}
+
+fn app_audio_status(
+    capturing: bool,
+    last_error: Option<AttachFailure>,
+    permission_failures: u32,
+) -> AppAudioStatus {
+    match last_error {
+        _ if capturing => AppAudioStatus::Capturing,
+        Some(AttachFailure::PermissionRequired)
+            if permission_failures < PERMISSION_CONFIRMATIONS =>
+        {
+            AppAudioStatus::Pending
+        }
+        Some(AttachFailure::PermissionRequired) => AppAudioStatus::PermissionRequired,
+        Some(_) => AppAudioStatus::Unavailable,
+        None => AppAudioStatus::Pending,
+    }
+}
+
+/// Quietest level the meter shows, in dBFS; louder input fills it toward 0 dBFS.
+const METER_FLOOR_DB: f32 = -60.0;
+
+/// R5: maps a block's RMS to a bounded 0..=1 meter level on a dBFS scale, so
+/// normal speech (about -30 to -20 dBFS) sits mid-scale instead of near zero.
+fn meter_level(rms: f32) -> f32 {
+    if !rms.is_finite() || rms <= 0.0 {
+        return 0.0;
+    }
+    let db = 20.0 * rms.log10();
+    ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0)
 }
 
 fn hearing(
@@ -530,6 +572,45 @@ fn hearing(
     } else {
         HearingState::Silent
     }
+}
+
+#[cfg(test)]
+#[test]
+fn one_permission_failure_stays_pending_until_it_repeats() {
+    use AttachFailure::*;
+    assert_eq!(app_audio_status(false, None, 0), AppAudioStatus::Pending);
+    assert_eq!(
+        app_audio_status(false, Some(PermissionRequired), 1),
+        AppAudioStatus::Pending
+    );
+    assert_eq!(
+        app_audio_status(false, Some(PermissionRequired), 2),
+        AppAudioStatus::PermissionRequired
+    );
+    assert_eq!(
+        app_audio_status(true, Some(PermissionRequired), 2),
+        AppAudioStatus::Capturing
+    );
+    assert_eq!(
+        app_audio_status(false, Some(AttachFailed), 0),
+        AppAudioStatus::Unavailable
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn meter_level_maps_rms_to_a_bounded_dbfs_scale() {
+    assert_eq!(meter_level(0.0), 0.0);
+    assert_eq!(meter_level(f32::NAN), 0.0);
+    assert_eq!(meter_level(0.0005), 0.0);
+    assert!((meter_level(1.0) - 1.0).abs() < 1e-6);
+    assert_eq!(meter_level(4.0), 1.0);
+    // Normal speech RMS (about 0.03-0.1, -30 to -20 dBFS) sits mid-scale.
+    assert!((meter_level(0.0316) - 0.5).abs() < 0.01);
+    assert!(meter_level(0.1) > 0.6 && meter_level(0.1) < 0.7);
+    // Silence threshold still shows as a small but visible level.
+    assert!(meter_level(SILENCE_RMS) > 0.0 && meter_level(SILENCE_RMS) < 0.15);
+    assert!(meter_level(0.01) < meter_level(0.02));
 }
 
 #[cfg(test)]
