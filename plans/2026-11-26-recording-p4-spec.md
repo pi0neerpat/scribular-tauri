@@ -34,7 +34,7 @@ Tab-specific capture, new UI, any change to AS1–AS16 behavior except fixing a 
 
 ## Prior work
 
-A cancelled earlier attempt left uncommitted AS18 edits in
-`/Users/admin/Projects/Scribular/recording-p4-dirty-edits-2026-11-26.patch` (applies cleanly to
-`c910c71`: clipboard `copy_with` fault test in `commands.rs`, plus `queue_coach_tests.rs`,
-`tests/session_job.rs`, `src/lib/types/Session.ts`). Read it first and reuse what is correct.
+A cancelled earlier attempt drafted AS18 edits against `c910c71`: a clipboard `copy_with` fault
+test in `commands.rs`, Start-while-busy tests in `queue_coach_tests.rs`, store-fault privacy tests
+in `tests/session_job.rs`, and a regenerated `src/lib/types/Session.ts`. Their correct parts are
+now committed on this branch; nothing outside the repository is needed.

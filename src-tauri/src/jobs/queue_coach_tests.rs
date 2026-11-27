@@ -560,19 +560,22 @@ fn start_mic_promptly(store: Arc<Store>, queue: Arc<JobQueue>) {
         }),
     );
     let (started, result) = mpsc::channel();
-    std::thread::spawn(move || {
+    let (checked, hold) = mpsc::channel::<()>();
+    let worker = std::thread::spawn(move || {
         let outcome = recorder
             .start(InputMode::Mic, None, "Session")
             .map(|s| s.id);
         started.send(outcome.is_ok()).unwrap();
         // Keep the recorder alive until the test has checked the mic.
-        std::thread::sleep(Duration::from_millis(200));
+        let _ = hold.recv();
     });
     assert!(
         result.recv_timeout(Duration::from_secs(2)).unwrap(),
         "mic Start failed"
     );
     assert!(mic.is_open());
+    checked.send(()).unwrap();
+    worker.join().unwrap();
 }
 
 /// AS18: a Coach generation stuck in the model cannot block mic Start.
@@ -611,7 +614,10 @@ fn as18_in_flight_session_coach_cannot_block_mic_start() {
 #[test]
 fn as18_summary_model_load_in_flight_cannot_block_mic_start() {
     let (_db, store) = TestStore::new();
-    let (engine, _, _) = engine(true);
+    let (engine, _started, engine_gate) = engine(true);
+    // Open the engine's first-call gate up front: only the loader is slow here,
+    // and a model call that runs anyway must not hang or panic.
+    engine_gate.send(()).unwrap();
     let (arrived, loading) = mpsc::channel();
     let (release, wait) = mpsc::channel();
     let queue = Arc::new(JobQueue::new(

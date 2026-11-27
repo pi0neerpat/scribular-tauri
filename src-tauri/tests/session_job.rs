@@ -1245,7 +1245,7 @@ fn capture_faults_log_metadata_and_keep_committed_audio() {
 fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
     use scribular_lib::diag::log;
     use scribular_lib::store::key::apply_key;
-    use scribular_lib::store::SessionPatch;
+    use scribular_lib::store::{SessionPatch, StoreError};
 
     let _log = LOG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let h = Harness::new();
@@ -1286,7 +1286,9 @@ fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
             "CREATE TRIGGER fail_chunk BEFORE INSERT ON audio_chunks
              WHEN NEW.seq = 1 BEGIN SELECT RAISE(FAIL, 'injected fault'); END;
              CREATE TRIGGER fail_note BEFORE UPDATE OF summary ON sessions
-             WHEN NEW.summary <> OLD.summary BEGIN SELECT RAISE(FAIL, 'injected fault'); END;",
+             WHEN NEW.summary <> OLD.summary BEGIN SELECT RAISE(FAIL, 'injected fault'); END;
+             CREATE TRIGGER fail_copy BEFORE UPDATE OF copied_at ON sessions
+             BEGIN SELECT RAISE(FAIL, 'injected fault'); END;",
         )
         .unwrap();
     h.feed(2);
@@ -1295,15 +1297,19 @@ fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
     assert_eq!(h.chunks(&id), 1);
     assert_eq!(h.get(&id).error.as_deref(), Some("interrupted"));
 
-    // Store faults on the earlier note: an edit and a stale copy mark.
+    // Store faults on the earlier note: an edit and a copy mark.
     let edit = h
         .store
         .update_session(&earlier, &patch("PRIVATE-EDIT replacement note"))
         .unwrap_err();
     let copy = h
         .store
-        .mark_note_copied(&earlier, "PRIVATE-STALE copied text")
+        .mark_note_copied(&earlier, note)
         .unwrap_err();
+    assert!(
+        !matches!(copy, StoreError::StaleCandidate),
+        "copy mark must hit the injected store fault, got {copy:?}"
+    );
     let kept = h.get(&earlier);
     assert_eq!(kept.summary, note);
     assert_eq!(kept.copied_at, None);
@@ -1318,7 +1324,6 @@ fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
             "PRIVATE-SESSION-TITLE",
             "PRIVATE-NOTE",
             "PRIVATE-EDIT",
-            "PRIVATE-STALE",
             "violet lanterns",
             TRANSCRIPT,
             db_path.as_str(),
@@ -1328,7 +1333,7 @@ fn as18_attach_pause_and_store_faults_keep_notes_and_log_only_metadata() {
     }
 
     connection
-        .execute_batch("DROP TRIGGER fail_chunk; DROP TRIGGER fail_note;")
+        .execute_batch("DROP TRIGGER fail_chunk; DROP TRIGGER fail_note; DROP TRIGGER fail_copy;")
         .unwrap();
     h.recorder.recover(&id).unwrap();
     h.events.wait_for(&id, SessionStatus::Done);
