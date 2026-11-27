@@ -36,8 +36,11 @@ expect-not "Summaries couldn't load"
 expect-not "Try Again"
 expect "Copy Note"
 labels
+click "Transcript"
+expect "Client:"
 click "Copy Transcript" index 1
 expect-clipboard-matches "Client:"
+click "Note" index 1
 click "Note style · Therapy (DORA)" index 1
 expect-disabled "Therapy (DORA)" index 1
 click "Transcript"
@@ -53,8 +56,11 @@ key cmd+option+down
 expect "Summaries couldn't load. Recording and transcription still work." timeout 30s
 expect-not "Summaries aren't available on this Mac"
 expect "Try Again"
+click "Transcript"
+expect "Client:"
 click "Copy Transcript" index 1
 expect-clipboard-matches "Client:"
+click "Note" index 1
 click "Note style · Therapy (DORA)" index 1
 expect-disabled "Therapy (DORA)" index 1
 quit

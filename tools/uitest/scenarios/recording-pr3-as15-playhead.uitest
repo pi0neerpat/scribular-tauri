@@ -37,7 +37,9 @@ click "Back 15 seconds"
 expect-playhead "Playback position" in "Timed transcript" timeout 10s
 labels
 click "1×"
-click "2×"
+labels
+key down
+key enter
 wait 2s
 expect-playhead "Playback position" in "Timed transcript" timeout 10s
 click "Pause"
