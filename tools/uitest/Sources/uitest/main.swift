@@ -121,9 +121,12 @@ private func runCLI() -> Int32 {
         }
     }
 
-    let lifecycle = AppLifecycle(appPath: appPath, noTrust: cli.noTrust)
+    let llm = HostLLM.resolve()
+    if let line = llm.runLine { print(line) }
+    let lifecycle = AppLifecycle(appPath: appPath, noTrust: cli.noTrust, llmURL: llm.url)
     let player = Player()
     let cleanup = Cleanup(lifecycle: lifecycle, recorder: recorder, player: player)
+    let appLogBefore = HostLLM.LogMark(at: appLogSource)
     let start = Date()
     let finalizeLock = NSLock()
     var finalized = false
@@ -181,13 +184,28 @@ private func runCLI() -> Int32 {
     let duration = Date().timeIntervalSince(start)
     cleanup.run(logURL: finalizer?.logURL(for: passed ? .pass : .fail))
     copyAppLog(to: runDir)
-    let recordingSaved = finalizeOnce(passed ? "pass" : "fail", duration: duration)
-    return passed && recordingSaved ? 0 : 1
+    var llmHonoured = true
+    if let url = llm.url {
+        if let log = try? Data(contentsOf: runDir.appendingPathComponent("app.log")) {
+            let run = HostLLM.currentRun(log, fileID: HostLLM.LogMark(at: appLogSource)?.fileID, since: appLogBefore)
+            if !HostLLM.logConfirms(run, url: url) {
+                print("FAIL \(HostLLM.ignoredMessage)")
+                llmHonoured = false
+            }
+        } else {
+            print("FAIL \(HostLLM.missingLogMessage)")
+            llmHonoured = false
+        }
+    }
+    let recordingSaved = finalizeOnce(passed && llmHonoured ? "pass" : "fail", duration: duration)
+    return passed && llmHonoured && recordingSaved ? 0 : 1
 }
 
+private let appLogSource = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Application Support/com.app.scribular.tauri/logs/scribular.log")
+
 private func copyAppLog(to runDir: URL) {
-    let source = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/com.app.scribular.tauri/logs/scribular.log")
+    let source = appLogSource
     guard FileManager.default.fileExists(atPath: source.path) else {
         print("app.log not copied: source log not found")
         return
@@ -233,7 +251,7 @@ private func runDoctor(_ args: [String]) -> Int32 {
         let bundleExists = bundleURL.pathExtension == "app" && bundle?.executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } == true
         return DoctorCheck(name: "App bundle", fix: "CARGO_TARGET_DIR=<target> APPLE_SIGNING_IDENTITY='Scribular Local Dev' npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json", passed: bundleExists)
     }
-    let report = doctorReport(probes: probes, noPrompt: noPrompt, appCheck: appCheck)
+    let report = doctorReport(probes: probes, noPrompt: noPrompt, appCheck: appCheck, hostLLM: HostLLM.resolve().doctorLine)
     report.lines.forEach { print($0) }
     if let appPath {
         let quotedAppPath = "'\(appPath.replacingOccurrences(of: "'", with: "'\\''"))'"

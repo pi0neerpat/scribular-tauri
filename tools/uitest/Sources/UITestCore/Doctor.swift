@@ -64,6 +64,7 @@ public func doctorReport(
     probes: DoctorProbes,
     noPrompt: Bool,
     appCheck: DoctorCheck?,
+    hostLLM: String? = nil,
     termProgram: String? = ProcessInfo.processInfo.environment["TERM_PROGRAM"]
 ) -> DoctorReport {
     let host = switch termProgram {
@@ -93,6 +94,8 @@ public func doctorReport(
     } else {
         info.append("not checked Foreign keychain prompt: Accessibility missing")
     }
+    // info, not a check: a host llama-server that is down must not hold verify
+    if let hostLLM { info.append(hostLLM) }
 
     if (!accessibility || !screenRecording), let (pid, responsible) = probes.tmuxServer() {
         info.append("permission is decided for tmux server pid \(pid), started by \(responsible)")
