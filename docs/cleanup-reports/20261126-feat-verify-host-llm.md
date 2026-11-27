@@ -44,7 +44,7 @@ Totals (known sessions, 7/8): 6,619,880 tokens. build 1.94 M, verify 3.54 M, rev
 - **Parallel implementation.** The plan did not recommend splitting; one build agent did it.
 - **PR hygiene.** PR #65 has one Cubic review summary and one product-review package comment, no duplicates, package head `eb3e6da` matches the head (`package_stale: false`). No recording (waived).
 - **Demo evidence.** Waived: uitest-only change (`demo_waived`). Nothing to flag.
-- **Product review package.** Titled "Recording" not "Proof of success", has no mermaid journey (acceptable only because the demo was waived), and the "Test it yourself" section reads "None" instead of "Human Verification Needed". See proposal 2.
+- **Product review package.** Titled "Recording" not "Proof of success", has no mermaid journey (acceptable only because the demo was waived), and the "Test it yourself" section reads "None" instead of "Human Verification Needed". See proposal 1.
 
 ## Proposed changes (not applied; automatic mode)
 1. **Target** `workflows/coding/skills/coding-task/templates/review-package.md` (or the code that renders it). **Change:** for a waived demo, render the section as "Proof of success" with the waiver reason, and name the human section "Human Verification Needed" (with "None" when empty). **Evidence:** PR #65 package comment uses "Recording" and "Test it yourself". Confidence low: I did not read the template, so this may already be handled and the posted package may be from an older template.
