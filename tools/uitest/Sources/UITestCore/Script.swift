@@ -119,14 +119,7 @@ public func parseScript(_ text: String) throws(ScriptError) -> [Step] {
             command = .launch(keepData: !args.isEmpty)
         case "launch-with-unavailable-hotkey":
             guard args.isEmpty else { throw fail("usage: launch-with-unavailable-hotkey") }
-            for prior in steps.reversed() {
-                if prior.command == .quit { break }
-                switch prior.command {
-                case .launch, .launchWithUnavailableHotkey:
-                    throw fail("launch-with-unavailable-hotkey requires a fresh launch; quit first")
-                default: break
-                }
-            }
+            try requireFreshLaunch(steps, fail: fail, name: first.text)
             command = .launchWithUnavailableHotkey
         case "launch-with-env":
             var env = [String: String]()

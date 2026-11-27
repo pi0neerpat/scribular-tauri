@@ -245,6 +245,13 @@ import Testing
     #expect(try parseScript("launch\nquit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
 }
 
+@Test func unavailableHotkeyLaunchSharesFreshLaunchGuard() throws {
+    #expect(throws: ScriptError.self) {
+        try parseScript("launch-with-env \"SCRIBULAR_UITEST_SUMMARY=loadFailed\"\nlaunch-with-unavailable-hotkey")
+    }
+    #expect(try parseScript("launch\nforce-quit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
+}
+
 @Test func parsesFreshFixtureFailureCommands() throws {
     let steps = try parseScript("""
     expect-active-app "com.apple.finder"

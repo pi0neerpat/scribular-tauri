@@ -96,7 +96,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `click "Label" [index N] [in "Scope"]` | Click the unique exact label; use a 1-based index or scope to disambiguate. |
 | `pick-app "afplay" timeout 60s` | Close any menu left open, refresh the App-audio list, wait 2.5 seconds, open the App picker, and wait for the menu to open and close as detected by the window server. Type-select the name, press Return, wait 1 second, verify the picker value, and retry if it differs. |
 | `pick-call-app "afplay" timeout 60s` | Click the named button in the Choose a call app dialog. If the app is missing and the source list timed out, click Refresh before retrying. |
-| `click-child N in "Scope"` | Click the Nth (1-based) visible button inside the scope, for lists whose labels vary between runs (e.g. timed transcript lines). |
+| `click-child N in "Scope"` | Click the Nth (1-based) button inside the scope, for lists whose labels vary between runs (e.g. timed transcript lines). |
 | `expect-disabled "Label" [index N]` | Wait until the exact label resolves to a disabled control. |
 | `expect-playhead "Slider" in "Lines"` | Wait until the slider's value (seconds) and the line marked `aria-current` in the scope agree: the highlighted line is the last whose leading `m:ss` time has started, or none before the first line. Prints the playhead and highlighted line. |
 | `type "text"` | Type into the focused control. |
@@ -107,7 +107,8 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `wait 30s` / `wait 500ms` | Pause for a duration. |
 | `pause 3s` | Pause for reading without changing the configured action pace. |
 | `pace 2s` | Change the delay after UI actions for the rest of the script. |
-| `<step> timeout 300s` | End a `launch`, `click`, `pick-app`, `expect`, `expect-not`, `expect-clipboard-matches`, `expect-status-item`, `expect-notification`, `close-window`, `launch-with-env`, `click-child`, `expect-disabled` or `expect-playhead` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). `pick-app` reports the last failure and attempt count if it times out. |
+| `<step> timeout 300s` | End a `launch`, `click`, `pick-app`, `expect`, `expect-not`, `expect-clipboard-matches`, `expect-status-item`, `expect-notification` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). `pick-app` reports the last failure and attempt count if it times out. |
+| `launch-with-env`, `click-child`, `expect-disabled` or `expect-playhead` step `timeout 300s` | These steps also accept a trailing timeout to retry for that long instead of the default 10s. |
 | `close-window` | Click the front window's close control. |
 | `reopen-app` | Open the running app’s bundle through Launch Services, including when its Dock icon is absent. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |

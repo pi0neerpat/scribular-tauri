@@ -56,6 +56,7 @@ key cmd+option+down
 expect "Summaries couldn't load. Recording and transcription still work." timeout 30s
 expect-not "Summaries aren't available on this Mac"
 expect "Try Again"
+expect "Copy Note"
 click "Transcript"
 expect "Client:"
 click "Copy Transcript" index 1
