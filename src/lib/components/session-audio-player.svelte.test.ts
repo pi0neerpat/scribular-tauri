@@ -6,7 +6,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { Session } from '../types/Session';
 
 const requestSessionAudio = vi.fn();
-vi.mock('../api', () => ({ requestSessionAudio }));
+const getSessionSegments = vi.fn(async () => []);
+vi.mock('../api', () => ({ requestSessionAudio, getSessionSegments }));
 const { default: SessionAudio } = await import('./SessionAudio.svelte');
 
 let urls = 0;
@@ -52,6 +53,17 @@ describe('SessionAudio component (AS19)', () => {
     await vi.waitFor(() =>
       expect(target.querySelector('audio')?.getAttribute('src')).toBe('blob:test/2'),
     );
+    unmount(app);
+  });
+
+  it('refetches timed lines when processing advances, without reopening the audio', async () => {
+    const props = $state({ session: { ...session('a'), status: 'summarizing' } as Session, active: true });
+    const { app } = await render(props);
+    const before = getSessionSegments.mock.calls.length;
+    props.session = { ...session('a'), status: 'done' } as Session;
+    flushSync();
+    await vi.waitFor(() => expect(getSessionSegments.mock.calls.length).toBe(before + 1));
+    expect(requestSessionAudio).toHaveBeenCalledTimes(1);
     unmount(app);
   });
 

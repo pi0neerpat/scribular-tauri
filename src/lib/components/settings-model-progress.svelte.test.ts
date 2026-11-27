@@ -165,9 +165,11 @@ it('shows the plain summary limitation and retry on a load failure', async () =>
   modelsStatus.mockResolvedValue([ready]);
   const target = document.createElement('div');
   const app = mount(Settings, { target });
-  await vi.waitFor(() => expect(target.textContent).toContain("Summaries aren't available on this Mac."));
-  expect(target.textContent).toContain('Try again');
-  [...target.querySelectorAll('button')].find((button) => button.textContent === 'Try again')?.click();
+  await vi.waitFor(() => expect(target.textContent).toContain("Summaries couldn't load."));
+  expect(target.textContent).not.toContain("aren't available on this Mac");
+  const retries = [...target.querySelectorAll('button')].filter((button) => button.textContent === 'Try Again');
+  expect(retries).toHaveLength(1);
+  retries[0].click();
   expect(retrySummaryModel).toHaveBeenCalledOnce();
   unmount(app);
 });

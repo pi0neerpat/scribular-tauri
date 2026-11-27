@@ -1,0 +1,30 @@
+# AS13: Copy Note shows Copied; an edit clears it; Copy Transcript does not set it.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav"
+click "Start recording"
+wait 14s
+click "Stop"
+stop-audio
+expect "Ask Coach to change the note" timeout 400s
+click "Copy Note"
+expect "Copied"
+click "Note" index 2
+type " AS13 edit"
+click "Transcript"
+expect-not "Copied"
+click "Copy Transcript"
+expect-clipboard-matches "Client:"
+click "Note" index 1
+expect "Copy Note"
+quit

@@ -235,8 +235,7 @@
     {/each}
   </nav>
   {#if summaryAvailability === 'unsupported' || summaryAvailability === 'loadFailed'}
-    <SummaryUnavailable />
-    {#if summaryAvailability === 'loadFailed'}<button onclick={retrySummary}>Try again</button>{/if}
+    <SummaryUnavailable loadFailed={summaryAvailability === 'loadFailed'} onRetry={retrySummary} />
   {/if}
   {#if summaryAvailabilityError}
     <p role="alert">Couldn't check summary availability.</p>

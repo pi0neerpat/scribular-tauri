@@ -245,6 +245,13 @@ import Testing
     #expect(try parseScript("launch\nquit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
 }
 
+@Test func unavailableHotkeyLaunchSharesFreshLaunchGuard() throws {
+    #expect(throws: ScriptError.self) {
+        try parseScript("launch-with-env \"SCRIBULAR_UITEST_SUMMARY=loadFailed\"\nlaunch-with-unavailable-hotkey")
+    }
+    #expect(try parseScript("launch\nforce-quit\nlaunch-with-unavailable-hotkey").last?.command == .launchWithUnavailableHotkey)
+}
+
 @Test func parsesFreshFixtureFailureCommands() throws {
     let steps = try parseScript("""
     expect-active-app "com.apple.finder"
@@ -280,4 +287,9 @@ import Testing
         .expect("Show Scribular"),
         .click(label: "Start Recording", index: nil, within: nil)
     ])
+}
+
+@Test func parsesForceQuit() throws {
+    #expect(try parseScript("force-quit").first?.command == .forceQuit)
+    #expect(throws: ScriptError(line: 1, message: "usage: force-quit")) { try parseScript("force-quit now") }
 }

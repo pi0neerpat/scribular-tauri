@@ -1,0 +1,31 @@
+# Records the 57 s synthetic-speech fixture through App audio (enough words for "Audio capture insufficient" checks) and checks the real transcript and summary.
+# Template for recording tests: App audio + `play`, never the microphone.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+# loop keeps afplay playing so it is listed in the App picker
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+# capture follows the afplay process running at Start, and a loop restart is a new process (capture detaches): start one fresh long clip.
+# The 12 s clip transcribes too few words for "Audio capture insufficient" checks; use the 57 s synthetic speech.
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+click "Start recording"
+# a little longer than the 57 s clip
+wait 60s
+click "Stop"
+stop-audio
+# the session coach renders only once the summary is saved (status done); Copy Note renders earlier, disabled, so it is no gate
+expect "Ask Coach to change the note" timeout 400s
+expect "Copy Note"
+expect-not "Audio capture insufficient" timeout 10s
+click "Transcript"
+# a word from the fixture's first sentence, from whisper ggml-base transcriptions (2026-11-26: "library" and "libraries" both occur, so assert only "neighborhood"); assert fixture words, never summary wording
+expect "neighborhood" timeout 60s
+quit

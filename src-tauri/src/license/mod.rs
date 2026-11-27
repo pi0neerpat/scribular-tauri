@@ -283,6 +283,21 @@ pub fn dev_skip() -> bool {
     skip_requested(cfg!(debug_assertions), env.as_deref())
 }
 
+/// `SCRIBULAR_UITEST_LICENSE=lapsed` in a debug build: the uitest hook that
+/// puts the app in read-only access (`launch-with-env`). Release builds never read it.
+pub fn uitest_forced_state(debug_build: bool, env: Option<&str>) -> Option<AccessState> {
+    (debug_build && env == Some("lapsed")).then_some(AccessState::LicenseLapsed)
+}
+
+/// The uitest access override from the environment.
+pub fn dev_forced_state() -> Option<AccessState> {
+    #[cfg(debug_assertions)]
+    let env = std::env::var("SCRIBULAR_UITEST_LICENSE").ok();
+    #[cfg(not(debug_assertions))]
+    let env: Option<String> = None;
+    uitest_forced_state(cfg!(debug_assertions), env.as_deref())
+}
+
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> i64;
 }
@@ -397,6 +412,7 @@ pub struct Licensing {
     log: Log,
     secrets: Mutex<Secrets>,
     skip: bool,
+    forced: Option<AccessState>,
 }
 
 impl Licensing {
@@ -477,6 +493,7 @@ impl Licensing {
             log,
             secrets: Mutex::new(Secrets::default()),
             skip: false,
+            forced: None,
         };
         // Only rewrite the Keychain when something changed: each write can
         // prompt the user on an unsigned build. Never after a failed read: the
@@ -497,6 +514,12 @@ impl Licensing {
         if skip {
             (self.log)(DEBUG_SKIP_LOG);
         }
+        self
+    }
+
+    /// The debug-only uitest override from [`dev_forced_state`]; wins over the skip.
+    pub fn with_forced_state(mut self, forced: Option<AccessState>) -> Self {
+        self.forced = forced;
         self
     }
 
@@ -538,6 +561,9 @@ impl Licensing {
     }
 
     pub fn state(&self) -> AccessState {
+        if let Some(forced) = &self.forced {
+            return forced.clone();
+        }
         let state = access_status(self.clock.now_ms(), &self.record());
         // The dev skip must reach the UI too, or its gates stay locked.
         if self.skip && !state.allows() {
@@ -1294,6 +1320,24 @@ mod tests {
                 days_left: TRIAL_DAYS
             }
         );
+    }
+
+    #[test]
+    fn uitest_lapsed_override_wins_over_the_skip_in_debug_builds_only() {
+        assert_eq!(uitest_forced_state(false, Some("lapsed")), None);
+        assert_eq!(uitest_forced_state(true, None), None);
+        assert_eq!(uitest_forced_state(true, Some("trial")), None);
+        let f = Fixture::new();
+        let lapsed = Licensing::init(
+            f.store.clone(),
+            f.keys.clone(),
+            f.api.clone(),
+            f.clock.clone(),
+        )
+        .with_skip(true)
+        .with_forced_state(uitest_forced_state(true, Some("lapsed")));
+        assert_eq!(lapsed.state(), AccessState::LicenseLapsed);
+        assert!(lapsed.require_access().is_err());
     }
 
     #[test]

@@ -39,6 +39,22 @@ pub enum SummaryAvailability {
     LoadFailed,
 }
 
+/// `SCRIBULAR_UITEST_SUMMARY=unsupported|loadFailed` in a debug build: the uitest
+/// hook that pins summary availability (`launch-with-env`). Release builds never read it.
+pub fn uitest_forced_availability(
+    debug_build: bool,
+    env: Option<&str>,
+) -> Option<SummaryAvailability> {
+    if !debug_build {
+        return None;
+    }
+    match env {
+        Some("unsupported") => Some(SummaryAvailability::Unsupported),
+        Some("loadFailed") => Some(SummaryAvailability::LoadFailed),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelState {
@@ -113,6 +129,8 @@ pub struct ModelManager {
     /// The recorder's update install gate, shared so downloads cannot start mid-install.
     install_gate: OnceLock<Arc<Mutex<()>>>,
     availability: Mutex<SummaryAvailability>,
+    /// The uitest override ([`uitest_forced_availability`]): every state change reports this instead.
+    forced_availability: Option<SummaryAvailability>,
     availability_event: OnceLock<tauri::AppHandle>,
 }
 
@@ -133,7 +151,26 @@ impl Drop for DownloadGuard {
 
 impl ModelManager {
     pub fn new(dir: PathBuf, specs: Vec<ModelSpec>) -> Self {
+        #[cfg(debug_assertions)]
+        let env = std::env::var("SCRIBULAR_UITEST_SUMMARY").ok();
+        #[cfg(not(debug_assertions))]
+        let env: Option<String> = None;
         Self::new_with_memory(dir, specs, crate::hardware::physical_memory_bytes())
+            .with_forced_availability(uitest_forced_availability(
+                cfg!(debug_assertions),
+                env.as_deref(),
+            ))
+    }
+
+    fn with_forced_availability(mut self, forced: Option<SummaryAvailability>) -> Self {
+        if let Some(state) = forced {
+            *self
+                .availability
+                .get_mut()
+                .unwrap_or_else(|p| p.into_inner()) = state;
+        }
+        self.forced_availability = forced;
+        self
     }
 
     fn new_with_memory(dir: PathBuf, specs: Vec<ModelSpec>, memory_bytes: Option<u64>) -> Self {
@@ -162,6 +199,7 @@ impl ModelManager {
             } else {
                 SummaryAvailability::Downloading
             }),
+            forced_availability: None,
             availability_event: OnceLock::new(),
         }
     }
@@ -183,6 +221,7 @@ impl ModelManager {
     }
 
     pub fn set_summary_availability(&self, state: SummaryAvailability) {
+        let state = self.forced_availability.unwrap_or(state);
         let mut current = self.availability.lock().unwrap_or_else(|p| p.into_inner());
         if *current == state {
             return;
@@ -446,6 +485,30 @@ mod tests {
         );
         assert!(old.exists());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn uitest_override_pins_availability_in_debug_builds_only() {
+        assert_eq!(uitest_forced_availability(false, Some("unsupported")), None);
+        assert_eq!(uitest_forced_availability(true, None), None);
+        assert_eq!(uitest_forced_availability(true, Some("ready")), None);
+        assert_eq!(
+            uitest_forced_availability(true, Some("unsupported")),
+            Some(SummaryAvailability::Unsupported)
+        );
+        let dir =
+            std::env::temp_dir().join(format!("scribular-model-forced-{}", std::process::id()));
+        let manager = ModelManager::new_with_memory(dir, manifest(), None)
+            .with_forced_availability(uitest_forced_availability(true, Some("loadFailed")));
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::LoadFailed
+        );
+        manager.set_summary_availability(SummaryAvailability::Ready);
+        assert_eq!(
+            manager.summary_availability(),
+            SummaryAvailability::LoadFailed
+        );
     }
 
     #[test]

@@ -26,8 +26,8 @@ pub const BINDINGS: &[(&str, &str)] = &[
     ("shell-sidebar", "Ctrl+CmdOrCtrl+S"),
     ("shell-main", "CmdOrCtrl+0"),
     ("shell-help", "CmdOrCtrl+Shift+/"),
-    ("native-undo", "CmdOrCtrl+Z"),
-    ("native-redo", "Shift+CmdOrCtrl+Z"),
+    ("shell-undo", "CmdOrCtrl+Z"),
+    ("shell-redo", "Shift+CmdOrCtrl+Z"),
     ("native-cut", "CmdOrCtrl+X"),
     ("native-copy", "CmdOrCtrl+C"),
     ("native-paste", "CmdOrCtrl+V"),
@@ -201,6 +201,25 @@ pub fn handle(app: &AppHandle, event: MenuEvent) {
             }
         }
     }
+    // Edit > Undo/Redo: text fields keep native undo; the main window's notes use note undo (R12).
+    if matches!(id, "shell-undo" | "shell-redo") {
+        let command = if id == "shell-undo" { "undo" } else { "redo" };
+        let focused = app
+            .webview_windows()
+            .into_values()
+            .find(|window| window.is_focused().unwrap_or(false));
+        match focused {
+            Some(window) if window.label() != "main" || crate::coach::is_open(app) => {
+                let _ = window.eval(format!("document.execCommand('{command}')"));
+            }
+            _ => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("shell://menu", id);
+                }
+            }
+        }
+        return;
+    }
     if crate::coach::is_open(app) && !matches!(id, "shell-close" | "shell-quit") {
         return;
     }
@@ -278,6 +297,9 @@ pub fn set_state(
         ("shell-previous", !locked && has_sessions),
         ("shell-next", !locked && has_sessions),
         ("shell-sidebar", !locked),
+        ("shell-note", !locked && selected),
+        ("shell-transcript", !locked && selected),
+        ("shell-audio", !locked && selected),
     ] {
         for top in menu.items().map_err(|e| e.to_string())? {
             if let tauri::menu::MenuItemKind::Submenu(sub) = top {
@@ -438,9 +460,9 @@ pub fn build(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     menu.append(&file)?;
 
     let edit = Submenu::new(app, "Edit", true)?;
+    item(&app.handle(), &edit, "shell-undo", "Undo", true, None)?;
+    item(&app.handle(), &edit, "shell-redo", "Redo", true, None)?;
     for p in [
-        P::undo(app, None)?,
-        P::redo(app, None)?,
         P::cut(app, None)?,
         P::copy(app, None)?,
         P::paste(app, None)?,

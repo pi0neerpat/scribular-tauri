@@ -21,7 +21,7 @@ Failed steps save the existing cropped `fail-<line>.png` plus a full-display `fa
 
 - Before a run, check `pgrep -fl "Scribular.app|codex"`, make sure no unrelated GUI automation covers Scribular, and trust the exact app build with `bash tools/uitest/trust-build.sh /path/to/Scribular.app`.
 - Use `play "fixture.wav" loop` only to make `afplay` available in the App picker. Stop or supersede it with a one-shot `play "fixture.wav"` immediately before each `Start recording` action.
-- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `since we last met`).
+- Do not assert live transcript phrases while recording. After Stop, assert only phrases stable across Whisper runs (for example, `neighborhood` from `keyboard-pr3-synthetic-speech.m4a`; Whisper writes both "library" and "libraries" after it).
 - On a slow VM, allow at least 400 seconds for the summary.
 - Concurrent uitest runs queue on the desktop lock; do not run other GUI automation at the same time.
 
@@ -39,7 +39,7 @@ TAURI_CONFIG='{"bundle":{"macOS":{"frameworks":[]}}}' cargo build --locked --rel
 APPLE_SIGNING_IDENTITY="Scribular Local Dev" npm run tauri -- build --debug --bundles app --config tools/uitest/tauri-debug-overlay.json
 export SCRIBULAR_SKIP_LICENSE=1
 swift run --package-path tools/uitest uitest tools/uitest/scenarios/as11-note-style-default.uitest --app /path/to/Scribular.app
-swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
+swift run --package-path tools/uitest uitest tools/uitest/scenarios/system-audio-smoke-57s.uitest --record 04-system-audio-happy-path --app /path/to/Scribular.app
 ```
 
 Use `--record <name>` only for a happy path or an issue that cannot be reproduced reliably. The recorder uses libx264's ultrafast preset to keep CPU free for the app (files are larger). Use names like `04-system-audio-happy-path`; recordings are written as `<record-dir>/<name>.mp4` with a matching JSON metadata file. Failed recorded runs use `<name>-FAILED.mp4`. `--record-dir <dir>` overrides `CWF_RECORDINGS_DIR`; otherwise a clone with a sibling `scribular-tauri` checkout writes there, falling back to `./runs/`. Recordings are not committed.
@@ -76,13 +76,13 @@ Clear it with `rm -rf ~/Library/Caches/scribular-uitest` only to free disk space
 
 ### Recording tests
 
-Use a recording only for a happy path or an issue that cannot be reproduced reliably. Record a fixture file through App audio, never the microphone. `system-audio-smoke.uitest` is the template:
+Use a recording only for a happy path or an issue that cannot be reproduced reliably. Record a fixture file through App audio, never the microphone. `system-audio-smoke-57s.uitest` (57 s fixture) is the template:
 
-1. `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
-2. In Settings choose `App audio`, then run `pick-app "afplay" timeout 60s`. Each attempt closes any open menu, refreshes the list, waits 2.5 seconds, and opens the App picker. It waits for the menu to open and close, detected through the window server, types `afplay`, presses Return, waits 1 second, and verifies the picker's value; a mismatch is retried. The native menu does not update while open, and its items are not exposed to Accessibility, so selection cannot rely on reading its menu items. The 1-second wait accounts for the first click after the menu closes being swallowed.
-3. Go to Record and run `play "fixture.wav"` once more without `loop`, immediately before `Start recording`. Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
+1. Pass onboarding (`key escape`, `click "Continue"`) and wait for the speech model, then `play "fixture.wav" loop` so `afplay` is playing and appears in the App picker.
+2. On the Record screen, `click "On a call" index 1`, `click "Choose an app to try recording"`, then `pick-call-app "afplay" timeout 60s` and `expect "App: afplay"`.
+3. Run `play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"` (no `loop`) immediately before `Start recording`. Use a clip long enough to transcribe at least 10 words: this 57 s fixture is what the smoke test uses; the 12 s clip can end in "Audio capture insufficient". Capture follows the `afplay` process running at Start, and each loop restart is a new process, so recording a loop captures only the rest of the current pass.
 4. Wait a little longer than the clip, then click `Stop` and run `stop-audio`.
-5. `expect` a phrase that appeared identically in several recordings of the fixture. Do not assert summary wording, which varies; `expect "Summary·"` only checks that a summary exists. On an 8 GB VM, allow `expect "Summary·" timeout 400s` or longer.
+5. Wait for the saved note with `expect "Ask Coach to change the note" timeout 400s` (longer on an 8 GB VM); it renders only once the summary is saved. `Copy Note` renders earlier, disabled, so it does not prove a summary exists. Then `click "Transcript"` and `expect` a phrase that appeared identically in several transcriptions of the fixture (`neighborhood` for the 57 s fixture). Do not assert summary wording, which varies.
 
 The runner uses AVFoundation's `Capture screen 0` device (`0:none`). Check that device with `ffmpeg -f avfoundation -list_devices true -i ""` if screen capture does not start. Keychain typing and the Accessibility labels still need verification in a live desktop session after a rebuild.
 
@@ -94,9 +94,13 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | --- | --- |
 | `launch [--keep-data]` | Start the built app. By default, move its app data into the run folder first. |
 | `launch-with-unavailable-hotkey` | Launch the app like `launch` with `SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY=1`, so it reports its background shortcut as unavailable (exercises the registration-failure path). Requires a fresh launch: use `quit` first if the script already launched the app. |
+| `launch-with-env "SCRIBULAR_UITEST_NAME=value" ...` | Launch like `launch` with debug-build test hooks set (only `SCRIBULAR_UITEST_*` names). `SCRIBULAR_UITEST_SUMMARY=unsupported` or `=loadFailed` pins summary availability; `SCRIBULAR_UITEST_LICENSE=lapsed` puts access in read-only (lapsed). Release builds ignore both. App data from earlier launches in the run is kept, so a session recorded first can be reopened in each state. Requires a fresh launch: use `quit` first. |
 | `click "Label" [index N] [in "Scope"]` | Click the unique exact label; use a 1-based index or scope to disambiguate. |
 | `pick-app "afplay" timeout 60s` | Close any menu left open, refresh the App-audio list, wait 2.5 seconds, open the App picker, and wait for the menu to open and close as detected by the window server. Type-select the name, press Return, wait 1 second, verify the picker value, and retry if it differs. |
 | `pick-call-app "afplay" timeout 60s` | Click the named button in the Choose a call app dialog. If the app is missing and the source list timed out, click Refresh before retrying. |
+| `click-child N in "Scope"` | Click the Nth (1-based) button inside the scope, for lists whose labels vary between runs (e.g. timed transcript lines). |
+| `expect-disabled "Label" [index N]` | Wait until the exact label resolves to a disabled control. |
+| `expect-playhead "Slider" in "Lines"` | Wait until the slider's value (seconds) and the line marked `aria-current` in the scope agree: the highlighted line is the last whose leading `m:ss` time has started, or none before the first line. Prints the playhead and highlighted line. |
 | `type "text"` | Type into the focused control. |
 | `key cmd+shift+s` | Press a key with optional `cmd`, `shift`, `option`, or `ctrl` modifiers. |
 | `expect "text"` | Wait until visible text contains the value. |
@@ -106,6 +110,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `pause 3s` | Pause for reading without changing the configured action pace. |
 | `pace 2s` | Change the delay after UI actions for the rest of the script. |
 | `<step> timeout 300s` | End a `launch`, `click`, `pick-app`, `expect`, `expect-not`, `expect-clipboard-matches`, `expect-status-item`, `expect-notification` or `close-window` step with this to retry it for that long instead of the default 10s (e.g. while a model downloads). `pick-app` reports the last failure and attempt count if it times out. |
+| `launch-with-env`, `click-child`, `expect-disabled` or `expect-playhead` step `timeout 300s` | These steps also accept a trailing timeout to retry for that long instead of the default 10s. |
 | `close-window` | Click the front window's close control. |
 | `reopen-app` | Open the running app’s bundle through Launch Services, including when its Dock icon is absent. |
 | `handle-keychain` | If SecurityAgent has a prompt, type the environment password and choose Always Allow. |
@@ -114,6 +119,7 @@ One command per line. Blank lines and `#` comments are ignored; text values use 
 | `play "file.wav" [loop]` | Play the file through `/usr/bin/afplay` in the background, so the app can record it in App-audio mode (`afplay` in the App picker). Relative paths resolve against the directory uitest runs from; a missing file fails the step. `loop` restarts it when it ends. Stops at `stop-audio`, `quit`, or the end of the run (pass or fail). |
 | `stop-audio` | Stop `play` playback. |
 | `quit` | Quit the app and stop `play` playback. |
+| `force-quit` | Kill the app with SIGKILL (no clean shutdown, like a crash) and stop `play` playback. A recording in progress is left interrupted for the next `launch --keep-data`. |
 | `expect-status-item "Scribular"` | Wait for the app status item whose Accessibility help equals the text. |
 | `status-item click "Scribular"` | Press the matching app status item. Native menu items are not exposed to Accessibility. |
 | `status-item-mouse-click "Scribular"` | Mouse-click the status item whose Accessibility help matches. |

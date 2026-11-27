@@ -42,6 +42,37 @@ final class AXDriver: Driver {
         case .launchWithUnavailableHotkey:
             _ = try lifecycle.launch(keepData: false, runDir: runDir, unavailableHotkey: true)
             return try perform(.launch(keepData: false))
+        case .launchWithEnv(let environment):
+            _ = try lifecycle.launch(keepData: false, runDir: runDir, environment: environment)
+            return try perform(.launch(keepData: false))
+        case .clickChild(let index, let within):
+            try answerKeychainPrompt()
+            let scope = try resolveScope(within)
+            let buttons = allElements(from: scope).dropFirst().filter {
+                attribute($0, kAXRoleAttribute) as? String == kAXButtonRole && frame(of: $0) != nil
+            }
+            guard index <= buttons.count else { throw .retryable("\(buttons.count) buttons in \"\(within)\"") }
+            return try press(buttons[index - 1])
+        case .expectDisabled(let label, let index):
+            let element = try resolve(label, index: index, within: nil)
+            guard attribute(element, kAXEnabledAttribute) as? Bool == false else { throw .retryable("enabled") }
+            return nil
+        case .expectPlayhead(let slider, let within):
+            let sliders = allElements().filter { matches($0, exact: slider) && attribute($0, kAXRoleAttribute) as? String == kAXSliderRole }
+            guard sliders.count == 1, let value = attribute(sliders[0], kAXValueAttribute) else {
+                throw .retryable("\(sliders.count) sliders labelled \"\(slider)\"")
+            }
+            let position = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap(Double.init) ?? .nan
+            let scope = try resolveScope(within)
+            let lines = allElements(from: scope).dropFirst().compactMap { element -> PlayheadLine? in
+                guard attribute(element, kAXRoleAttribute) as? String == kAXButtonRole,
+                      let start = labelValues(element).lazy.compactMap(lineStartSeconds).first else { return nil }
+                let current = (attribute(element, "AXARIACurrent") as? String).map { !$0.isEmpty && $0 != "false" } ?? false
+                return PlayheadLine(start: start, current: current)
+            }
+            if let reason = playheadDisagreement(position: position, lines: lines) { throw .retryable(reason) }
+            let highlighted = lines.firstIndex(where: \.current).map { "line \($0 + 1) at \(lines[$0].start)s" } ?? "none"
+            return "playhead \(position)s, highlighted \(highlighted) of \(lines.count)"
         case .play(let path, let loop):
             let file = try resolvePlayPath(path, cwd: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
             do { try player.start(file, loop: loop) }
@@ -50,6 +81,13 @@ final class AXDriver: Driver {
             return file.path
         case .stopAudio:
             player.stop()
+            return nil
+        case .forceQuit:
+            releaseFixtureWriter()
+            player.stop()
+            lifecycle.forceQuit()
+            application = nil
+            keychainHandled = false
             return nil
         case .quit:
             releaseFixtureWriter()
@@ -522,6 +560,27 @@ final class AXDriver: Driver {
         case .none: throw .retryable("not found")
         case .ambiguous(let count): throw .fatal("ambiguous: \(count) matches for \"\(label)\" — add index N or in \"…\"")
         }
+    }
+
+    /// The outermost element labelled `within`, as `click ... in` scopes it.
+    private func resolveScope(_ within: String) throws(DriverError) -> AXUIElement {
+        let labelled = allElements().filter { matches($0, exact: within) }
+        let scopes = labelled.filter { scope in
+            !labelled.contains { other in !CFEqual(other, scope) && allElements(from: other).contains { CFEqual($0, scope) } }
+        }
+        switch pick(scopes, index: nil) {
+        case .none: throw .retryable("scope not found")
+        case .ambiguous(let count): throw .fatal("ambiguous: \(count) matches for \"\(within)\"")
+        case .found(let value): return value
+        }
+    }
+
+    /// `click` on an already resolved element.
+    private func press(_ element: AXUIElement) throws(DriverError) -> String? {
+        if attribute(element, kAXEnabledAttribute) as? Bool == false { throw .retryable("disabled") }
+        if AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success { Thread.sleep(forTimeInterval: 0.2) }
+        guard let frame = frame(of: element) else { throw .retryable("not found") }
+        return try click(element, at: CGPoint(x: frame.midX, y: frame.midY))
     }
 
     private func click(at point: CGPoint) throws(DriverError) {

@@ -80,10 +80,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-async function renderRecordView() {
+async function renderRecordView(extra: Record<string, unknown> = {}) {
   const target = document.createElement('div');
   document.body.append(target);
-  const app = mount(RecordView, { target, props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null } } });
+  const app = mount(RecordView, { target, props: { speech: { modelId: 'whisper-base', state: 'ready', downloadedBytes: 100, totalBytes: 100, error: null }, ...extra } });
   await vi.waitFor(() => expect(target.querySelector('button')).not.toBeNull());
   return { target, app };
 }
@@ -299,7 +299,8 @@ describe('recording speaker-count prompt', () => {
     await clickButton(target, 'Stop');
     await clickButton(target, '2 people');
     await vi.waitFor(() => expect(stopRecording).toHaveBeenCalled());
-    expect(target.querySelector('pre')?.textContent).toContain('hello there');
+    // R10: Stop hands the session to its page, so the record screen is ready again.
+    await vi.waitFor(() => expect(target.querySelector('pre')).toBeNull());
     clock.mockRestore();
     unmount(app);
     target.remove();
@@ -308,10 +309,9 @@ describe('recording speaker-count prompt', () => {
     sessionStorage.setItem('scribular.inFlightSession', 'summary-1');
     getSession.mockResolvedValueOnce({ id: 'summary-1', status: 'summarizing', inputMode: 'mic', createdAt: 0 });
     const { target, app } = await renderRecordView();
-    await vi.waitFor(() => expect(target.textContent).toContain('Working…'));
-    expect([...target.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
-      expect.arrayContaining(['Start recording', 'Cancel']),
-    );
+    // R10: a stopped session's progress lives on its page; the record screen lets go of it.
+    await vi.waitFor(() => expect(sessionStorage.getItem('scribular.inFlightSession')).toBeNull());
+    expect(target.textContent).not.toContain('Working…');
     await clickButton(target, 'Start recording');
     await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
     expect(startRecording).toHaveBeenCalledTimes(1);
@@ -332,32 +332,6 @@ describe('recording speaker-count prompt', () => {
 
     emitTranscriptWaiting!({ sessionId: recording.id, waiting: false });
     await vi.waitFor(() => expect(target.textContent).not.toContain('Live transcript will start when the current summary finishes.'));
-    unmount(app);
-    target.remove();
-  });
-
-  it('keeps Start available and offers Cancel while awaiting the summary model', async () => {
-    sessionStorage.setItem('scribular.inFlightSession', 'waiting-1');
-    getSession.mockResolvedValueOnce({ id: 'waiting-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });
-    const { target, app } = await renderRecordView();
-    await vi.waitFor(() => expect(target.textContent).toContain('Waiting for the summary model download'));
-    expect([...target.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
-      expect.arrayContaining(['Start recording', 'Cancel']),
-    );
-    await clickButton(target, 'Cancel');
-    expect(cancelJob).toHaveBeenCalledWith('waiting-1');
-    unmount(app);
-    target.remove();
-  });
-
-  it('clears the displayed job after its session is deleted', async () => {
-    sessionStorage.setItem('scribular.inFlightSession', 'queued-1');
-    getSession.mockResolvedValueOnce({ id: 'queued-1', status: 'awaitingModel', inputMode: 'mic', createdAt: 0 });
-    const { target, app } = await renderRecordView();
-    await vi.waitFor(() => expect(target.textContent).toContain('Waiting for the summary model download'));
-    await app.refreshAfterDeletion();
-    await vi.waitFor(() => expect(target.textContent).not.toContain('Waiting for the summary model download'));
-    expect(sessionStorage.getItem('scribular.inFlightSession')).toBeNull();
     unmount(app);
     target.remove();
   });
@@ -437,6 +411,21 @@ describe('recording speaker-count prompt', () => {
     fresh.target.remove();
   });
 
+  it('opens the session after an external Stop even while another view is shown (R10)', async () => {
+    onSessionProgress.mockImplementation(async (callback) => {
+      emitProgress = callback;
+      return () => {};
+    });
+    const onStopped = vi.fn();
+    const { target, app } = await renderRecordView({ onStopped, active: false });
+    await clickButton(target, 'Start recording');
+    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
+    emitProgress!({ sessionId: recording.id, state: 'finalizing', stepIndex: 1, stepCount: 3, message: 'Finalizing' });
+    expect(onStopped).toHaveBeenCalledWith(recording.id);
+    unmount(app);
+    target.remove();
+  });
+
   it('keeps a new attempt marker when an older session finishes', async () => {
     onSessionProgress.mockImplementation(async (callback) => {
       emitProgress = callback;
@@ -460,41 +449,6 @@ describe('recording speaker-count prompt', () => {
     await vi.waitFor(() => expect(target.textContent).toContain('new startup failed'));
     expect(sessionStorage.getItem('scribular.inFlightStartAttempt')).toBeNull();
     expect(sessionStorage.getItem('scribular.inFlightMultiSpeaker')).toBeNull();
-    unmount(app);
-    target.remove();
-  });
-
-  it('ignores an older fetch after a newer update for the same session', async () => {
-    let resolveOld!: (session: Session) => void;
-    let resolveNew!: (session: Session) => void;
-    const result: Session = {
-      id: recording.id, inputMode: 'mic', status: 'done', title: '', createdAt: 0,
-      error: null, promptId: null, modelId: null,
-      transcript: '', plainTranscript: null, rawTranscript: null, speakerMap: null,
-      diarizationState: 'none', summary: '', durationMs: null, timings: null,
-      hasAudio: false, isSample: false, audioExpiresAt: null,
-      previousSummary: null, previousPromptId: null, previousModelId: null, canRedo: false, copiedAt: null,
-    } as const;
-    onSessionProgress.mockImplementation(async (callback) => {
-      emitProgress = callback;
-      return () => {};
-    });
-    getSession
-      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
-      .mockReturnValueOnce(new Promise((resolve) => { resolveNew = resolve; }));
-    const { target, app } = await renderRecordView();
-    await clickButton(target, 'Start recording');
-    await vi.waitFor(() => expect(target.textContent).toContain('Stop'));
-    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 1, stepCount: 1, message: 'Done' });
-    emitProgress!({ sessionId: recording.id, state: 'done', stepIndex: 2, stepCount: 2, message: 'Done' });
-    await vi.waitFor(() => expect(getSession).toHaveBeenCalledTimes(2));
-
-    resolveNew({ ...result, id: recording.id, title: 'new result', summary: 'new summary' });
-    await vi.waitFor(() => expect(target.textContent).toContain('new summary'));
-    resolveOld({ ...result, id: recording.id, title: 'old result', summary: 'old summary' });
-    await Promise.resolve();
-    expect(target.textContent).toContain('new summary');
-    expect(target.textContent).not.toContain('old summary');
     unmount(app);
     target.remove();
   });

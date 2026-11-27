@@ -1870,3 +1870,26 @@ fn stopping_uses_the_style_selected_during_recording() {
 
     assert_eq!(h.get(&id).prompt_id.as_deref(), Some(at_stop));
 }
+
+/// Recording spec AS7: the style captured at Stop is kept for the queued note,
+/// even when the global style changes while the note waits for its model.
+#[test]
+fn as7_a_later_global_style_change_leaves_the_queued_note_alone() {
+    let h = Harness::with(|_| {}, |loader| loader.ready.store(false, Ordering::SeqCst));
+    let at_start = h.store.get_active_prompt_id().unwrap().unwrap();
+    let id = h.start(InputMode::Mic);
+    h.feed(2);
+    let at_stop = "default-narrative-therapy";
+    assert_ne!(at_start, at_stop);
+    h.store.set_active_prompt(at_stop).unwrap();
+
+    h.recorder.stop().unwrap();
+    h.events.wait_for(&id, SessionStatus::AwaitingModel);
+    h.store.set_active_prompt(&at_start).unwrap();
+    h.summarizer.ready.store(true, Ordering::SeqCst);
+    assert!(h.queue.wait_idle(WAIT));
+
+    let s = h.get(&id);
+    assert_eq!(s.status, SessionStatus::Done);
+    assert_eq!(s.prompt_id.as_deref(), Some(at_stop));
+}

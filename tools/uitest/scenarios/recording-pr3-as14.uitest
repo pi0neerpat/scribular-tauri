@@ -1,0 +1,37 @@
+# AS14: renamed speakers apply on Done; Edit Speakers reopens the form; names persist.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+click "Note Styles"
+click "New Recording"
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+wait 30s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+click "Start recording"
+wait 35s
+click "Stop"
+stop-audio
+expect "Ask Coach to change the note" timeout 400s
+labels
+click "Confirm speakers"
+expect "Edit Speakers" timeout 30s
+click "Edit Speakers"
+click "Client" index 1
+click "Done"
+expect "Edit Speakers" timeout 30s
+click "Transcript"
+expect "Client:"
+key cmd+option+down
+key cmd+option+up
+labels
+click "Edit Speakers"
+expect "Who's speaking in this session?"
+quit

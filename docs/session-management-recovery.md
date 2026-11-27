@@ -10,7 +10,8 @@ Spec: `plans/parity/09-session-management-recovery.md`. Recovery and waiting-ses
 - **Regenerate**: style picker (`StylePicker.svelte`), streaming preview in a separate area (the stored summary is untouched until success), and Stop. Failure or Stop keeps the old summary.
 - **Undo**: one snapshot per session. A successful regenerate stores the old summary, style and model; Undo restores them.
 - **Delete / Delete all**: single delete and Delete all, each with a confirm step (a second click within 3 s for single delete). Delete all also removes samples and runs `VACUUM`.
-- **Recover interrupted recordings**: a banner ("N interrupted recording(s)") and a Recover button per row. Recovery re-transcribes the kept audio, then summarizes.
+- **Recover page** (recording spec PR3, R16): opening an interrupted session shows its Recover page ("Recover recording") with Recover Recording and Delete. Only that session processes; a failed recovery keeps its chunks and the Recover action. Test natively with uitest `force-quit` then `launch --keep-data`.
+- **Recover interrupted recordings**: each interrupted row with kept audio shows a Recover marker and a Recover action in its menu; there is no aggregate banner. Recovery re-transcribes the kept audio, then summarizes. An interrupted row whose audio was swept shows "Audio no longer available" and only Delete.
 - **Cancel awaitingModel**: a session waiting for the summary model download can be cancelled and returns to a stopped state.
 - A session with too little speech (under `MIN_WORDS`) stays `Failed(InsufficientAudio)` with a Delete action; it is not silently deleted as in Electron.
 
@@ -27,7 +28,7 @@ Spec: `plans/parity/09-session-management-recovery.md`. Recovery and waiting-ses
 - Sessions live in the encrypted SQLite store (`src-tauri/src/store/`). Stored per session: transcript, summary, `prompt_id`, `model_id`, `previous_*` snapshot, status/error, and (spec 02) `plain_transcript`, `raw_transcript`, `speaker_map`, `diarization_state`.
 - **Audio**: recorded in 5 s chunks (16 kHz mono) into the `audio_chunks` table, so a crash loses at most about 5 s. Normal retention deletes chunks after a successful transcript/summary, unless the user keeps audio; the hourly sweep in `jobs/retention.rs` expires kept audio.
 - **Recovery state** lives in the DB, not a side file: a session with status `Failed`, error `"interrupted"` and `audio_chunk_count > 0` is recoverable. At launch `recover_interrupted` marks live recordings interrupted and puts finalizing/summarizing sessions that are in `summary_queue` back to `AwaitingModel` in FIFO order (they resume).
-- Recovery is manual (banner plus button), not automatic at launch, because it costs CPU.
+- Recovery is manual (the per-row Recover action or the Recover page), not automatic at launch, because it costs CPU.
 
 ## How to test
 

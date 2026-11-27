@@ -5,12 +5,13 @@
   import type { Session } from '../types/Session';
   import type { SessionListItem } from '../types/SessionListItem';
   import type { SessionProgress } from '../types/SessionProgress';
+  import type { NoteTab } from './note-tabs';
   import SummaryPanel from './SummaryPanel.svelte';
   import TrialBadge from './TrialBadge.svelte';
   import { accessState, allows } from '../license';
 
-  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, recordHasNote = false, onNavigate = () => {}, onLicense = () => {}, onSessionsChanged, children }: {
-    view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; recordHasNote?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
+  let { view = 'history', navigationLocked = false, recording = false, recoverable = false, onNavigate = () => {}, onLicense = () => {}, onSessionsChanged, children }: {
+    view?: AppView; navigationLocked?: boolean; recording?: boolean; recoverable?: boolean; onNavigate?: (view: AppView, opener?: HTMLElement, action?: () => void) => void;
     onLicense?: () => void; onSessionsChanged?: () => void; children?: Snippet;
   } = $props();
   let sessions = $state<SessionListItem[]>([]);
@@ -26,15 +27,19 @@
   let sidebarVisible = $state(true);
   let request = 0;
   let deleteConfirmId = $state<string | null>(null);
-  let summaryPanel = $state<{ copy: () => Promise<void>; requestDelete: () => void } | undefined>();
+  let summaryPanel = $state<{ copy: () => Promise<void>; showTab: (tab: NoteTab) => void; undo: () => Promise<boolean>; redo: () => Promise<boolean> } | undefined>();
+  let confirmingDelete = $state<string | null>(null);
+  let recovering = $state(false);
   let deleteTimer: ReturnType<typeof setTimeout> | undefined;
   let prompts = $state<Awaited<ReturnType<typeof getPromptList>> | null>(null);
   let models = $state<Awaited<ReturnType<typeof listSummaryModels>>>([]);
-  let interrupted = $derived(sessions.filter((s) => s.interrupted && s.hasAudio && s.status === 'failed').length);
+  const working = (status: string) => ['recording', 'finalizing', 'summarizing', 'awaitingModel'].includes(status);
+  // R16: an interrupted recording whose saved chunks can still be processed.
+  const needsRecovery = (s: Session) => s.status === 'failed' && s.error === 'interrupted' && s.hasAudio;
   $effect(() => {
     // Refresh native availability after a list change, even when search hides every row.
     sessions; $accessState;
-    void setShellMenuState({ selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' ? !!selected?.summary : view === 'record' && recordHasNote, recording, recoverable, locked: navigationLocked }).catch(() => {});
+    void setShellMenuState({ selected: view === 'history' && !!selected && !['recording', 'finalizing'].includes(selected.status), hasNote: view === 'history' && !!selected?.summary && !working(selected.status), recording, recoverable, locked: navigationLocked }).catch(() => {});
   });
   let groups = $derived.by(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -65,9 +70,13 @@
   }
 
   function open(item: SessionListItem, opener: HTMLElement) {
-    onNavigate('history', opener, () => {
-      void getSession(item.id).then((session) => { selected = session; }).catch((e) => (error = String(e)));
-    });
+    onNavigate('history', opener, () => openSession(item.id));
+  }
+
+  /** Shows a session's page, such as the one Stop just returned (R10). */
+  export function openSession(id: string) {
+    confirmingDelete = null;
+    void getSession(id).then((session) => { selected = session; void refresh(); }).catch((e) => (error = String(e)));
   }
 
   export async function focusSearch() {
@@ -91,12 +100,18 @@
     event.preventDefault();
     rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
   }
-  export function confirmDeleteSelected() { if (view === 'history' && selected && !['recording', 'finalizing'].includes(selected.status)) summaryPanel?.requestDelete(); }
-  export async function copySelectedNote() { if (view === 'history' && selected?.summary) await summaryPanel?.copy(); }
+  export function confirmDeleteSelected() { if (view === 'history' && selected && !['recording', 'finalizing'].includes(selected.status)) confirmingDelete = selected.id; }
+  export async function copySelectedNote() { if (view === 'history' && selected?.summary && !working(selected.status)) await summaryPanel?.copy(); }
+  export function showTab(tab: NoteTab) { if (view === 'history') summaryPanel?.showTab(tab); }
+  /** Note-level Undo/Redo for the Edit menu; false when there is nothing to do here. */
+  export async function undoNote() { return view === 'history' && !!summaryPanel && await summaryPanel.undo(); }
+  export async function redoNote() { return view === 'history' && !!summaryPanel && await summaryPanel.redo(); }
+  /** Recovers the open interrupted session, or opens the first one so its page explains recovery. */
   export async function recoverFirst() {
     try {
+      if (selected && needsRecovery(selected)) { await recover(selected.id); return; }
       const first = (await listSessions()).find((s) => s.interrupted && s.hasAudio && s.status === 'failed');
-      if (first) await recover(first.id);
+      if (first) openSession(first.id);
     } catch (e) { error = String(e); }
   }
   export function refreshSessions() { void refresh(); }
@@ -125,8 +140,17 @@
 
   async function recover(id: string) {
     error = null;
-    try { await recoverSession(id); await refresh(); }
-    catch (e) { error = String(e); }
+    recovering = true;
+    let failure: string | null = null;
+    try { await recoverSession(id); }
+    catch (e) { failure = String(e); }
+    finally {
+      recovering = false;
+      await refresh();
+      if (selected?.id === id) selected = await getSession(id).catch(() => selected);
+      // refresh() clears error on success; keep the recovery failure visible.
+      if (failure) error = failure;
+    }
   }
 
   async function cancel(id: string) {
@@ -135,6 +159,7 @@
   }
 
   async function remove(id: string) {
+    confirmingDelete = null;
     try { await deleteSession(id); if (selected?.id === id) selected = null; await refresh(); onSessionsChanged?.(); }
     catch (e) { error = String(e); }
   }
@@ -201,7 +226,7 @@
                     <time>{new Date(item.createdAt).toLocaleDateString('en-US')}</time>
                     <span>{event?.message ?? item.status} {item.isSample ? 'Sample' : ''}</span>
                     {#if item.interrupted && item.hasAudio && item.status === 'failed'}<span>Recover</span>{/if}
-                    {#if ['awaitingModel', 'summarizing'].includes(item.status)}<span>Writing…</span>{/if}
+                    {#if ['finalizing', 'awaitingModel', 'summarizing'].includes(item.status)}<span>Writing…</span>{/if}
                     {#if item.copiedAt !== null}<span aria-label="Copied">✓</span>{/if}
                   </button>
                   <details class="actions">
@@ -224,16 +249,36 @@
         <button onclick={() => openSettings().catch((e) => (error = String(e)))}>Settings</button>
         <TrialBadge onclick={onLicense} />
       </nav>
-      {#if interrupted}<p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'}</p>{/if}
       <button class="delete-all" disabled={!hasSessions || recording || clearing} onclick={confirmDeleteAll}>Delete All…</button>
     </div>
   </aside>
   <div class="content">
     <div hidden={view !== 'history'}>
+      {#if selected && confirmingDelete === selected.id}
+        {@const id = selected.id}
+        <div role="alertdialog" aria-label="Delete session">
+          <p>Delete “{selected.title}”? Its note, transcript and audio are removed from this Mac.</p>
+          <button onclick={() => remove(id)}>Delete Session</button>
+          <button onclick={() => (confirmingDelete = null)}>Cancel</button>
+        </div>
+      {/if}
       {#if selected}
-        <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history'} management prompts={prompts} models={models}
-          onUpdate={(s) => { selected = s; void refresh(); }} onCopied={() => { void refresh(); }}
-          onDelete={['recording', 'finalizing'].includes(selected.status) ? undefined : () => remove(selected!.id)} />
+        <!-- Hidden, not unmounted, behind the dialog so Undo line, tab and unsaved note survive Cancel (R12). -->
+        <div hidden={confirmingDelete === selected.id}>
+          {#if needsRecovery(selected)}
+            {@const id = selected.id}
+            <article aria-label="Recover recording">
+              <h3>{selected.title}</h3>
+              <p>This recording stopped before it finished. Its audio is saved on this Mac, so Scribular can recover it and write the transcript and note.</p>
+              <button disabled={recovering || !allows($accessState)} onclick={() => recover(id)}>Recover Recording</button>
+              <button disabled={recovering} onclick={confirmDeleteSelected}>Delete</button>
+            </article>
+          {:else}
+            <SummaryPanel bind:this={summaryPanel} session={selected} active={view === 'history' && confirmingDelete !== selected.id} management prompts={prompts} models={models}
+              progress={progress[selected.id]}
+              onUpdate={(s) => { selected = s; void refresh(); }} onCopied={() => { void refresh(); }} />
+          {/if}
+        </div>
       {:else}<p>Select a session or start a new recording.</p>{/if}
     </div>
     {@render children?.()}

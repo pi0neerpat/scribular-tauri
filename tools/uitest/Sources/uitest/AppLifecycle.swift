@@ -37,7 +37,7 @@ final class AppLifecycle {
 
     init(appPath: URL, noTrust: Bool = false, llmURL: String? = nil) { self.appPath = appPath; self.noTrust = noTrust; self.llmURL = llmURL }
 
-    func launch(keepData: Bool, runDir: URL, unavailableHotkey: Bool = false) throws(DriverError) -> String {
+    func launch(keepData: Bool, runDir: URL, unavailableHotkey: Bool = false, environment: [String: String] = [:]) throws(DriverError) -> String {
         if !launched {
             let trusted = try trustBuild(runDir: runDir)
             try terminateExisting()
@@ -69,6 +69,8 @@ final class AppLifecycle {
                 if unavailableHotkey {
                     configuration.environment["SCRIBULAR_UITEST_UNAVAILABLE_HOTKEY"] = "1"
                 }
+                // launch-with-env: debug-build test hooks only (`launchEnvPair` admits SCRIBULAR_UITEST_* names)
+                for (name, value) in environment { configuration.environment[name] = value }
                 NSWorkspace.shared.openApplication(at: appPath, configuration: configuration) { application, error in
                     result.set(app: application, error: error)
                     completed.signal()
@@ -145,6 +147,19 @@ final class AppLifecycle {
             running.forceTerminate()
             _ = waitForTermination(running, seconds: 1)
         }
+        app = nil
+        launching = nil
+        launched = false
+        usesFreshProfile = false
+    }
+
+    /// Kills the app with no chance to clean up, like a crash, so a recording in progress is left interrupted.
+    func forceQuit() {
+        guard let running = app ?? launching?.get().0 else { return }
+        if !running.isTerminated && !processHasExited(running.processIdentifier) {
+            kill(running.processIdentifier, SIGKILL)
+        }
+        _ = waitForTermination(running, seconds: 5)
         app = nil
         launching = nil
         launched = false

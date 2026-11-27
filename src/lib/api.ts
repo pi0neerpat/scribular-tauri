@@ -132,6 +132,11 @@ export function getSession(id: string): Promise<Session | null> {
   return invoke<Session | null>('get_session', { id });
 }
 
+/** Timed transcript lines from both sources, in time order (R15 playback). */
+export function getSessionSegments(id: string): Promise<TranscriptSegment[]> {
+  return invoke<TranscriptSegment[]>('get_session_segments', { id });
+}
+
 export function updateSession(id: string, patch: SessionPatch): Promise<Session> {
   return invoke<Session>('update_session', { id, patch });
 }

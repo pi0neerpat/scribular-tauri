@@ -33,3 +33,25 @@ export function retentionLine(expiresAt: number, now: number = Date.now()): stri
   }
   return `Recording deletes ${at.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
+
+export const SPEEDS = [0.75, 1, 1.25, 1.5, 2];
+
+/** Index of the line playing at `ms`: the last one that has started, or -1 before the first. */
+export function currentLine(lines: { startMs: number }[], ms: number): number {
+  let found = -1;
+  for (let i = 0; i < lines.length && lines[i].startMs <= ms; i++) found = i;
+  return found;
+}
+
+/** "1:05" from seconds. */
+export function formatTime(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Why the Audio tab is disabled (R15), or null when audio can play. */
+export function audioUnavailable(session: { hasAudio: boolean; audioExpiresAt: number | null }, now: number = Date.now()): string | null {
+  if (session.audioExpiresAt !== null && now >= session.audioExpiresAt) return "This session's audio was deleted after seven days. The note and transcript are still here.";
+  if (!session.hasAudio) return 'No audio was kept for this session. Turn on Keep audio in Settings to keep future recordings on this Mac for seven days.';
+  return null;
+}

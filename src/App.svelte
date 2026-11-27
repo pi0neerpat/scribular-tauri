@@ -24,6 +24,7 @@
   import NoteStyleCoach from './lib/components/NoteStyleCoach.svelte';
   import type { CoachAvailability } from './lib/types/CoachAvailability';
   import type { PromptList } from './lib/types/PromptList';
+  import type { NoteTab } from './lib/components/note-tabs';
 
   onMount(() => {
     let stop: (() => void) | undefined;
@@ -55,9 +56,8 @@
   let welcomeOpen = $state(false);
   let welcome = $state<{ show: () => void }>();
   let noteStyles = $state<{ requestLeave: (action: () => void, opener?: HTMLElement) => void; newBlank: () => void } | undefined>();
-  let history = $state<{ focusSearch: () => Promise<void>; toggleSidebar: () => void; moveSession: (direction: -1 | 1) => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void } | undefined>();
-  let recordView = $state<{ copyResultNote: () => Promise<void>; toggleRecording: () => void; toggleRecordingPause: () => void; cancelDialog: () => boolean; refreshAfterDeletion: () => Promise<void> } | undefined>();
-  let recordHasNote = $state(false);
+  let history = $state<{ focusSearch: () => Promise<void>; toggleSidebar: () => void; moveSession: (direction: -1 | 1) => void; confirmDeleteAll: () => void; confirmDeleteSelected: () => void; copySelectedNote: () => Promise<void>; recoverFirst: () => void; refreshSessions: () => void; openSession: (id: string) => void; showTab: (tab: NoteTab) => void; undoNote: () => Promise<boolean>; redoNote: () => Promise<boolean> } | undefined>();
+  let recordView = $state<{ toggleRecording: () => void; toggleRecordingPause: () => void; cancelDialog: () => boolean; refreshAfterDeletion: () => Promise<void> } | undefined>();
 
   let coach = $state<CoachTarget | null>(null);
   let coachAvailability = $state<CoachAvailability | null>(null);
@@ -169,6 +169,11 @@
 
   function navigate(next: AppView, opener?: HTMLElement, after?: () => void) {
     if (coach || navigationDisabled(navigationLocked, next, view)) return;
+    go(next, opener, after);
+  }
+
+  // Skips the navigation lock: Stop must open the stopped session even while a model downloads (R10).
+  function go(next: AppView, opener?: HTMLElement, after?: () => void) {
     const action = () => { navigation.update((n) => ({ ...n, view: next })); after?.(); };
     if (view === 'styles' && next !== 'styles' && noteStyles) noteStyles.requestLeave(action, opener);
     else action();
@@ -176,6 +181,18 @@
 
   function openLicense() {
     void openSettings('License').catch((e) => (error = String(e)));
+  }
+
+  /** Edit > Undo/Redo: a focused text field keeps its own undo; otherwise undo the note (R12). */
+  function textUndo(redo: boolean): boolean {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable))) return false;
+    document.execCommand(redo ? 'redo' : 'undo');
+    return true;
+  }
+
+  function editUndo(redo: boolean) {
+    if (!textUndo(redo)) void (redo ? history?.redoNote() : history?.undoNote());
   }
 
   async function refreshInterrupted() {
@@ -210,6 +227,8 @@
     };
     window.addEventListener('keydown', find);
     const menuRequest = onShellMenu((id) => {
+      // A focused text field keeps native undo even inside a modal; only note undo waits for it to close.
+      if ((id === 'shell-undo' || id === 'shell-redo') && textUndo(id === 'shell-redo')) return;
       if (coach || welcomeOpen || modalOpen()) return;
       switch (id) {
         case 'shell-example-style':
@@ -225,7 +244,11 @@
         case 'shell-new-recording': if (!recording && allows($accessState)) navigate('record'); break;
         case 'shell-delete-all': if (!recording) void history?.confirmDeleteAll(); break;
         case 'shell-delete-session': if (!recording) navigate('history', undefined, () => history?.confirmDeleteSelected()); break;
-        case 'shell-copy-note': void (view === 'record' ? recordView?.copyResultNote() : history?.copySelectedNote()); break;
+        case 'shell-copy-note': void history?.copySelectedNote(); break;
+        case 'shell-note': history?.showTab('note'); break;
+        case 'shell-transcript': history?.showTab('transcript'); break;
+        case 'shell-audio': history?.showTab('audio'); break;
+        case 'shell-undo': case 'shell-redo': editUndo(id === 'shell-redo'); break;
         case 'shell-recover': if (!recording && allows($accessState)) navigate('history', undefined, () => history?.recoverFirst()); break;
         case 'shell-update': void checkForUpdates().catch((e) => (error = String(e))); break;
         case 'shell-welcome': welcome?.show(); break;
@@ -365,11 +388,6 @@
       <button onclick={() => (notice = false)}>Dismiss</button>
     </p>
   {/if}
-  {#if interrupted}
-    <p role="status">{interrupted} interrupted recording{interrupted === 1 ? '' : 's'} — recover?
-      <button onclick={() => navigate('history')}>Recover</button>
-    </p>
-  {/if}
   {#if version}
     <h1>{version.name} <span data-testid="version">{version.version}</span></h1>
   {:else if error}
@@ -377,7 +395,7 @@
   {:else}
     <p>Loading…</p>
   {/if}
-  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} {recordHasNote} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onSessionsChanged={sessionsChanged}>
+  <SessionHistory bind:this={history} {view} {navigationLocked} {recording} recoverable={interrupted > 0} onNavigate={navigate} onLicense={openLicense} onSessionsChanged={sessionsChanged}>
     <!-- Keep the recorder mounted so its progress survives navigation. -->
     <div hidden={view !== 'record'}><RecordView bind:this={recordView}
         {speech}
@@ -389,8 +407,7 @@
         onStartFailed={() => (pendingCoachInterruption = false)}
         active={view === 'record'}
         onEnterLicense={openLicense}
-        onResultNote={(hasNote) => (recordHasNote = hasNote)}
-        onSessionChanged={() => history?.refreshSessions()}
+        onStopped={(id) => go('history', undefined, () => history?.openSession(id))}
       />
     </div>
     {#if view === 'styles'}<NoteStyles bind:this={noteStyles} />{/if}

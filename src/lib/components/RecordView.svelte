@@ -3,7 +3,6 @@
   import { onMount, tick } from 'svelte';
   import {
     accessDenied,
-    cancelJob,
     cancelTrayStart,
     currentRecording,
     deniedPrivacy,
@@ -22,7 +21,6 @@
     pauseRecording,
     resumeRecording,
     getSession,
-    listSummaryModels,
     onSessionProgress,
     onSessionTranscriptWaiting,
     setActivePrompt,
@@ -33,7 +31,6 @@
   import type { ModelProgress } from '../types/ModelProgress';
   import type { Privacy } from '../types/Privacy';
   import type { PromptList } from '../types/PromptList';
-  import type { Session } from '../types/Session';
   import type { SessionProgress } from '../types/SessionProgress';
   import type { SessionStatus } from '../types/SessionStatus';
   import type { RecordingSource } from '../types/RecordingSource';
@@ -41,11 +38,8 @@
   import type { SystemAudioPermissionStatus } from '../types/SystemAudioPermissionStatus';
   import type { SessionLevel } from '../types/SessionLevel';
   import LiveTranscript from './LiveTranscript.svelte';
-  import Timings from './Timings.svelte';
-  import SummaryPanel from './SummaryPanel.svelte';
   import StylePicker from './StylePicker.svelte';
   import PermissionNotice from './PermissionNotice.svelte';
-  import { isWorking } from './record-status';
   import LicenseGate from './LicenseGate.svelte';
   import { accessState, allows } from '../license';
   import { getCoachContext } from '../coach-context';
@@ -59,12 +53,11 @@
     onRetryModels = () => {},
     active = true,
     onEnterLicense = () => {},
-    onResultNote = () => {},
-    onSessionChanged = () => {},
+    onStopped = () => {},
     coachInterrupted = false,
     onStartFailed = () => {},
     onDismissCoachInterruption = () => {},
-  }: { speech?: ModelProgress; modelError?: boolean; preparingModels?: boolean; onRetryModels?: () => void; active?: boolean; onEnterLicense?: () => void; onResultNote?: (hasNote: boolean) => void; onSessionChanged?: () => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
+  }: { speech?: ModelProgress; modelError?: boolean; preparingModels?: boolean; onRetryModels?: () => void; active?: boolean; onEnterLicense?: () => void; onStopped?: (sessionId: string) => void; coachInterrupted?: boolean; onDismissCoachInterruption?: () => void; onStartFailed?: () => void } = $props();
 
   let speechReady = $derived(speech?.state === 'ready');
   let speechPercent = $derived(speech && speech.totalBytes > 0
@@ -73,7 +66,6 @@
   const recordViewId = $props.id();
   const modelStatusId = `${recordViewId}-speech-model`;
 
-  const finished: SessionStatus[] = ['done', 'failed', 'cancelled'];
   // The session in flight, kept across a window reload. The backend reports
   // only the one recording, not a session after Stop. A window session, not
   // local storage, so a crashed app's session isn't picked up on relaunch.
@@ -95,11 +87,6 @@
   let status = $state<SessionStatus | null>(null);
   let progress = $state<SessionProgress | null>(null);
   let transcriptWaiting = $state<{ sessionId: string; waiting: boolean } | null>(null);
-  // The finished session's result.
-  let result = $state<Session | null>(null);
-  let summaryPanel = $state<{ copy: () => Promise<void> } | undefined>();
-  $effect(() => onResultNote(!!result?.summary));
-  export async function copyResultNote() { if (active && result?.summary) await summaryPanel?.copy(); }
   export function toggleRecording() {
     if (busy || askSpeakerCount) return;
     if (recording) void stop();
@@ -114,17 +101,18 @@
     return false;
   }
   export async function refreshAfterDeletion() {
-    const id = sessionId ?? result?.id;
+    const id = sessionId;
     if (!id || await getSession(id)) return;
-    if (sessionId === id) {
-      resultFetch++;
-      sessionId = null;
-      status = null;
-      progress = null;
-      transcriptWaiting = null;
-      remember(null);
-    }
-    if (result?.id === id) result = null;
+    if (sessionId === id) release();
+  }
+  // R10: after Stop the session page owns progress, so the record screen is ready again.
+  function release() {
+    resultFetch++;
+    sessionId = null;
+    status = null;
+    progress = null;
+    transcriptWaiting = null;
+    remember(null);
   }
   let resultFetch = 0;
   let busy = $state(false);
@@ -146,11 +134,9 @@
   let apps = $state<string[]>([]);
   let level = $state<Partial<Record<'mic' | 'system', SessionLevel>>>({});
   let capture = $state<RecordingState | null>(null);
-  let finalElapsedMs = $state<number | null>(null);
   const commonApps = ['Zoom', 'Microsoft Teams', 'FaceTime', 'Slack', 'Discord', 'Google Chrome', 'Safari', 'Firefox'];
   let askSpeakerCount = $state(false);
   let styles = $state<PromptList | null>(null);
-  let modelNames = $state<Record<string, string>>({});
 
   // Re-read when shown, since Settings may have changed styles or the model.
   $effect(() => {
@@ -159,9 +145,6 @@
     const currentStyles = coach?.styles();
     if (currentStyles) styles = currentStyles;
     else getPromptList().then((l) => { if (current) styles = l; }).catch(() => {});
-    listSummaryModels()
-      .then((ms) => { if (current) modelNames = Object.fromEntries(ms.map((m) => [m.spec.id, m.spec.displayName])); })
-      .catch(() => {});
     return () => { current = false; };
   });
 
@@ -207,10 +190,9 @@
   let recording = $derived(status === 'recording');
   let appAudioPermissionRequired = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'permissionRequired');
   let callPermissionStatus = $derived(capture?.sessionId === sessionId && capture?.appAudioStatus === 'capturing' ? 'granted' : permissionStatus);
-  let working = $derived(isWorking(status));
   let elapsedMs = $derived(capture?.sessionId === sessionId
     ? (capture.status === 'paused' ? capture.activeElapsedMs : (level.mic?.activeElapsedMs ?? capture.activeElapsedMs))
-    : (finalElapsedMs ?? Math.max(0, now - startedAt)));
+    : Math.max(0, now - startedAt));
   let elapsed = $derived(Math.floor(elapsedMs / 1000));
 
   // The clock only ticks during a recording.
@@ -236,7 +218,6 @@
         sessionId = p.sessionId;
         remember(sessionId);
         startedAt = Date.now();
-        result = null;
         const fetch = ++resultFetch;
         void getSession(p.sessionId).then((session) => {
           if (session && fetch === resultFetch && p.sessionId === sessionId) {
@@ -247,16 +228,11 @@
       }
       if (p.state === 'recording') firstCall = false;
       else askSpeakerCount = false;
+      // A background or menu-bar Stop also hands the session to its page.
+      // busy: a direct Stop is in flight and calls onStopped itself.
+      if (p.state !== 'recording') { release(); if (!busy) onStopped(p.sessionId); return; }
       progress = p;
       status = p.state;
-      if (result || finished.includes(p.state) || p.state === 'awaitingModel') {
-        const fetch = ++resultFetch;
-        // Keep the id while awaitingModel, so a reload still finds the session.
-        if (finished.includes(p.state)) remember(null);
-        getSession(p.sessionId).then((s) => {
-          if (sessionId === p.sessionId && resultFetch === fetch) result = s;
-        });
-      }
     });
     const unlistenTranscriptWaiting = onSessionTranscriptWaiting((state) => {
       if (state.waiting) transcriptWaiting = state;
@@ -281,15 +257,12 @@
       const session = await getSession(id);
       // Start may have begun a new session while this fetch ran.
       if (sessionId !== id || resultFetch !== fetch) return;
-      if (!recording && (!session || finished.includes(session.status))) {
-        // It ended while the window reloaded.
-        sessionId = null;
-        remember(null);
-        result = session;
+      if (!recording) {
+        // It stopped while the window reloaded; its page shows the rest.
+        release();
         return;
       }
       if (session && status === null) status = session.status;
-      if (session?.status === 'awaitingModel') result = session;
       labeled = session?.inputMode === 'micAndSystem';
       if (recording) sessionStorage.setItem(IN_FLIGHT_SPEAKERS_KEY, sessionStorage.getItem(IN_FLIGHT_SPEAKERS_KEY) ?? 'false');
       startedAt = session?.createdAt ?? Date.now();
@@ -362,10 +335,9 @@
       return;
     }
     busy = true;
-    finalElapsedMs = null;
     resultFetch++;
     error = denied = null;
-    result = progress = null;
+    progress = null;
     let attempt: string | null = null;
     try {
       const settings = await getRecordingSettings();
@@ -432,13 +404,11 @@
   async function stopWithCount(numSpeakers: number | null) {
     askSpeakerCount = false;
     busy = true;
-    const stoppedElapsedMs = elapsedMs;
     try {
-      await stopRecording(numSpeakers);
-      finalElapsedMs = stoppedElapsedMs;
+      const id = await stopRecording(numSpeakers);
       capture = null;
-      // Its "Transcribing…" event may already have moved it on.
-      if (status === 'recording') status = 'finalizing';
+      release();
+      onStopped(id);
     } catch (e) {
       error = String(e);
     } finally {
@@ -477,20 +447,6 @@
     } catch (e) { error = String(e); }
   }
 
-  async function cancel() {
-    if (!sessionId) return;
-    const before = status;
-    try {
-      await cancelJob(sessionId);
-      const session = await getSession(sessionId);
-      // A progress event that landed meanwhile is newer than this snapshot.
-      if (session && status === before) {
-        status = session.status;
-        result = session;
-        if (finished.includes(session.status)) remember(null);
-      }
-    } catch (e) { error = String(e); }
-  }
 </script>
 
 <section inert={askSpeakerCount}>
@@ -535,17 +491,6 @@
       {#if level.system?.hearing === 'warning'}<p role="status">No app audio heard yet. Your microphone is still recording.</p>{/if}
     {/if}
   {:else}
-    {#if working && status !== 'awaitingModel'}
-      <p>
-        {progress?.message ?? 'Working…'}
-        {#if progress && progress.stepCount > 1}({progress.stepIndex}/{progress.stepCount}){/if}
-      </p>
-      <button onclick={cancel}>Cancel</button>
-    {/if}
-    {#if status === 'awaitingModel'}
-      <p>{progress?.message ?? 'Waiting for the summary model download…'}</p>
-      <button onclick={cancel}>Cancel</button>
-    {/if}
     <LicenseGate access={$accessState} onEnter={onEnterLicense} />
     <div class="record-control">
       <div class="record-ring" class:downloading={!speechReady} style:--speech-progress={`${speechPercent}%`}>
@@ -576,7 +521,7 @@
   {/if}
 
   </div>
-  {#if sessionId && (recording || working || status === 'failed')}
+  {#if sessionId && recording}
     <LiveTranscript {sessionId} {labeled} activeElapsedMs={elapsedMs} waiting={transcriptWaiting?.sessionId === sessionId && transcriptWaiting.waiting} />
   {/if}
 
@@ -588,14 +533,6 @@
   {/if}
   {#if error && !denied}<p role="alert">{error}</p>{/if}
 
-  {#if result}
-    {@const session = result}
-    <SummaryPanel bind:this={summaryPanel} {session} {active} prompts={styles} byline={[
-      styles?.prompts.find((p) => p.id === session.promptId)?.name,
-      session.modelId && (modelNames[session.modelId] ?? session.modelId),
-    ].filter(Boolean).join(' · ')} onUpdate={(updated) => { if (result?.id === updated.id) result = updated; onSessionChanged(); }} onCopied={onSessionChanged} />
-    {#if session.timings}<Timings timings={session.timings} />{/if}
-  {/if}
 </section>
 {#if !onboardingReady && explainerError}
   <p role="alert">{explainerError} <button onclick={loadOnboarding}>Retry onboarding state</button></p>

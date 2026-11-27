@@ -171,6 +171,7 @@ pub fn run() {
             commands::count_sessions,
             commands::search_sessions,
             commands::get_session,
+            commands::get_session_segments,
             commands::update_session,
             commands::delete_session,
             commands::clear_all_sessions,
@@ -382,7 +383,8 @@ pub fn run() {
                     Arc::new(license::api::HttpLicenseApi::new(&license::api::api_root())?),
                     Arc::new(license::SystemClock),
                 )
-                .with_skip(license::dev_skip()),
+                .with_skip(license::dev_skip())
+                .with_forced_state(license::dev_forced_state()),
             );
             app.manage(Arc::clone(&licensing));
             spawn_license_checks(app.handle().clone(), licensing);

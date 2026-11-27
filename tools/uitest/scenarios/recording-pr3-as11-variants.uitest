@@ -1,0 +1,84 @@
+# AS11 variants: one recorded session reopened with summaries unsupported, summaries failed to load,
+# and lapsed access (debug-build hooks via launch-with-env). Note is initial; Unsupported and LoadFailed
+# show their own copy; only LoadFailed offers Try Again; Copy Transcript works; rewrite is disabled;
+# lapsed access can view and copy but not edit or rewrite.
+launch
+expect "Welcome to Scribular"
+key escape
+click "Continue"
+expect "Start recording" timeout 60s
+click "Settings"
+click "Recording"
+click "On" index 1
+click "New Recording"
+expect "Start recording" timeout 30s
+expect-not "Downloading the speech model" timeout 120s
+expect-not "Verifying the speech model" timeout 120s
+play "src-tauri/tests/fixtures/audio/2-speakers-12s.wav" loop
+click "On a call" index 1
+click "Choose an app to try recording"
+pick-call-app "afplay" timeout 60s
+expect "App: afplay"
+play "tools/uitest/fixtures/keyboard-pr3-synthetic-speech.m4a"
+click "Start recording"
+wait 35s
+click "Stop"
+stop-audio
+expect "Ask Coach to change the note" timeout 400s
+quit
+
+# Unsupported: owned copy, no Try Again, Copy Transcript works, style rewrite disabled.
+launch-with-env "SCRIBULAR_UITEST_SUMMARY=unsupported"
+expect "Start recording" timeout 60s
+key cmd+option+down
+expect "Summaries aren't available on this Mac. Recording and transcription still work." timeout 30s
+expect-not "Summaries couldn't load"
+expect-not "Try Again"
+expect "Copy Note"
+labels
+click "Transcript"
+expect "Client:"
+click "Copy Transcript" index 1
+expect-clipboard-matches "Client:"
+click "Note" index 1
+click "Note style · Therapy (DORA)" index 1
+expect-disabled "Therapy (DORA)" index 1
+click "Transcript"
+expect "Client:"
+click "Audio"
+expect "Play" timeout 30s
+quit
+
+# LoadFailed: owned copy with Try Again; Copy Transcript works; style rewrite disabled.
+launch-with-env "SCRIBULAR_UITEST_SUMMARY=loadFailed"
+expect "Start recording" timeout 60s
+key cmd+option+down
+expect "Summaries couldn't load. Recording and transcription still work." timeout 30s
+expect-not "Summaries aren't available on this Mac"
+expect "Try Again"
+expect "Copy Note"
+click "Transcript"
+expect "Client:"
+click "Copy Transcript" index 1
+expect-clipboard-matches "Client:"
+click "Note" index 1
+click "Note style · Therapy (DORA)" index 1
+expect-disabled "Therapy (DORA)" index 1
+quit
+
+# Lapsed access: view and copy work; the note is read-only and rewrite is disabled.
+launch-with-env "SCRIBULAR_UITEST_LICENSE=lapsed"
+expect "Start recording" timeout 60s
+key cmd+option+down
+expect "Copy Note" timeout 30s
+labels
+click "Copy Note"
+expect "Copied"
+click "Note style · Therapy (DORA)" index 1
+expect-disabled "Therapy (DORA)" index 1
+click "Transcript"
+click "Copy Transcript"
+expect-clipboard-matches "Client:"
+click "Audio"
+expect "Play" timeout 30s
+quit

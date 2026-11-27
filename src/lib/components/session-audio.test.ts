@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const requestSessionAudio = vi.fn();
 vi.mock('../api', () => ({ requestSessionAudio }));
-const { openAudio, retentionLine } = await import('./session-audio');
+const { audioUnavailable, currentLine, formatTime, openAudio, retentionLine } = await import('./session-audio');
 
 describe('session audio (AS19)', () => {
   afterEach(() => requestSessionAudio.mockReset());
@@ -31,5 +31,22 @@ describe('session audio (AS19)', () => {
     const now = new Date(2026, 10, 4, 9).getTime();
     expect(retentionLine(new Date(2026, 10, 11, 9).getTime(), now)).toBe('Recording deletes Nov 11');
     expect(retentionLine(new Date(2026, 10, 4, 23).getTime(), now)).toBe('Recording deletes today');
+  });
+});
+
+describe('player helpers (R15)', () => {
+  it('highlights the last started line and formats times', () => {
+    const lines = [{ startMs: 0 }, { startMs: 4000 }, { startMs: 9000 }];
+    expect(currentLine(lines, 3999)).toBe(0);
+    expect(currentLine(lines, 4000)).toBe(1);
+    expect(currentLine([{ startMs: 500 }], 0)).toBe(-1);
+    expect(formatTime(65.9)).toBe('1:05');
+    expect(formatTime(NaN)).toBe('0:00');
+  });
+
+  it('explains why the Audio tab is disabled', () => {
+    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000 }, 1000)).toBeNull();
+    expect(audioUnavailable({ hasAudio: true, audioExpiresAt: 2000 }, 2000)).toContain('deleted after seven days');
+    expect(audioUnavailable({ hasAudio: false, audioExpiresAt: null })).toContain('No audio was kept');
   });
 });

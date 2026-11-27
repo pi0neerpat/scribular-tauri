@@ -6,7 +6,7 @@
 - Launch answers Scribular keychain prompts with the stored login password and fails within 15 seconds with a fix command if it cannot; trust-build output is saved in the run folder.
 - Recording is opt-in: use `--record <NN-slug-happy-path>` only for a happy path or an issue that cannot be reproduced reliably. It writes an MP4 and JSON metadata; failed runs use `-FAILED.mp4`. Recordings are not committed.
 - Recorded runs pace UI actions by 2.5s by default; use `--pace 2s` to override, or `--pace 0` to disable. Scripts can use `pause 3s` for read time and `pace 2s` to change pacing.
-- Recording tests use App audio + `play "fixture.wav"`, never the microphone. Start from `tools/uitest/scenarios/system-audio-smoke.uitest`.
+- Recording tests use App audio + `play "fixture.wav"`, never the microphone. Start from `tools/uitest/scenarios/system-audio-smoke-57s.uitest`.
 - Assert phrases from the fixture's transcript, never summary wording (the LLM output varies).
 - Models come from `~/Library/Caches/scribular-uitest/models`. Never delete it to fix a failing test: that is a 1.85 GB re-download, not a different result.
 - In the Tart VM, uitest uses the host llama-server automatically (debug overlay enables `remote-llm`; uitest probes `192.168.64.1:5801`). Set `SCRIBULAR_LLM_URL=` (empty) to force on-device. See "Host llama-server (VM)" in `tools/uitest/README.md`.

@@ -20,7 +20,10 @@ describe('recording and sample components', () => {
   it('shows an AwaitingModel session as waiting while keeping its transcript viewable', () => {
     const { body } = render(SummaryPanel, { props: { session } });
     expect(body).toContain('Waiting for the summary model download');
-    expect(body).toContain('A saved transcript');
+    // The transcript stays one tab away (R11).
+    const tab = body.match(/<button[^>]*role="tab"[^>]*>Transcript</)?.[0];
+    expect(tab).toBeDefined();
+    expect(tab).not.toMatch(/\sdisabled/);
   });
 
   it('keeps the download quiet in a completed note', () => {

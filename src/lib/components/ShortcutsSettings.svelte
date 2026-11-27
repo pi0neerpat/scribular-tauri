@@ -17,7 +17,7 @@
     'shell-new-recording': ['Recording', 'New Recording'], 'shell-record': ['Recording', 'Start/Stop Recording'],
     'shell-pause': ['Recording', 'Pause/Resume Recording'], 'shell-example-style': ['Notes and sessions', 'New Style from Example Note'],
     'shell-copy-note': ['Notes and sessions', 'Copy Note'], 'shell-delete-session': ['Notes and sessions', 'Delete Session'],
-    'native-undo': ['Notes and sessions', 'Undo'], 'native-redo': ['Notes and sessions', 'Redo'],
+    'shell-undo': ['Notes and sessions', 'Undo'], 'shell-redo': ['Notes and sessions', 'Redo'],
     'shell-find': ['Find and view', 'Find'], 'shell-note': ['Find and view', 'Note'],
     'shell-transcript': ['Find and view', 'Transcript'], 'shell-audio': ['Find and view', 'Audio'],
     'shell-manage-styles': ['Find and view', 'Note Styles'], 'shell-previous': ['Find and view', 'Previous Session'],

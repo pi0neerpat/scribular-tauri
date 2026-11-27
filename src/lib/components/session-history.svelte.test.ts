@@ -181,12 +181,12 @@ it('searches the current input text on each keystroke and restores the full list
   unmount(app);
 });
 
-it('uses the visible record result for Copy Note enablement, not a retained history selection', async () => {
+it('keeps Copy Note off on the Record page even with a retained history selection (R10)', async () => {
   api.listSessions.mockResolvedValue([row('History')]);
   api.getSession.mockResolvedValue({ ...row('History'), summary: 'Old note' });
   const target = document.createElement('div');
   const app = mount(SessionHistory, { target, props: {
-    view: 'record', recordHasNote: false,
+    view: 'record',
     onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.(),
   } });
   await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
@@ -194,9 +194,53 @@ it('uses the visible record result for Copy Note enablement, not a retained hist
   await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledWith('History'));
   await vi.waitFor(() => expect(api.setShellMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ hasNote: false, selected: false })));
   unmount(app);
+});
 
-  const emptyTarget = document.createElement('div');
-  const empty = mount(SessionHistory, { target: emptyTarget, props: { view: 'record', recordHasNote: true } });
-  await vi.waitFor(() => expect(api.setShellMenuState).toHaveBeenLastCalledWith(expect.objectContaining({ hasNote: true })));
-  unmount(empty);
+it('opens an interrupted session on its Recover page (R16)', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
+  api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
+  api.recoverSession.mockResolvedValue(undefined);
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { view: 'history', onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
+  expect(target.textContent).toContain('This recording stopped before it finished.');
+  [...target.querySelectorAll('button')].find((b) => b.textContent === 'Recover Recording')!.click();
+  await vi.waitFor(() => expect(api.recoverSession).toHaveBeenCalledWith('Lost'));
+  unmount(app);
+});
+
+it('keeps a failed recovery error visible after the list refreshes (R16)', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
+  api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
+  api.recoverSession.mockRejectedValue('no speech found');
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { view: 'history', onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
+  [...target.querySelectorAll('button')].find((b) => b.textContent === 'Recover Recording')!.click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alert"]')?.textContent).toContain('no speech found'));
+  unmount(app);
+});
+
+it('hides (keeps mounted) the session page behind the delete confirmation, and clears a vanished session', async () => {
+  api.listSessions.mockResolvedValue([{ ...row('Lost', 'failed'), interrupted: true }]);
+  api.getSession.mockResolvedValue({ ...row('Lost', 'failed'), error: 'interrupted', summary: '', transcript: '' });
+  const target = document.createElement('div');
+  const app = mount(SessionHistory, { target, props: { view: 'history', onNavigate: (_view: unknown, _opener: unknown, action?: () => void) => action?.() } });
+  await vi.waitFor(() => expect(target.querySelector('.session')).not.toBeNull());
+  (target.querySelector('.session') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[aria-label="Recover recording"]')).not.toBeNull());
+  app.confirmDeleteSelected();
+  await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).not.toBeNull());
+  expect(target.querySelector('[aria-label="Recover recording"]')!.closest('[hidden]')).not.toBeNull();
+  (target.querySelector('[role="alertdialog"] button:last-child') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(target.querySelector('[role="alertdialog"]')).toBeNull());
+  expect(target.querySelector('[aria-label="Recover recording"]')?.closest('[hidden]')).toBeNull();
+  api.getSession.mockResolvedValue(null);
+  app.openSession('Lost');
+  await vi.waitFor(() => expect(target.textContent).toContain('Select a session'));
+  unmount(app);
 });

@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  // R14: unsaved speaker choices survive closing and reopening the session (per app run).
+  const drafts = new Map<string, Record<string, string>>();
+</script>
+
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { confirmSpeakerLabels, getSession, skipDiarization, updateSpeakerMap } from '../api';
@@ -5,7 +10,8 @@
   import { accessState, allows } from '../license';
   type SpeakerMap = Record<string, string>;
 
-  let { session: incoming, onUpdate }: { session: Session; onUpdate?: (session: Session) => void } = $props();
+  // part='transcript' renders only the speaker-labelled transcript (Transcript tab).
+  let { session: incoming, onUpdate, part = 'controls' }: { session: Session; onUpdate?: (session: Session) => void; part?: 'controls' | 'transcript' } = $props();
   let current = $state<Session | null>(null);
   let overrides = $state<SpeakerMap | null>(null);
   let editing = $state(false);
@@ -16,8 +22,10 @@
   onDestroy(() => { disposed = true; });
   $effect(() => {
     current = incoming;
-    editing = incoming.diarizationState === 'pending';
+    overrides = drafts.get(incoming.id) ?? null;
+    editing = incoming.diarizationState === 'pending' || (overrides !== null && incoming.diarizationState === 'confirmed');
   });
+  const writable = $derived(allows($accessState));
   let session = $derived(current ?? incoming);
   let names = $derived(overrides ?? session.speakerMap ?? {});
   let speakers = $derived(Object.entries(names));
@@ -34,6 +42,7 @@
 
   function setName(id: string, name: string) {
     overrides = { ...names, [id]: name };
+    drafts.set(session.id, overrides);
   }
 
   async function refresh() {
@@ -42,6 +51,7 @@
     if (updated && !disposed && incoming.id === id) {
       current = updated;
       overrides = null;
+      drafts.delete(id);
       addingLater = false;
       onUpdate?.(updated);
     }
@@ -64,42 +74,48 @@
     finally { busy = false; }
   }
 
-  async function rename() {
-    try { await updateSpeakerMap(session.id, names); await refresh(); }
+  /** Names apply only on Done (R14). */
+  async function done() {
+    if (!overrides) { editing = false; return; }
+    busy = true;
+    try { await updateSpeakerMap(session.id, names); editing = false; await refresh(); }
     catch (e) { error = String(e); }
+    finally { busy = false; }
   }
 </script>
 
+{#if part === 'controls'}
 {#if session.rawTranscript && (session.diarizationState === 'pending' || session.diarizationState === 'confirmed' || addingLater)}
   {#if session.diarizationState === 'confirmed' && !editing}
-    <button onclick={() => (editing = true)} disabled={!allows($accessState)}>Edit speakers</button>
+    <button onclick={() => (editing = true)} disabled={!writable}>Edit Speakers</button>
   {:else}
+    {@const locked = session.diarizationState === 'confirmed' && !writable}
     <section aria-labelledby="speakers-title">
       <h4 id="speakers-title">Who's speaking in this session?</h4>
       {#each speakers as [id, name], i (id)}
         <div class="speaker color-{i % 5}">
-          <label>{id}<input value={name} disabled={session.diarizationState === 'confirmed' && !allows($accessState)} oninput={(event) => setName(id, event.currentTarget.value)} onblur={session.diarizationState === 'confirmed' ? rename : undefined} /></label>
+          <label>{id}<input value={name} disabled={locked} oninput={(event) => setName(id, event.currentTarget.value)} /></label>
           <p>{quote(session.rawTranscript, id)}</p>
-          <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, 'You'); if (session.diarizationState === 'confirmed') rename(); }}>Me</button>
-          <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, 'Client'); if (session.diarizationState === 'confirmed') rename(); }}>Client</button>
+          <button disabled={locked} onclick={() => setName(id, 'You')}>Me</button>
+          <button disabled={locked} onclick={() => setName(id, 'Client')}>Client</button>
           {#each speakers.filter(([other]) => other !== id) as [other, otherName] (other)}
-            <button disabled={session.diarizationState === 'confirmed' && !allows($accessState)} onclick={() => { setName(id, otherName); if (session.diarizationState === 'confirmed') rename(); }}>{otherName}</button>
+            <button disabled={locked} onclick={() => setName(id, otherName)}>{otherName}</button>
           {/each}
         </div>
       {/each}
       {#if session.diarizationState === 'pending' || addingLater}
-        <button onclick={confirm} disabled={busy}>Confirm speakers</button>
-        <button onclick={skip} disabled={busy}>Skip</button>
+        {@const gated = addingLater && !writable}
+        <button onclick={confirm} disabled={busy || gated}>Confirm speakers</button>
+        <button onclick={skip} disabled={busy || gated}>Skip</button>
       {:else}
-        <button onclick={() => (editing = false)}>Done</button>
+        <button onclick={done} disabled={busy || (locked && overrides !== null)}>Done</button>
       {/if}
     </section>
   {/if}
 {:else if session.rawTranscript && session.diarizationState === 'skipped'}
-  <button onclick={() => { addingLater = true; editing = true; }}>Add speakers</button>
+  <button disabled={!writable} onclick={() => { addingLater = true; editing = true; }}>Add speakers</button>
 {/if}
-
-{#if session.diarizationState === 'confirmed' && session.transcript}
+{:else if session.diarizationState === 'confirmed' && session.transcript}
   <div class="transcript" aria-label="Speaker-labelled transcript">
     {#each session.transcript.split('\n') as line, i (i)}
       <p class="color-{colorIndex(line)}">{line}</p>
