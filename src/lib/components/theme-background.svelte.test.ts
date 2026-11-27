@@ -78,11 +78,21 @@ it('never starts the frame loop without a 2D context', () => {
 
 it('tells the user when the owned picture cannot be shown, but not for a stale picture', () => {
   appearanceError.set(null);
+  // Keep the first picture's error handler: {#key} removes it with the old <img>.
+  const handlers = new Map<EventTarget, EventListener>();
+  const add = HTMLImageElement.prototype.addEventListener;
+  vi.spyOn(HTMLImageElement.prototype, 'addEventListener').mockImplementation(function (this: HTMLImageElement, type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) {
+    if (type === 'error') handlers.set(this, listener as EventListener);
+    add.call(this, type, listener, options);
+  });
   const { target, props, app } = render({ owned: 'abc123' });
   const old = target.querySelector('img')!;
+  const oldError = handlers.get(old)!;
+  expect(oldError).toBeDefined();
   props.background = { owned: 'def456' };
   flushSync();
   // A late error from the previous picture leaves the new one on screen.
+  add.call(old, 'error', oldError);
   old.dispatchEvent(new Event('error'));
   flushSync();
   expect(target.querySelector('img')?.getAttribute('src')).toBe('scribular-bg://localhost/def456');

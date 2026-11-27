@@ -11,7 +11,7 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
 - **Tray failures.** A failed tray Start (renderer side) or tray Stop shows a native notification with the error. A tray Start failure also shows the window.
 - **External links.** Clicks on `http(s)` links to another origin, and on `mailto:` links, open in the system handler. `open_external_link` rejects every other scheme.
 - **Navigation lock.** History and Settings buttons are disabled while any model is `downloading` or `verifying`.
-- **Background animation.** A canvas starfield. It animates only if the setting is on, the document is visible, and reduced-motion is off. It speeds up while recording.
+- **Background animation.** A canvas starfield. The canvas mounts only when the theme background is Stars. It animates only when the Stars "Animated motion" switch (Settings > Appearance) is on, the window is visible, and Reduce Motion is off. It speeds up while recording.
 
 ## How it works
 
@@ -31,13 +31,13 @@ Shipped in PR #18. Spec: `plans/parity/08-app-shell-tray-notifications.md`. macO
   - `src/lib/api.ts` wraps the commands and events.
   - `src/main.ts` holds the global link-click handler.
   - `src/lib/navigation.ts` holds `navigationLockedBy`.
-  - `src/lib/components/BackgroundAnimation.svelte` and `background-animation.ts` (`starsState`) run the starfield.
-  - `src/lib/components/Settings.svelte` has the two toggles.
+  - `src/lib/components/ThemeBackground.svelte` mounts `BackgroundAnimation.svelte` for Stars; `background-animation.ts` (`starsState`) decides whether it animates.
+  - `src/lib/components/Settings.svelte` has the summary alert toggle; `AppearancePane.svelte` has the Animated motion switch (`starsMotion` in the theme values).
 - Window: `src-tauri/tauri.conf.json` sets `titleBarStyle: Overlay` and a 670x552 minimum.
 
 ## Config and data
 
-- `AppSettings` (`src/lib/types/AppSettings.ts`, persisted by the Rust store): `notifySummaryComplete` (default false in the frontend store) and `showBackgroundAnimation` (default true).
+- `AppSettings` (`src/lib/types/AppSettings.ts`, persisted by the Rust store): `notifySummaryComplete` (default false in the frontend store). `showBackgroundAnimation` is still persisted but no longer controls the starfield; the theme's `starsMotion` does.
 - Turning on "Show summarization complete alert" calls `request_notification_permission`. If macOS denies it, the toggle reverts to off.
 - `src-tauri/capabilities/default.json` grants core event and window permissions to `main` and `settings`. The Rust visibility command handles close-to-hide.
 - Crate: `tauri-plugin-notification = "=2.5.0"`. Tray icons are `src-tauri/icons/tray-idle.png` and `tray-recording.png`, embedded with `include_bytes!`.
