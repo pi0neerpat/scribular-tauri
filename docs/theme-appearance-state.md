@@ -63,6 +63,8 @@ Shipped in PR #49 (PR1 of the theme work). Spec: `plans/2026-11-16-theme-spec.md
 
 ## Background pictures (PR2)
 
+Full write-up: [theme-background-pictures.md](theme-background-pictures.md).
+
 - Bundled pictures: `src/assets/backgrounds/{dawn,sea-glass,linen}.jpg`, resolved by `backgroundSource` in `src/lib/appearance.ts`. Stars draws on a canvas; None shows the solid background.
 - Import: `choose_background_picture` (native Open panel) and `import_background_picture` (Settings drop) in `src-tauri/src/commands.rs`, backed by `src-tauri/src/backgrounds.rs`. Scribular sniffs JPEG, PNG, HEIC or WebP content, decodes it with macOS `sips`, downsizes it to cover the largest reported width and the largest reported height across connected displays, taken independently (never upscales), and writes an owned copy to `<db dir>/Backgrounds/<id>.jpg|png` (folder mode 0700). Import needs a My Theme and selects it. Undecodable or other files show the unsupported-picture error and leave the theme unchanged.
 - Cleanup: after every appearance save or import, `Backgrounds::sweep` removes owned copies that the saved My Theme no longer references. Sessions never reference pictures, so deleting sessions leaves the selected picture alone. `set_appearance` refuses to select My Theme when its owned picture file is missing; built-ins stay selectable and My Theme keeps the reference. Unexpected store failures return "The settings could not be written." instead of SQLite or JSON details.
